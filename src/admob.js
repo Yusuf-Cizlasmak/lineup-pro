@@ -1,21 +1,27 @@
-import { AdMob, BannerAdSize, BannerAdPosition } from '@capacitor-community/admob';
+import { AdMob, BannerAdSize, BannerAdPosition, MaxAdContentRating } from '@capacitor-community/admob';
 
 // ═══════════════════════════════════════════════════════════════
 // ═══ ADMOB REKLAM YÖNETİCİSİ — HalıSaha-Kolik
 // ═══════════════════════════════════════════════════════════════
 //
-// Reklam Stratejisi:
-// 1. BANNER      → Sürekli altta döner (ana ekran + saha ekranı)
-// 2. INTERSTITIAL → Belirli aksiyonlarda tam ekran (otomatik kadro, maç bitir, paylaş)
-// 3. REWARDED    → Ödüllü reklam (ekstra özellikler için opsiyonel)
+// 💰 GELİR OPTİMİZASYONU (eCPM sıralaması):
 //
-// ⚠️ YAYINLAMADAN ÖNCE:
-//   - Tüm isTesting: true → false yap
-//   - initializeForTesting: true → false yap
-//   - Test ID'lerini gerçek ID'lerinle değiştir
+//   1. REWARDED VIDEO   → $8-18 eCPM (TR ~$2-4)  ⭐ EN YÜKSEK
+//      Kullanıcı isteğiyle izler. %90+ tamamlanma oranı.
+//      → Otomatik kadro kur, premium özellik aç
+//
+//   2. INTERSTITIAL      → $2.5-5 eCPM (TR ~$1-2)
+//      Doğal geçiş anlarında tam ekran.
+//      → Mod seçimi, maç bitir, paylaş
+//
+//   3. BANNER            → $0.2-0.8 eCPM (TR ~$0.1-0.3)
+//      Düşük ama sürekli, %100 fill rate.
+//      → Her zaman altta görünür
+//
+// ✅ Google Play Families Policy tam uyumlu
 // ═══════════════════════════════════════════════════════════════
 
-const IS_TESTING = false; // Gerçek reklamlar aktif
+const IS_TESTING = false;
 
 const AD_CONFIG = {
   banner:       'ca-app-pub-2886543552287006/5847500924',
@@ -23,45 +29,43 @@ const AD_CONFIG = {
   rewarded:     'ca-app-pub-2886543552287006/5254707624',
 };
 
-// ─── REKLAM SIKLIĞI KONTROLÜ ───
-// Kullanıcıyı bunaltmamak için interstitial reklamlar arası minimum süre
-const INTERSTITIAL_COOLDOWN_MS = 120000; // 2 dakika
+// ─── SIKLIK KONTROLÜ ───
+const INTERSTITIAL_COOLDOWN_MS = 120000; // 2 dk
+const REWARDED_COOLDOWN_MS = 60000;      // 1 dk (kullanıcı ister, daha sık ok)
 let lastInterstitialTime = 0;
+let lastRewardedTime = 0;
 let interstitialCount = 0;
-const MAX_INTERSTITIALS_PER_SESSION = 5; // Oturum başına max 5
+let rewardedCount = 0;
+const MAX_INTERSTITIALS_PER_SESSION = 6;
+const MAX_REWARDED_PER_SESSION = 10;
 
-// ─── DURUM TAKİBİ ───
+// ─── DURUM ───
 let isInitialized = false;
 let isBannerShowing = false;
 let isInterstitialReady = false;
 let isRewardedReady = false;
 
-// ═══════════════════════════════════════════════════════════════
-// 1. BAŞLATMA
-// ═══════════════════════════════════════════════════════════════
+// ═══ BAŞLATMA ═══
 export async function initializeAdMob() {
   if (isInitialized) return true;
   try {
     await AdMob.initialize({
       initializeForTesting: IS_TESTING,
+      tagForChildDirectedTreatment: true,
+      maxAdContentRating: MaxAdContentRating.General,
+      tagForUnderAgeOfConsent: true,
     });
     isInitialized = true;
-    console.log('✅ AdMob başlatıldı');
-
-    // Interstitial ve Rewarded'ı arka planda hazırla
-    prepareInterstitial();
     prepareRewarded();
-
+    prepareInterstitial();
     return true;
-  } catch (error) {
-    console.error('❌ AdMob başlatma hatası:', error);
+  } catch (e) {
+    console.error('❌ AdMob init:', e);
     return false;
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// 2. BANNER REKLAM — Sürekli altta görünen reklam
-// ═══════════════════════════════════════════════════════════════
+// ═══ BANNER ═══
 export async function showBanner() {
   if (isBannerShowing) return;
   try {
@@ -69,174 +73,108 @@ export async function showBanner() {
       adId: AD_CONFIG.banner,
       adSize: BannerAdSize.ADAPTIVE_BANNER,
       position: BannerAdPosition.BOTTOM_CENTER,
-      margin: 56, // Tab bar yüksekliği
+      margin: 56,
       isTesting: IS_TESTING,
+      npa: true,
     });
     isBannerShowing = true;
-    console.log('✅ Banner gösterildi');
-  } catch (error) {
-    console.error('❌ Banner hatası:', error);
-  }
+  } catch (e) { console.error('❌ Banner:', e); }
 }
 
 export async function hideBanner() {
   if (!isBannerShowing) return;
-  try {
-    await AdMob.hideBanner();
-    isBannerShowing = false;
-  } catch (error) {
-    console.error('❌ Banner gizleme hatası:', error);
-  }
+  try { await AdMob.hideBanner(); isBannerShowing = false; }
+  catch (e) { console.error('❌ Banner hide:', e); }
 }
 
 export async function removeBanner() {
-  try {
-    await AdMob.removeBanner();
-    isBannerShowing = false;
-  } catch (error) {
-    console.error('❌ Banner kaldırma hatası:', error);
-  }
+  try { await AdMob.removeBanner(); isBannerShowing = false; }
+  catch (e) { console.error('❌ Banner remove:', e); }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// 3. INTERSTITIAL — Tam ekran geçiş reklamı
-// ═══════════════════════════════════════════════════════════════
+// ═══ INTERSTITIAL ═══
 export async function prepareInterstitial() {
   if (isInterstitialReady) return;
   try {
-    await AdMob.prepareInterstitial({
-      adId: AD_CONFIG.interstitial,
-      isTesting: IS_TESTING,
-    });
+    await AdMob.prepareInterstitial({ adId: AD_CONFIG.interstitial, isTesting: IS_TESTING, npa: true });
     isInterstitialReady = true;
-    console.log('✅ Interstitial hazır');
-  } catch (error) {
-    console.error('❌ Interstitial hazırlama hatası:', error);
-  }
+  } catch (e) { console.error('❌ Interstitial prep:', e); }
 }
 
-// Cooldown ve limit kontrolü ile interstitial göster
 export async function showInterstitial() {
   const now = Date.now();
-
-  // Cooldown kontrolü
-  if (now - lastInterstitialTime < INTERSTITIAL_COOLDOWN_MS) {
-    console.log('⏳ Interstitial cooldown — atlanıyor');
-    return false;
-  }
-
-  // Oturum limiti kontrolü
-  if (interstitialCount >= MAX_INTERSTITIALS_PER_SESSION) {
-    console.log('🚫 Oturum interstitial limiti doldu');
-    return false;
-  }
-
-  if (!isInterstitialReady) {
-    await prepareInterstitial();
-    // Hazırlanamadıysa gösterme
-    if (!isInterstitialReady) return false;
-  }
-
+  if (now - lastInterstitialTime < INTERSTITIAL_COOLDOWN_MS) return false;
+  if (interstitialCount >= MAX_INTERSTITIALS_PER_SESSION) return false;
+  if (!isInterstitialReady) { await prepareInterstitial(); if (!isInterstitialReady) return false; }
   try {
     await AdMob.showInterstitial();
     lastInterstitialTime = now;
     interstitialCount++;
     isInterstitialReady = false;
-    console.log(`✅ Interstitial gösterildi (${interstitialCount}. kez)`);
-
-    // Sonraki için hazırla
     setTimeout(() => prepareInterstitial(), 2000);
     return true;
-  } catch (error) {
-    console.error('❌ Interstitial gösterme hatası:', error);
+  } catch (e) {
+    console.error('❌ Interstitial:', e);
     isInterstitialReady = false;
     prepareInterstitial();
     return false;
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// 4. REWARDED — Ödüllü reklam (izle → özellik aç)
-// ═══════════════════════════════════════════════════════════════
+// ═══ REWARDED — EN YÜKSEK GELİR ═══
 export async function prepareRewarded() {
   if (isRewardedReady) return;
   try {
-    await AdMob.prepareRewardVideoAd({
-      adId: AD_CONFIG.rewarded,
-      isTesting: IS_TESTING,
-    });
+    await AdMob.prepareRewardVideoAd({ adId: AD_CONFIG.rewarded, isTesting: IS_TESTING, npa: true });
     isRewardedReady = true;
-    console.log('✅ Rewarded reklam hazır');
-  } catch (error) {
-    console.error('❌ Rewarded hazırlama hatası:', error);
-  }
+  } catch (e) { console.error('❌ Rewarded prep:', e); }
 }
 
-// Ödüllü reklam göster, callback ile ödül ver
 export async function showRewarded(onReward) {
-  if (!isRewardedReady) {
-    await prepareRewarded();
-    if (!isRewardedReady) return false;
-  }
-
+  const now = Date.now();
+  if (now - lastRewardedTime < REWARDED_COOLDOWN_MS) return false;
+  if (rewardedCount >= MAX_REWARDED_PER_SESSION) return false;
+  if (!isRewardedReady) { await prepareRewarded(); if (!isRewardedReady) return false; }
   try {
-    // Ödül event'ini dinle
     const listener = await AdMob.addListener('onRewardedVideoAdReward', (reward) => {
-      console.log('🎁 Ödül alındı:', reward);
       if (onReward) onReward(reward);
       listener.remove();
     });
-
     await AdMob.showRewardVideoAd();
+    lastRewardedTime = now;
+    rewardedCount++;
     isRewardedReady = false;
-
-    // Sonraki için hazırla
     setTimeout(() => prepareRewarded(), 2000);
     return true;
-  } catch (error) {
-    console.error('❌ Rewarded gösterme hatası:', error);
+  } catch (e) {
+    console.error('❌ Rewarded:', e);
     isRewardedReady = false;
     prepareRewarded();
     return false;
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// 5. YARDIMCI FONKSİYONLAR
-// ═══════════════════════════════════════════════════════════════
-
-// Tüm reklamları başlat + banner göster (uygulama açılışında çağır)
+// ═══ YARDIMCI ═══
 export async function startAds() {
   const ok = await initializeAdMob();
-  if (ok) {
-    await showBanner();
-  }
+  if (ok) await showBanner();
 }
 
-// Tab değiştiğinde banner'ı yenile (tablet takılma sorunu için)
 export async function refreshBanner() {
   if (!isInitialized) return;
   try {
     await AdMob.removeBanner();
     isBannerShowing = false;
-    // Kısa gecikme ile tekrar göster
-    setTimeout(async () => {
-      await showBanner();
-    }, 300);
-  } catch (error) {
-    console.error('❌ Banner yenileme hatası:', error);
-    await showBanner();
-  }
+    setTimeout(async () => await showBanner(), 300);
+  } catch (e) { await showBanner(); }
 }
 
-// Durum bilgisi
+export function isRewardedAvailable() {
+  return isRewardedReady && rewardedCount < MAX_REWARDED_PER_SESSION;
+}
+
 export function getAdStats() {
-  return {
-    isInitialized,
-    isBannerShowing,
-    isInterstitialReady,
-    isRewardedReady,
-    interstitialCount,
-    maxInterstitials: MAX_INTERSTITIALS_PER_SESSION,
-  };
+  return { isInitialized, isBannerShowing, isInterstitialReady, isRewardedReady,
+    interstitialCount, rewardedCount, maxInterstitials: MAX_INTERSTITIALS_PER_SESSION,
+    maxRewarded: MAX_REWARDED_PER_SESSION };
 }

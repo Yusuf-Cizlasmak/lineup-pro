@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import logo from "./ssssss.png";
-import { startAds, showInterstitial, showBanner, hideBanner } from "./admob";
+import { startAds, showInterstitial, showRewarded, showBanner, hideBanner } from "./admob";
 
 // ─── FORMATIONS (7-a-side: kaleci + 6 oyuncu)
 const FORMATIONS = {
@@ -145,6 +145,23 @@ const mkTeam = (name, color, withPlayers) => ({
       ]
     : [],
 });
+
+// ─── KALICI DEPOLAMA (localStorage) ───
+const STORAGE_KEY = "halisaha_kolik_data";
+const saveData = (a, b) => {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ teamA: a, teamB: b })); } catch {}
+};
+const loadData = () => {
+  try {
+    const d = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    if (d?.teamA?.players) return d;
+  } catch {}
+  return null;
+};
+const loadTeam = (key, fallbackName, fallbackColor, withPlayers) => {
+  const d = loadData();
+  return d?.[key] || mkTeam(fallbackName, fallbackColor, withPlayers);
+};
 
 // ─── ICONS ───
 const I = {
@@ -587,8 +604,8 @@ const Toast = ({ message, show }) => (
 export default function LineupPro() {
   const [mode, setMode] = useState(null);
   const [tab, setTab] = useState("field");
-  const [teamA, setTeamA] = useState(() => mkTeam("Takımım", TEAM_COLORS[0], true));
-  const [teamB, setTeamB] = useState(() => mkTeam("Rakip Takım", TEAM_COLORS[2], false));
+  const [teamA, setTeamA] = useState(() => loadTeam("teamA", "Takımım", TEAM_COLORS[0], true));
+  const [teamB, setTeamB] = useState(() => loadTeam("teamB", "Rakip Takım", TEAM_COLORS[2], false));
   const [activeTeam, setAT] = useState("A");
   const [showPlayer, setSP] = useState(false);
   const [editPlayer, setEP] = useState(null);
@@ -608,8 +625,13 @@ export default function LineupPro() {
 
   // ★★★ REKLAM: Uygulama açılışında banner başlat ★★★
   useEffect(() => {
-    startAds(); // Banner + interstitial/rewarded hazırlığı
+    startAds();
   }, []);
+
+  // ★★★ KAYIT: Takım verilerini localStorage'a kaydet ★★★
+  useEffect(() => {
+    saveData(teamA, teamB);
+  }, [teamA, teamB]);
 
   const toast_ = (m) => { setToast({ show: true, msg: m }); setTimeout(() => setToast({ show: false, msg: "" }), 1800); };
 
@@ -625,23 +647,31 @@ export default function LineupPro() {
     toast_("Oyuncu silindi!");
   };
 
-  // ★ REKLAM: Otomatik kadro kurma — interstitial göster
+  // ★ REKLAM: Otomatik kadro kurma — REWARDED reklam ($8-18 eCPM)
+  // Kullanıcı "Otomatik Kadro" ister → reklam izler → kadro kurulur
   const autoFill = async (side) => {
-    await showInterstitial(); // ← REKLAM
+    const doFill = () => {
+      const setter = side === "A" ? setTeamA : setTeamB;
+      setter((t) => {
+        const on = new Set(t.fieldPlayers.filter(Boolean));
+        const av = [...t.players.filter((p) => !on.has(p.id))];
+        const n = [...t.fieldPlayers];
+        const positionsNeeded = FORMATIONS[t.formation].positions;
+        for (let i = 0; i < 7; i++) { if (!n[i] && av.length) { const reqRole = positionsNeeded[i].role; const matchIdx = av.findIndex((p) => p.position === reqRole); if (matchIdx !== -1) { n[i] = av[matchIdx].id; av.splice(matchIdx, 1); } } }
+        for (let i = 0; i < 7; i++) { if (!n[i] && av.length) { const reqRole = positionsNeeded[i].role; const matchIdx = av.findIndex((p) => { if (reqRole.includes("BEK") || reqRole === "STOPER" || reqRole === "DEFANS") { return ["DEFANS", "SOL BEK", "SAĞ BEK", "STOPER"].includes(p.position); } return false; }); if (matchIdx !== -1) { n[i] = av[matchIdx].id; av.splice(matchIdx, 1); } } }
+        av.sort((a, b) => b.rating - a.rating);
+        for (let i = 0; i < 7; i++) { if (!n[i] && av.length) { n[i] = av.shift().id; } }
+        return { ...t, fieldPlayers: n };
+      });
+      toast_("Kadro otomatik kuruldu! 🤖");
+    };
 
-    const setter = side === "A" ? setTeamA : setTeamB;
-    setter((t) => {
-      const on = new Set(t.fieldPlayers.filter(Boolean));
-      const av = [...t.players.filter((p) => !on.has(p.id))];
-      const n = [...t.fieldPlayers];
-      const positionsNeeded = FORMATIONS[t.formation].positions;
-      for (let i = 0; i < 7; i++) { if (!n[i] && av.length) { const reqRole = positionsNeeded[i].role; const matchIdx = av.findIndex((p) => p.position === reqRole); if (matchIdx !== -1) { n[i] = av[matchIdx].id; av.splice(matchIdx, 1); } } }
-      for (let i = 0; i < 7; i++) { if (!n[i] && av.length) { const reqRole = positionsNeeded[i].role; const matchIdx = av.findIndex((p) => { if (reqRole.includes("BEK") || reqRole === "STOPER" || reqRole === "DEFANS") { return ["DEFANS", "SOL BEK", "SAĞ BEK", "STOPER"].includes(p.position); } return false; }); if (matchIdx !== -1) { n[i] = av[matchIdx].id; av.splice(matchIdx, 1); } } }
-      av.sort((a, b) => b.rating - a.rating);
-      for (let i = 0; i < 7; i++) { if (!n[i] && av.length) { n[i] = av.shift().id; } }
-      return { ...t, fieldPlayers: n };
-    });
-    toast_("Kadro otomatik kuruldu! 🤖");
+    // Önce rewarded dene (yüksek gelir), olmazsa interstitial, o da olmazsa direkt kur
+    const rewarded = await showRewarded(doFill);
+    if (!rewarded) {
+      const inter = await showInterstitial();
+      doFill();
+    }
   };
 
   const clearField = (side) => { (side === "A" ? setTeamA : setTeamB)((t) => ({ ...t, fieldPlayers: Array(7).fill(null) })); toast_("Saha temizlendi!"); };
@@ -655,8 +685,10 @@ export default function LineupPro() {
 
   const toggleCaptain = (side, id) => { (side === "A" ? setTeamA : setTeamB)((t) => ({ ...t, captain: t.captain === id ? null : id })); };
 
-  // Mod seçimi — reklam yok, kullanıcıyı sıkmayalım
-  const handleModeSelect = (newMode) => {
+  // ★ REKLAM: Mod seçiminde interstitial + banner gizle
+  const handleModeSelect = async (newMode) => {
+    await showInterstitial();
+    hideBanner(); // Mod içinde banner kapalı
     setMode(newMode);
   };
 
@@ -701,22 +733,22 @@ export default function LineupPro() {
         <h1 style={{ fontSize: 30, fontWeight: 700, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 3, marginBottom: 4, animation: "fadeUp 0.45s 0.08s both" }}>HalıSaha-Kolik</h1>
         <p style={{ color: "rgba(255,255,255,0.32)", fontSize: 13, marginBottom: 10, animation: "fadeUp 0.45s 0.16s both" }}>Halı Saha Taktik & Takım Yönetimi</p>
         <div style={{ fontSize: 10, color: "rgba(255,255,255,0.15)", fontWeight: 600, letterSpacing: 2, textTransform: "uppercase", marginBottom: 32, animation: "fadeUp 0.45s 0.2s both" }} />
-        <div style={{ display: "flex", flexDirection: "column", gap: 12, width: "100%", maxWidth: 360 }}>
-          {[
-            { key: "myteam", icon: <I.Shield />, col: "#34d399", bg: "rgba(5,150,105,0.12)", bd: "rgba(52,211,153,0.2)", title: "Kendi Takımım", sub: "Tek takım kur, kadro yönet, dizilim paylaş", detail: "7 kişilik kadro · 7 formasyon · Paylaşım" },
-            { key: "match", icon: <I.Trophy />, col: "#fbbf24", bg: "rgba(245,158,11,0.12)", bd: "rgba(251,191,36,0.2)", title: "Tüm Halı Saha", sub: "İki takım kur, maçı yönet, sonucu paylaş", detail: "2 takım · Yarı saha dizilimi · Gol kaydı" },
-          ].map((m, i) => (
-            <button key={m.key} onClick={() => handleModeSelect(m.key)} style={{ padding: "18px 20px", borderRadius: 16, background: m.bg, border: `1px solid ${m.bd}`, cursor: "pointer", display: "flex", alignItems: "center", gap: 14, textAlign: "left", animation: `fadeUp 0.45s ${0.24 + i * 0.08}s both`, transition: "transform 0.15s, box-shadow 0.15s" }}>
-              <div style={{ width: 48, height: 48, borderRadius: 13, background: `${m.col}22`, display: "flex", alignItems: "center", justifyContent: "center", color: m.col, flexShrink: 0 }}>{m.icon}</div>
-              <div style={{ flex: 1 }}>
-                <div style={{ color: m.col, fontSize: 15, fontWeight: 700, marginBottom: 2 }}>{m.title}</div>
-                <div style={{ color: "rgba(255,255,255,0.35)", fontSize: 12, lineHeight: 1.45 }}>{m.sub}</div>
-                <div style={{ color: "rgba(255,255,255,0.18)", fontSize: 9, marginTop: 4, fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase" }}>{m.detail}</div>
-              </div>
-              <div style={{ color: m.col, opacity: 0.5, transform: "rotate(-90deg)" }}><I.Chevron /></div>
-            </button>
-          ))}
-        </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, width: "100%", maxWidth: 360 }}>
+            {[
+              { key: "myteam", icon: <I.Shield />, col: "#34d399", bg: "rgba(5,150,105,0.12)", bd: "rgba(52,211,153,0.2)", title: "Kendi Takımım", sub: "Tek takım kur, kadro yönet, dizilim paylaş", detail: "7 kişilik kadro · 7 formasyon · Paylaşım" },
+              { key: "match", icon: <I.Trophy />, col: "#fbbf24", bg: "rgba(245,158,11,0.12)", bd: "rgba(251,191,36,0.2)", title: "Tüm Halı Saha", sub: "İki takım kur, maçı yönet, sonucu paylaş", detail: "2 takım · Yarı saha dizilimi · Gol kaydı" },
+            ].map((m, i) => (
+              <button key={m.key} onClick={() => handleModeSelect(m.key)} style={{ padding: "18px 20px", borderRadius: 16, background: m.bg, border: `1px solid ${m.bd}`, cursor: "pointer", display: "flex", alignItems: "center", gap: 14, textAlign: "left", animation: `fadeUp 0.45s ${0.24 + i * 0.08}s both`, transition: "transform 0.15s, box-shadow 0.15s" }}>
+                <div style={{ width: 48, height: 48, borderRadius: 13, background: `${m.col}22`, display: "flex", alignItems: "center", justifyContent: "center", color: m.col, flexShrink: 0 }}>{m.icon}</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ color: m.col, fontSize: 15, fontWeight: 700, marginBottom: 2 }}>{m.title}</div>
+                  <div style={{ color: "rgba(255,255,255,0.35)", fontSize: 12, lineHeight: 1.45 }}>{m.sub}</div>
+                  <div style={{ color: "rgba(255,255,255,0.18)", fontSize: 9, marginTop: 4, fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase" }}>{m.detail}</div>
+                </div>
+                <div style={{ color: m.col, opacity: 0.5, transform: "rotate(-90deg)" }}><I.Chevron /></div>
+              </button>
+            ))}
+          </div>
       </div>
     </div>
   );
@@ -729,7 +761,7 @@ export default function LineupPro() {
       {/* HEADER */}
       <div style={{ padding: "10px 13px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.04)", background: "rgba(0,0,0,0.28)", backdropFilter: "blur(14px)", position: "sticky", top: 0, zIndex: 50 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-          <button onClick={() => setMode(null)} style={{ ...S.mini, border: "none", background: "none", padding: 3 }}><I.Back /></button>
+          <button onClick={() => { setMode(null); showBanner(); }} style={{ ...S.mini, border: "none", background: "none", padding: 3 }}><I.Back /></button>
           <img src={logo} alt="HalıSaha-Kolik" style={{ width: 32, height: 32, borderRadius: 8, objectFit: "cover" }} />
           <div>
             <div style={{ fontSize: 13, fontWeight: 700 }}>{isMatch ? "Halı Saha" : "Takımım"}</div>
@@ -814,7 +846,7 @@ export default function LineupPro() {
               <input style={{ ...S.input, flex: 1 }} placeholder="Oyuncu ara..." value={search} onChange={(e) => setSearch(e.target.value)} />
               <button onClick={() => { setEP(null); setSP(true); }} style={{ ...S.btn, width: "auto", padding: "10px 13px", borderRadius: 8, background: `linear-gradient(135deg,${team.color.primary},${team.color.secondary})` }}><I.Plus /></button>
             </div>
-            <button onClick={() => setSC(true)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: "rgba(251,191,36,0.06)", borderRadius: 10, marginBottom: 10, border: "1px solid rgba(251,191,36,0.15)", cursor: "pointer", width: "100%" }}>
+            <button onClick={async () => { await showInterstitial(); setSC(true); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: "rgba(251,191,36,0.06)", borderRadius: 10, marginBottom: 10, border: "1px solid rgba(251,191,36,0.15)", cursor: "pointer", width: "100%" }}>
               <div style={{ fontSize: 16 }}>👑</div>
               <div style={{ flex: 1, textAlign: "left" }}><div style={{ fontSize: 11, fontWeight: 700, color: "#fbbf24" }}>Kaptan</div><div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)" }}>{team.captain ? (() => { const cp = team.players.find((p) => p.id === team.captain); return cp ? `${cp.name} ${cp.surname}` : "Seçilmedi"; })() : "Kaptan seçilmedi"}</div></div>
               <div style={{ color: "rgba(251,191,36,0.5)", transform: "rotate(-90deg)" }}><I.Chevron /></div>
