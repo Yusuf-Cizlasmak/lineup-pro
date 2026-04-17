@@ -13,14 +13,24 @@ workflows:
         script: npm install
       - name: Build web
         script: CI=false npm run build
-      - name: Install Capacitor iOS
-        script: npx cap add ios
+      - name: Add iOS platform
+        script: npx cap add ios || true
       - name: Sync Capacitor
         script: npx cap sync ios
-      - name: List iOS directory
-        script: find ios -name "Podfile" -o -name "*.xcworkspace" | head -20
+      - name: Debug - show iOS structure
+        script: ls -la ios/ && ls -la ios/App/ && cat ios/App/Podfile || echo "No Podfile found"
       - name: Install CocoaPods
-        script: cd ios/App && pod install
+        script: |
+          if [ -f "ios/App/Podfile" ]; then
+            cd ios/App && pod install
+          elif [ -f "ios/Podfile" ]; then
+            cd ios && pod install
+          else
+            echo "No Podfile found, creating one"
+            cd ios/App
+            pod init
+            pod install
+          fi
       - name: Build iOS
         script: |
           xcodebuild -workspace ios/App/App.xcworkspace \
