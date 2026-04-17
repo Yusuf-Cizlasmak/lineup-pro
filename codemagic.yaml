@@ -33,14 +33,14 @@ workflows:
           fi
       - name: Build iOS
         script: |
-            xcodebuild -workspace ios/App/App.xcworkspace \
-              -scheme App \
-              -sdk iphoneos \
-              -configuration Release \
-              -archivePath build/App.xcarchive \
-              DEVELOPMENT_TEAM="Q3BH6457BX" \
-              CODE_SIGN_STYLE="Manual" \
-              CODE_SIGN_IDENTITY="Apple Distribution" \
-              archive
+          xcodebuild -workspace ios/App/App.xcworkspace \
+            -scheme App \
+            -sdk iphoneos \
+            -configuration Release \
+            -archivePath build/App.xcarchive \
+            DEVELOPMENT_TEAM="Q3BH6457BX" \
+            CODE_SIGN_STYLE="Automatic" \
+            -allowProvisioningUpdates \
+            archive
     artifacts:
       - build/**/*.ipa
