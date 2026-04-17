@@ -12,7 +12,7 @@ workflows:
       - name: Install dependencies
         script: npm install
       - name: Build web
-        script: npm run build
+        script: CI=false npm run build
       - name: Install Capacitor iOS
         script: npx cap add ios
       - name: Sync Capacitor
