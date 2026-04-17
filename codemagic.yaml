@@ -17,6 +17,8 @@ workflows:
         script: npx cap add ios
       - name: Sync Capacitor
         script: npx cap sync ios
+      - name: List iOS directory
+        script: find ios -name "Podfile" -o -name "*.xcworkspace" | head -20
       - name: Install CocoaPods
         script: cd ios/App && pod install
       - name: Build iOS
