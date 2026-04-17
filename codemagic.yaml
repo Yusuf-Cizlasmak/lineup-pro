@@ -39,8 +39,9 @@ workflows:
             -configuration Release \
             -archivePath build/App.xcarchive \
             DEVELOPMENT_TEAM="Q3BH6457BX" \
-            CODE_SIGN_STYLE="Automatic" \
-            -allowProvisioningUpdates \
+            CODE_SIGN_STYLE="Manual" \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            PROVISIONING_PROFILE_SPECIFIER="com.halisahakolik.app" \
             archive
     artifacts:
       - build/**/*.ipa
