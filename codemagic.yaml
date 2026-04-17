@@ -19,18 +19,26 @@ workflows:
         script: npx cap add ios || true
       - name: Sync Capacitor
         script: npx cap sync ios
+      - name: Debug iOS structure
+        script: |
+          echo "=== ios/ ==="
+          ls -la ios/ || echo "no ios dir"
+          echo "=== ios/App/ ==="
+          ls -la ios/App/ || echo "no ios/App dir"
+          echo "=== Podfile location ==="
+          find ios -name "Podfile" 2>/dev/null || echo "No Podfile found"
       - name: Install CocoaPods
-        script: cd ios/App && pod install
+        script: |
+          PODFILE_DIR=$(find ios -name "Podfile" -exec dirname {} \; | head -1)
+          if [ -n "$PODFILE_DIR" ]; then
+            cd "$PODFILE_DIR"
+            pod install
+          else
+            echo "No Podfile found, skipping"
+          fi
       - name: Set signing settings
         script: |
           cd ios/App
-          # Sadece App target'ına signing ayarla, Pods'a dokunma
-          xcodebuild -workspace App.xcworkspace -scheme App -showBuildSettings | grep -i "provisioning\|code_sign\|development_team" || true
-          
-          # pbxproj dosyasında signing ayarla
-          /usr/libexec/PlistBuddy -c "Set :objects:YOUR_KEY:buildSettings:CODE_SIGN_STYLE Manual" App.xcodeproj/project.pbxproj 2>/dev/null || true
-          
-          # sed ile doğrudan ayarla
           sed -i '' 's/CODE_SIGN_STYLE = Automatic/CODE_SIGN_STYLE = Manual/g' App.xcodeproj/project.pbxproj
           sed -i '' 's/DEVELOPMENT_TEAM = ""/DEVELOPMENT_TEAM = "Q3BH6457BX"/g' App.xcodeproj/project.pbxproj
           sed -i '' 's/DEVELOPMENT_TEAM = "";/DEVELOPMENT_TEAM = "Q3BH6457BX";/g' App.xcodeproj/project.pbxproj
@@ -51,7 +59,6 @@ workflows:
             OTHER_CODE_SIGN_FLAGS="--keychain $HOME/Library/Keychains/codemagic.keychain-db" \
             | tee build.log || true
           
-          # Pods signing hatasını düzelt ve tekrar dene
           if grep -q "Pods-App does not support provisioning profiles" build.log; then
             echo "Fixing Pods signing..."
             cd ios/App
