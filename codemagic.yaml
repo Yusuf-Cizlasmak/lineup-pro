@@ -8,6 +8,8 @@ workflows:
         distribution_type: app_store
         bundle_identifier: com.halisahakolik.app
       node: 22
+      vars:
+        DEVELOPMENT_TEAM: "Q3BH6457BX"
     scripts:
       - name: Install dependencies
         script: npm install
@@ -17,20 +19,21 @@ workflows:
         script: npx cap add ios || true
       - name: Sync Capacitor
         script: npx cap sync ios
-      - name: Debug - show iOS structure
-        script: ls -la ios/ && ls -la ios/App/ && cat ios/App/Podfile || echo "No Podfile found"
       - name: Install CocoaPods
+        script: cd ios/App && pod install
+      - name: Set signing settings
         script: |
-          if [ -f "ios/App/Podfile" ]; then
-            cd ios/App && pod install
-          elif [ -f "ios/Podfile" ]; then
-            cd ios && pod install
-          else
-            echo "No Podfile found, creating one"
-            cd ios/App
-            pod init
-            pod install
-          fi
+          cd ios/App
+          # Sadece App target'ına signing ayarla, Pods'a dokunma
+          xcodebuild -workspace App.xcworkspace -scheme App -showBuildSettings | grep -i "provisioning\|code_sign\|development_team" || true
+          
+          # pbxproj dosyasında signing ayarla
+          /usr/libexec/PlistBuddy -c "Set :objects:YOUR_KEY:buildSettings:CODE_SIGN_STYLE Manual" App.xcodeproj/project.pbxproj 2>/dev/null || true
+          
+          # sed ile doğrudan ayarla
+          sed -i '' 's/CODE_SIGN_STYLE = Automatic/CODE_SIGN_STYLE = Manual/g' App.xcodeproj/project.pbxproj
+          sed -i '' 's/DEVELOPMENT_TEAM = ""/DEVELOPMENT_TEAM = "Q3BH6457BX"/g' App.xcodeproj/project.pbxproj
+          sed -i '' 's/DEVELOPMENT_TEAM = "";/DEVELOPMENT_TEAM = "Q3BH6457BX";/g' App.xcodeproj/project.pbxproj
       - name: Build iOS
         script: |
           xcodebuild -workspace ios/App/App.xcworkspace \
@@ -38,10 +41,57 @@ workflows:
             -sdk iphoneos \
             -configuration Release \
             -archivePath build/App.xcarchive \
+            archive \
             DEVELOPMENT_TEAM="Q3BH6457BX" \
             CODE_SIGN_STYLE="Manual" \
             CODE_SIGN_IDENTITY="Apple Distribution" \
             PROVISIONING_PROFILE_SPECIFIER="com.halisahakolik.app" \
-            archive
+            -destination "generic/platform=iOS" \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            OTHER_CODE_SIGN_FLAGS="--keychain $HOME/Library/Keychains/codemagic.keychain-db" \
+            | tee build.log || true
+          
+          # Pods signing hatasını düzelt ve tekrar dene
+          if grep -q "Pods-App does not support provisioning profiles" build.log; then
+            echo "Fixing Pods signing..."
+            cd ios/App
+            sed -i '' '/Pods-App/,/};/{s/PROVISIONING_PROFILE_SPECIFIER = .*/PROVISIONING_PROFILE_SPECIFIER = "";/g}' Pods/Pods.xcodeproj/project.pbxproj
+            cd ../..
+            xcodebuild -workspace ios/App/App.xcworkspace \
+              -scheme App \
+              -sdk iphoneos \
+              -configuration Release \
+              -archivePath build/App.xcarchive \
+              archive \
+              -destination "generic/platform=iOS" \
+              COMPILER_INDEX_STORE_ENABLE=NO
+          fi
+      - name: Export IPA
+        script: |
+          cat > exportOptions.plist << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store</string>
+            <key>teamID</key>
+            <string>Q3BH6457BX</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>com.halisahakolik.app</key>
+              <string>com.halisahakolik.app</string>
+            </dict>
+          </dict>
+          </plist>
+          EOF
+          
+          xcodebuild -exportArchive \
+            -archivePath build/App.xcarchive \
+            -exportPath build/output \
+            -exportOptionsPlist exportOptions.plist
     artifacts:
-      - build/**/*.ipa
+      - build/output/**/*.ipa
+      - build/**/*.xcarchive
