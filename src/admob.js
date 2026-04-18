@@ -1,27 +1,19 @@
-import { AdMob, BannerAdSize, BannerAdPosition, MaxAdContentRating } from '@capacitor-community/admob';
+import { AdMob, BannerAdSize, BannerAdPosition, MaxAdContentRating, AdmobConsentStatus } from '@capacitor-community/admob';
 import { Capacitor } from '@capacitor/core';
 
 // ═══════════════════════════════════════════════════════════════
 // ═══ ADMOB REKLAM YÖNETİCİSİ — HalıSaha-Kolik
 // ═══════════════════════════════════════════════════════════════
 //
-// 💰 GELİR OPTİMİZASYONU (eCPM sıralaması):
-//
-//   1. REWARDED VIDEO   → $8-18 eCPM (TR ~$2-4)  ⭐ EN YÜKSEK
-//   2. INTERSTITIAL      → $2.5-5 eCPM (TR ~$1-2)
-//   3. BANNER            → $0.2-0.8 eCPM (TR ~$0.1-0.3)
+// iOS 14+ GEREKSİNİMLERİ:
+//   1. ATT (App Tracking Transparency) izni istenmeli
+//   2. UMP (User Messaging Platform) consent alınmalı
+//   3. Bunlar olmadan AdMob reklam SERVİS ETMEZ
 //
 // ═══════════════════════════════════════════════════════════════
 
-// ─── TEST MODU: Gerçek reklamlar için false ───
 const IS_TESTING = false;
 
-// ─── PLATFORM KONTROLÜ ───
-const isNativePlatform = () => {
-  return Capacitor.isNativePlatform(); // true = iOS/Android, false = web
-};
-
-// ─── REKLAM BİRİM KİMLİKLERİ ───
 const AD_CONFIG = {
   banner:       'ca-app-pub-2886543552287006/3886785053',
   interstitial: 'ca-app-pub-2886543552287006/2573703388',
@@ -29,8 +21,8 @@ const AD_CONFIG = {
 };
 
 // ─── SIKLIK KONTROLÜ ───
-const INTERSTITIAL_COOLDOWN_MS = 120000; // 2 dk
-const REWARDED_COOLDOWN_MS = 60000;      // 1 dk
+const INTERSTITIAL_COOLDOWN_MS = 120000;
+const REWARDED_COOLDOWN_MS = 60000;
 let lastInterstitialTime = 0;
 let lastRewardedTime = 0;
 let interstitialCount = 0;
@@ -43,55 +35,97 @@ let isInitialized = false;
 let isBannerShowing = false;
 let isInterstitialReady = false;
 let isRewardedReady = false;
+let canShowAds = false;
 
-// ═══ BAŞLATMA ═══
+// ─── PLATFORM KONTROLÜ ───
+const isNative = () => Capacitor.isNativePlatform();
+
+// ═══════════════════════════════════════════════════════════════
+// ═══ ANA BAŞLATMA — ATT + UMP + AdMob initialize
+// ═══════════════════════════════════════════════════════════════
 export async function initializeAdMob() {
-  // Web'de çalışıyorsa AdMob yok, sessizce çık
-  if (!isNativePlatform()) {
-    console.log('ℹ️ AdMob: Web ortamında, reklamlar devre dışı');
+  if (!isNative()) {
+    console.log('ℹ️ AdMob: Web ortamı — atlanıyor');
     return false;
   }
-
   if (isInitialized) return true;
 
   try {
+    // ─── ADIM 1: AdMob SDK'yı başlat ───
     await AdMob.initialize({
       initializeForTesting: IS_TESTING,
-      tagForChildDirectedTreatment: true,
+      tagForChildDirectedTreatment: false,
       maxAdContentRating: MaxAdContentRating.General,
-      tagForUnderAgeOfConsent: true,
     });
-    isInitialized = true;
-    console.log('✅ AdMob başarıyla başlatıldı');
+    console.log('✅ AdMob SDK başlatıldı');
 
-    // Reklam event listener'ları
+    // ─── ADIM 2: iOS ATT izni iste ───
+    try {
+      const trackingInfo = await AdMob.trackingAuthorizationStatus();
+      console.log('ℹ️ ATT durumu:', trackingInfo.status);
+
+      if (trackingInfo.status === 'notDetermined') {
+        // iOS izin dialogunu göster
+        const result = await AdMob.requestTrackingAuthorization();
+        console.log('ℹ️ ATT sonucu:', result.status);
+      }
+    } catch (attErr) {
+      // ATT hatası reklamları engellemez, devam et
+      console.warn('⚠️ ATT hatası (devam ediliyor):', attErr);
+    }
+
+    // ─── ADIM 3: UMP Consent (GDPR/Türkiye) ───
+    try {
+      const consentInfo = await AdMob.requestConsentInfo();
+      console.log('ℹ️ Consent durumu:', consentInfo.status, 'Form var:', consentInfo.isConsentFormAvailable);
+
+      if (consentInfo.isConsentFormAvailable && consentInfo.status === AdmobConsentStatus.REQUIRED) {
+        const consentResult = await AdMob.showConsentForm();
+        console.log('ℹ️ Consent sonucu:', consentResult.status);
+      }
+
+      // Consent durumuna göre reklam gösterilebilir mi?
+      canShowAds = consentInfo.status === AdmobConsentStatus.OBTAINED
+                || consentInfo.status === AdmobConsentStatus.NOT_REQUIRED;
+    } catch (consentErr) {
+      console.warn('⚠️ Consent hatası (devam ediliyor):', consentErr);
+      // Consent başarısız olsa bile reklam dene — bazı bölgelerde consent gerekmez
+      canShowAds = true;
+    }
+
+    console.log('ℹ️ Reklam gösterilebilir:', canShowAds);
+
+    // ─── ADIM 4: Event listener'lar ───
     AdMob.addListener('onBannerAdLoaded', () => {
       console.log('✅ Banner yüklendi');
     });
-    AdMob.addListener('onBannerAdFailedToLoad', (error) => {
-      console.error('❌ Banner yüklenemedi:', JSON.stringify(error));
+    AdMob.addListener('onBannerAdFailedToLoad', (err) => {
+      console.error('❌ Banner yüklenemedi:', JSON.stringify(err));
       isBannerShowing = false;
     });
     AdMob.addListener('onInterstitialAdLoaded', () => {
       console.log('✅ Interstitial hazır');
       isInterstitialReady = true;
     });
-    AdMob.addListener('onInterstitialAdFailedToLoad', (error) => {
-      console.error('❌ Interstitial yüklenemedi:', JSON.stringify(error));
+    AdMob.addListener('onInterstitialAdFailedToLoad', (err) => {
+      console.error('❌ Interstitial yüklenemedi:', JSON.stringify(err));
       isInterstitialReady = false;
     });
     AdMob.addListener('onRewardedVideoAdLoaded', () => {
       console.log('✅ Rewarded hazır');
       isRewardedReady = true;
     });
-    AdMob.addListener('onRewardedVideoAdFailedToLoad', (error) => {
-      console.error('❌ Rewarded yüklenemedi:', JSON.stringify(error));
+    AdMob.addListener('onRewardedVideoAdFailedToLoad', (err) => {
+      console.error('❌ Rewarded yüklenemedi:', JSON.stringify(err));
       isRewardedReady = false;
     });
 
+    isInitialized = true;
+
     // İlk reklamları hazırla
-    prepareRewarded();
     prepareInterstitial();
+    prepareRewarded();
+
     return true;
   } catch (e) {
     console.error('❌ AdMob init hatası:', e);
@@ -101,7 +135,7 @@ export async function initializeAdMob() {
 
 // ═══ BANNER ═══
 export async function showBanner() {
-  if (!isNativePlatform() || !isInitialized) return;
+  if (!isNative() || !isInitialized) return;
   if (isBannerShowing) return;
   try {
     await AdMob.showBanner({
@@ -110,72 +144,65 @@ export async function showBanner() {
       position: BannerAdPosition.BOTTOM_CENTER,
       margin: 0,
       isTesting: IS_TESTING,
-      npa: true,
+      npa: !canShowAds,  // kişiselleştirilmemiş reklam consent yoksa
     });
     isBannerShowing = true;
     console.log('✅ Banner gösterildi');
   } catch (e) {
-    console.error('❌ Banner gösterilemedi:', e);
+    console.error('❌ Banner:', e);
     isBannerShowing = false;
   }
 }
 
 export async function hideBanner() {
-  if (!isNativePlatform() || !isBannerShowing) return;
+  if (!isNative() || !isBannerShowing) return;
   try {
     await AdMob.hideBanner();
     isBannerShowing = false;
   } catch (e) {
-    console.error('❌ Banner gizlenemedi:', e);
+    console.error('❌ Banner hide:', e);
   }
 }
 
 export async function removeBanner() {
-  if (!isNativePlatform()) return;
+  if (!isNative()) return;
   try {
     await AdMob.removeBanner();
     isBannerShowing = false;
   } catch (e) {
-    console.error('❌ Banner kaldırılamadı:', e);
+    console.error('❌ Banner remove:', e);
   }
 }
 
 // ═══ INTERSTITIAL ═══
 export async function prepareInterstitial() {
-  if (!isNativePlatform() || !isInitialized) return;
-  if (isInterstitialReady) return;
+  if (!isNative() || !isInitialized || isInterstitialReady) return;
   try {
     await AdMob.prepareInterstitial({
       adId: AD_CONFIG.interstitial,
       isTesting: IS_TESTING,
-      npa: true,
+      npa: !canShowAds,
     });
-    // isInterstitialReady listener'da true olacak
     console.log('ℹ️ Interstitial hazırlanıyor...');
   } catch (e) {
-    console.error('❌ Interstitial hazırlanamadı:', e);
+    console.error('❌ Interstitial prep:', e);
     isInterstitialReady = false;
   }
 }
 
 export async function showInterstitial() {
-  if (!isNativePlatform() || !isInitialized) return false;
+  if (!isNative() || !isInitialized) return false;
 
   const now = Date.now();
-  if (now - lastInterstitialTime < INTERSTITIAL_COOLDOWN_MS) {
-    console.log('ℹ️ Interstitial cooldown aktif');
-    return false;
-  }
-  if (interstitialCount >= MAX_INTERSTITIALS_PER_SESSION) {
-    console.log('ℹ️ Interstitial oturum limiti aşıldı');
-    return false;
-  }
+  if (now - lastInterstitialTime < INTERSTITIAL_COOLDOWN_MS) return false;
+  if (interstitialCount >= MAX_INTERSTITIALS_PER_SESSION) return false;
+
   if (!isInterstitialReady) {
     await prepareInterstitial();
-    // Kısa bir bekleme — reklamın hazırlanması için
-    await new Promise(r => setTimeout(r, 1500));
+    await new Promise((r) => setTimeout(r, 2000));
     if (!isInterstitialReady) return false;
   }
+
   try {
     await AdMob.showInterstitial();
     lastInterstitialTime = now;
@@ -184,42 +211,42 @@ export async function showInterstitial() {
     setTimeout(() => prepareInterstitial(), 3000);
     return true;
   } catch (e) {
-    console.error('❌ Interstitial gösterilemedi:', e);
+    console.error('❌ Interstitial:', e);
     isInterstitialReady = false;
     setTimeout(() => prepareInterstitial(), 3000);
     return false;
   }
 }
 
-// ═══ REWARDED — EN YÜKSEK GELİR ═══
+// ═══ REWARDED ═══
 export async function prepareRewarded() {
-  if (!isNativePlatform() || !isInitialized) return;
-  if (isRewardedReady) return;
+  if (!isNative() || !isInitialized || isRewardedReady) return;
   try {
     await AdMob.prepareRewardVideoAd({
       adId: AD_CONFIG.rewarded,
       isTesting: IS_TESTING,
-      npa: true,
+      npa: !canShowAds,
     });
-    // isRewardedReady listener'da true olacak
     console.log('ℹ️ Rewarded hazırlanıyor...');
   } catch (e) {
-    console.error('❌ Rewarded hazırlanamadı:', e);
+    console.error('❌ Rewarded prep:', e);
     isRewardedReady = false;
   }
 }
 
 export async function showRewarded(onReward) {
-  if (!isNativePlatform() || !isInitialized) return false;
+  if (!isNative() || !isInitialized) return false;
 
   const now = Date.now();
   if (now - lastRewardedTime < REWARDED_COOLDOWN_MS) return false;
   if (rewardedCount >= MAX_REWARDED_PER_SESSION) return false;
+
   if (!isRewardedReady) {
     await prepareRewarded();
-    await new Promise(r => setTimeout(r, 1500));
+    await new Promise((r) => setTimeout(r, 2000));
     if (!isRewardedReady) return false;
   }
+
   try {
     const listener = await AdMob.addListener('onRewardedVideoAdReward', (reward) => {
       console.log('✅ Ödül alındı:', reward);
@@ -233,7 +260,7 @@ export async function showRewarded(onReward) {
     setTimeout(() => prepareRewarded(), 3000);
     return true;
   } catch (e) {
-    console.error('❌ Rewarded gösterilemedi:', e);
+    console.error('❌ Rewarded:', e);
     isRewardedReady = false;
     setTimeout(() => prepareRewarded(), 3000);
     return false;
@@ -242,44 +269,42 @@ export async function showRewarded(onReward) {
 
 // ═══ YARDIMCI ═══
 export async function startAds() {
-  if (!isNativePlatform()) {
-    console.log('ℹ️ Web ortamında — reklamlar atlandı');
+  if (!isNative()) {
+    console.log('ℹ️ Web ortamı — reklamlar atlandı');
     return;
   }
   const ok = await initializeAdMob();
   if (ok) {
-    // Banner'ı biraz gecikmeyle göster — uygulama tam yüklensin
     setTimeout(async () => {
       await showBanner();
-    }, 1500);
+    }, 2000);
   }
 }
 
 export async function refreshBanner() {
-  if (!isNativePlatform() || !isInitialized) return;
+  if (!isNative() || !isInitialized) return;
   try {
     await AdMob.removeBanner();
     isBannerShowing = false;
-    setTimeout(async () => await showBanner(), 500);
+    setTimeout(() => showBanner(), 500);
   } catch (e) {
     await showBanner();
   }
 }
 
 export function isRewardedAvailable() {
-  return isNativePlatform() && isRewardedReady && rewardedCount < MAX_REWARDED_PER_SESSION;
+  return isNative() && isRewardedReady && rewardedCount < MAX_REWARDED_PER_SESSION;
 }
 
 export function getAdStats() {
   return {
-    isNative: isNativePlatform(),
+    isNative: isNative(),
     isInitialized,
+    canShowAds,
     isBannerShowing,
     isInterstitialReady,
     isRewardedReady,
     interstitialCount,
     rewardedCount,
-    maxInterstitials: MAX_INTERSTITIALS_PER_SESSION,
-    maxRewarded: MAX_REWARDED_PER_SESSION,
   };
 }
