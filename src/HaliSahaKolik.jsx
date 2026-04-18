@@ -584,16 +584,11 @@ const MatchResultModal = ({ open, onClose, teamA, teamB }) => {
   };
 
   const share = async () => {
-    await showInterstitial();
-    // Önce screenshot olarak paylaşmayı dene
+    showInterstitial();
     if (scoreRef.current) {
       const ok = await captureAndShare(scoreRef.current, "mac-sonucu.png");
-      if (ok) { setCopied(true); setTimeout(() => setCopied(false), 2200); return; }
+      if (ok) { setCopied(true); setTimeout(() => setCopied(false), 2200); }
     }
-    // Fallback: metin olarak paylaş
-    const txt = buildText();
-    if (navigator.share) { try { await navigator.share({ text: txt }); } catch {} return; }
-    navigator.clipboard?.writeText(txt); setCopied(true); setTimeout(() => setCopied(false), 2200);
   };
 
   if (!open) return null;
@@ -724,7 +719,7 @@ export default function LineupPro() {
 
     const rewarded = await showRewarded(doFill);
     if (!rewarded) {
-      await showInterstitial();
+      showInterstitial();
       doFill();
     }
   };
@@ -741,13 +736,13 @@ export default function LineupPro() {
   const toggleCaptain = (side, id) => { (side === "A" ? setTeamA : setTeamB)((t) => ({ ...t, captain: t.captain === id ? null : id })); };
 
   const handleModeSelect = async (newMode) => {
-    await showInterstitial();
+    showInterstitial();
     hideBanner();
     setMode(newMode);
   };
 
   const handleMatchEnd = async () => {
-    await showInterstitial();
+    showInterstitial();
     setSR(true);
   };
 
@@ -755,7 +750,7 @@ export default function LineupPro() {
     const pitchEl = fieldRef.current;
     if (!pitchEl) { toast_("Saha bulunamadı"); return; }
     toast_("Ekran görüntüsü alınıyor...");
-    await showInterstitial();
+    showInterstitial();
     const ok = await captureAndShare(pitchEl, "dizilim.png");
     if (ok) toast_("Dizilim paylaşıldı! 📸");
   };
@@ -915,7 +910,7 @@ export default function LineupPro() {
               <input style={{ ...S.input, flex: 1 }} placeholder="Oyuncu ara..." value={search} onChange={(e) => setSearch(e.target.value)} />
               <button onClick={() => { setEP(null); setSP(true); }} style={{ ...S.btn, width: "auto", padding: "10px 13px", borderRadius: 8, background: `linear-gradient(135deg,${team.color.primary},${team.color.secondary})` }}><I.Plus /></button>
             </div>
-            <button onClick={async () => { await showInterstitial(); setSC(true); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: "rgba(251,191,36,0.06)", borderRadius: 10, marginBottom: 10, border: "1px solid rgba(251,191,36,0.15)", cursor: "pointer", width: "100%" }}>
+            <button onClick={async () => { showInterstitial(); setSC(true); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: "rgba(251,191,36,0.06)", borderRadius: 10, marginBottom: 10, border: "1px solid rgba(251,191,36,0.15)", cursor: "pointer", width: "100%" }}>
               <div style={{ fontSize: 16 }}>👑</div>
               <div style={{ flex: 1, textAlign: "left" }}><div style={{ fontSize: 11, fontWeight: 700, color: "#fbbf24" }}>Kaptan</div><div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)" }}>{team.captain ? (() => { const cp = team.players.find((p) => p.id === team.captain); return cp ? `${cp.name} ${cp.surname}` : "Seçilmedi"; })() : "Kaptan seçilmedi"}</div></div>
               <div style={{ color: "rgba(251,191,36,0.5)", transform: "rotate(-90deg)" }}><I.Chevron /></div>

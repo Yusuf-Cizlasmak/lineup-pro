@@ -169,16 +169,9 @@ export async function showInterstitial() {
   if (interstitialCount >= MAX_INTERSTITIALS_PER_SESSION) return false;
 
   if (!isInterstitialReady) {
-    console.log('ℹ️ Interstitial hazır değil — bekleniyor...');
-    await prepareInterstitial();
-    for (let i = 0; i < 25; i++) {
-      if (isInterstitialReady) break;
-      await new Promise((r) => setTimeout(r, 200));
-    }
-    if (!isInterstitialReady) {
-      console.log('⚠️ Interstitial yüklenemedi — atlanıyor');
-      return false;
-    }
+    console.log('ℹ️ Interstitial hazır değil — atlanıyor');
+    prepareInterstitial();
+    return false;
   }
 
   try {
@@ -218,12 +211,8 @@ export async function showRewarded(onReward) {
   if (rewardedCount >= MAX_REWARDED_PER_SESSION) return false;
 
   if (!isRewardedReady) {
-    await prepareRewarded();
-    for (let i = 0; i < 25; i++) {
-      if (isRewardedReady) break;
-      await new Promise((r) => setTimeout(r, 200));
-    }
-    if (!isRewardedReady) return false;
+    prepareRewarded();
+    return false;
   }
 
   try {
