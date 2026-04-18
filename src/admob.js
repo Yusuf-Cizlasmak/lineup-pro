@@ -24,9 +24,9 @@ import { AdMob, BannerAdSize, BannerAdPosition, MaxAdContentRating } from '@capa
 const IS_TESTING = false;
 
 const AD_CONFIG = {
-  banner:       'ca-app-pub-2886543552287006/5847500924',
-  interstitial: 'ca-app-pub-2886543552287006/1389381160',
-  rewarded:     'ca-app-pub-2886543552287006/5254707624',
+  banner:       'ca-app-pub-2886543552287006/3886785053',
+  interstitial: 'ca-app-pub-2886543552287006/2573703388',
+  rewarded:     'ca-app-pub-2886543552287006/6520687257',
 };
 
 // ─── SIKLIK KONTROLÜ ───

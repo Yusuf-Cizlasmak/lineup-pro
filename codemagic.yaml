@@ -16,7 +16,7 @@ workflows:
       vars:
         DEVELOPMENT_TEAM: "Q3BH6457BX"
         BUNDLE_ID: "com.halisahakolik.app"
-        GAD_APP_ID: "ca-app-pub-2886543552287006~2792195810"
+        GAD_APP_ID: "ca-app-pub-2886543552287006~5889085689"
 
     scripts:
       # ── Bağımlılıklar ──
