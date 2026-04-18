@@ -324,7 +324,7 @@ const EmptySlot = ({ x, y, role, teamColor, onDrop, onClickPlus }) => (
 
 // ─── SHARED STYLES ───
 const S = {
-  input: { width: "100%", padding: "10px 13px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", color: "#e2e8f0", fontSize: 14, outline: "none", boxSizing: "border-box", fontFamily: "inherit" },
+  input: { width: "100%", padding: "10px 13px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", color: "#e2e8f0", fontSize: 16, outline: "none", boxSizing: "border-box", fontFamily: "inherit" },
   label: { color: "rgba(255,255,255,0.45)", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: 1, marginBottom: 5, display: "block" },
   btn: { width: "100%", padding: "11px", borderRadius: 10, border: "none", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 7, transition: "opacity 0.15s" },
   mini: { background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 6, padding: 5, cursor: "pointer", color: "rgba(255,255,255,0.5)", display: "flex", alignItems: "center", justifyContent: "center" },
@@ -334,9 +334,9 @@ const S = {
 const Modal = ({ open, onClose, title, children }) => {
   if (!open) return null;
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.75)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: "#111318", borderRadius: 16, border: "1px solid rgba(255,255,255,0.08)", width: "100%", maxWidth: 440, maxHeight: "88vh", overflow: "auto", boxShadow: "0 24px 80px rgba(0,0,0,0.6)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "15px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.75)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, paddingTop: "calc(16px + env(safe-area-inset-top, 0px))", paddingBottom: "calc(16px + env(safe-area-inset-bottom, 0px))" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#111318", borderRadius: 16, border: "1px solid rgba(255,255,255,0.08)", width: "100%", maxWidth: 440, maxHeight: "calc(100% - 32px)", overflow: "auto", boxShadow: "0 24px 80px rgba(0,0,0,0.6)", WebkitOverflowScrolling: "touch" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "15px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)", position: "sticky", top: 0, background: "#111318", zIndex: 5, borderRadius: "16px 16px 0 0" }}>
           <h3 style={{ color: "#e2e8f0", fontSize: 16, fontWeight: 700, margin: 0 }}>{title}</h3>
           <button onClick={onClose} style={{ ...S.mini, border: "none", background: "none" }}><I.X /></button>
         </div>
@@ -530,9 +530,8 @@ const MatchResultModal = ({ open, onClose, teamA, teamB }) => {
     t += `\n📱 HalıSaha-Kolik`; return t;
   };
 
-  // ★ REKLAM: Paylaşmadan önce interstitial göster
   const share = async () => {
-    await showInterstitial(); // ← REKLAM
+    await showInterstitial();
     const txt = buildText();
     if (navigator.share) { try { await navigator.share({ text: txt }); } catch {} return; }
     navigator.clipboard?.writeText(txt); setCopied(true); setTimeout(() => setCopied(false), 2200);
@@ -541,7 +540,7 @@ const MatchResultModal = ({ open, onClose, teamA, teamB }) => {
   if (!open) return null;
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 1100, background: "rgba(0,0,0,0.82)", backdropFilter: "blur(12px)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: "#0e1117", borderRadius: "22px 22px 0 0", border: "1px solid rgba(255,255,255,0.08)", width: "100%", maxWidth: 480, maxHeight: "92vh", overflow: "auto", paddingBottom: "env(safe-area-inset-bottom,20px)" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#0e1117", borderRadius: "22px 22px 0 0", border: "1px solid rgba(255,255,255,0.08)", width: "100%", maxWidth: 480, maxHeight: "92vh", overflow: "auto", paddingBottom: "calc(20px + env(safe-area-inset-bottom, 0px))" }}>
         <div style={{ display: "flex", justifyContent: "center", paddingTop: 10 }}><div style={{ width: 36, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.14)" }} /></div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 20px 10px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#e2e8f0", fontSize: 16, fontWeight: 700 }}><I.Trophy /> Maç Sonucu</div>
@@ -595,7 +594,7 @@ const MatchResultModal = ({ open, onClose, teamA, teamB }) => {
 
 // ─── TOAST ───
 const Toast = ({ message, show }) => (
-  <div style={{ position: "fixed", bottom: 76, left: "50%", transform: "translateX(-50%)", background: "#059669", color: "#fff", padding: "9px 22px", borderRadius: 10, fontSize: 13, fontWeight: 600, boxShadow: "0 8px 28px rgba(5,150,105,0.4)", opacity: show ? 1 : 0, transition: "opacity 0.25s", pointerEvents: "none", zIndex: 2000, whiteSpace: "nowrap" }}>{message}</div>
+  <div style={{ position: "fixed", bottom: "calc(76px + env(safe-area-inset-bottom, 0px))", left: "50%", transform: "translateX(-50%)", background: "#059669", color: "#fff", padding: "9px 22px", borderRadius: 10, fontSize: 13, fontWeight: 600, boxShadow: "0 8px 28px rgba(5,150,105,0.4)", opacity: show ? 1 : 0, transition: "opacity 0.25s", pointerEvents: "none", zIndex: 2000, whiteSpace: "nowrap" }}>{message}</div>
 );
 
 // ═══════════════════════════════════════════════════════════════════
@@ -623,12 +622,12 @@ export default function LineupPro() {
   const setTeam = activeTeam === "A" ? setTeamA : setTeamB;
   const tc = team.color.secondary;
 
-  // ★★★ REKLAM: Uygulama açılışında banner başlat ★★★
+  // ★ REKLAM: Uygulama açılışında reklamları başlat
   useEffect(() => {
     startAds();
   }, []);
 
-  // ★★★ KAYIT: Takım verilerini localStorage'a kaydet ★★★
+  // ★ KAYIT: Takım verilerini localStorage'a kaydet
   useEffect(() => {
     saveData(teamA, teamB);
   }, [teamA, teamB]);
@@ -647,8 +646,6 @@ export default function LineupPro() {
     toast_("Oyuncu silindi!");
   };
 
-  // ★ REKLAM: Otomatik kadro kurma — REWARDED reklam ($8-18 eCPM)
-  // Kullanıcı "Otomatik Kadro" ister → reklam izler → kadro kurulur
   const autoFill = async (side) => {
     const doFill = () => {
       const setter = side === "A" ? setTeamA : setTeamB;
@@ -666,10 +663,9 @@ export default function LineupPro() {
       toast_("Kadro otomatik kuruldu! 🤖");
     };
 
-    // Önce rewarded dene (yüksek gelir), olmazsa interstitial, o da olmazsa direkt kur
     const rewarded = await showRewarded(doFill);
     if (!rewarded) {
-      const inter = await showInterstitial();
+      await showInterstitial();
       doFill();
     }
   };
@@ -685,20 +681,17 @@ export default function LineupPro() {
 
   const toggleCaptain = (side, id) => { (side === "A" ? setTeamA : setTeamB)((t) => ({ ...t, captain: t.captain === id ? null : id })); };
 
-  // ★ REKLAM: Mod seçiminde interstitial + banner gizle
   const handleModeSelect = async (newMode) => {
     await showInterstitial();
-    hideBanner(); // Mod içinde banner kapalı
+    hideBanner();
     setMode(newMode);
   };
 
-  // ★ REKLAM: Maçı bitir — doğal mola anı
   const handleMatchEnd = async () => {
     await showInterstitial();
     setSR(true);
   };
 
-  // Dizilim paylaş — reklam yok
   const handleShareLineup = () => {
     toast_("Dizilim paylaşıldı! 📸");
   };
@@ -714,15 +707,20 @@ export default function LineupPro() {
     @keyframes pulseGlow { 0%,100% { opacity: 0.5 } 50% { opacity: 1 } }
     @keyframes pulse { 0%,100% { opacity: 0.6 } 50% { opacity: 1 } }
     * { box-sizing: border-box; margin: 0; padding: 0 }
+    html { height: 100%; overflow: hidden; }
+    body { height: 100%; overflow: hidden; position: fixed; width: 100%; }
+    #root { height: 100%; overflow: hidden; }
     ::-webkit-scrollbar { width: 3px }
     ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px }
     input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: #fff; border: 3px solid #22c55e; box-shadow: 0 3px 8px rgba(0,0,0,0.4); cursor: pointer; }
     input[type=range]::-moz-range-thumb { width: 20px; height: 20px; border-radius: 50%; background: #fff; border: 3px solid #22c55e; box-shadow: 0 3px 8px rgba(0,0,0,0.4); cursor: pointer; }
   `;
 
-  // ── MODE SELECT ──
+  // ══════════════════════════════════════════════
+  // ══ MODE SELECT SCREEN
+  // ══════════════════════════════════════════════
   if (!mode) return (
-    <div style={{ fontFamily: "'DM Sans','Segoe UI',sans-serif", background: "linear-gradient(160deg,#070a0f,#0c1117 45%,#0a1628)", color: "#e2e8f0", minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24, textAlign: "center" }}>
+    <div style={{ fontFamily: "'DM Sans','Segoe UI',sans-serif", background: "linear-gradient(160deg,#070a0f,#0c1117 45%,#0a1628)", color: "#e2e8f0", position: "fixed", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24, paddingTop: "calc(24px + env(safe-area-inset-top, 0px))", paddingBottom: "calc(24px + env(safe-area-inset-bottom, 0px))", textAlign: "center" }}>
       <style>{globalCSS}</style>
       <div style={{ position: "fixed", inset: 0, overflow: "hidden", pointerEvents: "none" }}>
         <div style={{ position: "absolute", top: "15%", left: "10%", width: 180, height: 180, borderRadius: "50%", background: "radial-gradient(circle, rgba(5,150,105,0.08) 0%, transparent 70%)", animation: "pulseGlow 4s ease-in-out infinite" }} />
@@ -753,13 +751,20 @@ export default function LineupPro() {
     </div>
   );
 
-  // ── MAIN UI ──
+  // ══════════════════════════════════════════════
+  // ══ MAIN UI
+  // ══════════════════════════════════════════════
+
+  // ★ SAFE AREA: Tab bar yüksekliği + safe area bottom
+  const TAB_BAR_HEIGHT = 56; // px
+  const BOTTOM_SAFE = "env(safe-area-inset-bottom, 0px)";
+
   return (
-    <div style={{ fontFamily: "'DM Sans','Segoe UI',sans-serif", background: "linear-gradient(160deg,#070a0f,#0c1117 45%,#0a1628)", color: "#e2e8f0", minHeight: "100vh", maxWidth: 480, margin: "0 auto", display: "flex", flexDirection: "column", position: "relative" }}>
+    <div style={{ fontFamily: "'DM Sans','Segoe UI',sans-serif", background: "linear-gradient(160deg,#070a0f,#0c1117 45%,#0a1628)", color: "#e2e8f0", position: "fixed", inset: 0, maxWidth: 480, margin: "0 auto", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <style>{globalCSS}</style>
 
-      {/* HEADER */}
-      <div style={{ padding: "10px 13px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.04)", background: "rgba(0,0,0,0.28)", backdropFilter: "blur(14px)", position: "sticky", top: 0, zIndex: 50 }}>
+      {/* ★ HEADER — safe-area-inset-top ile status bar'ın altına itildi */}
+      <div style={{ padding: "10px 13px", paddingTop: "calc(10px + env(safe-area-inset-top, 0px))", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.04)", background: "rgba(7,10,15,0.95)", backdropFilter: "blur(14px)", flexShrink: 0, zIndex: 50 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
           <button onClick={() => { setMode(null); showBanner(); }} style={{ ...S.mini, border: "none", background: "none", padding: 3 }}><I.Back /></button>
           <img src={logo} alt="HalıSaha-Kolik" style={{ width: 32, height: 32, borderRadius: 8, objectFit: "cover" }} />
@@ -780,13 +785,13 @@ export default function LineupPro() {
 
       {/* TEAM TOGGLE */}
       {isMatch && tab === "players" && (
-        <div style={{ display: "flex", padding: "5px 13px", gap: 4, borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+        <div style={{ display: "flex", padding: "5px 13px", gap: 4, borderBottom: "1px solid rgba(255,255,255,0.04)", flexShrink: 0 }}>
           {["A", "B"].map((s) => { const tm = s === "A" ? teamA : teamB; return (<button key={s} onClick={() => setAT(s)} style={{ flex: 1, padding: "6px", borderRadius: 8, border: "none", cursor: "pointer", background: activeTeam === s ? `${tm.color.secondary}22` : "rgba(255,255,255,0.03)", color: activeTeam === s ? tm.color.secondary : "rgba(255,255,255,0.32)", fontSize: 11, fontWeight: 700, borderBottom: activeTeam === s ? `2px solid ${tm.color.secondary}` : "2px solid transparent" }}><span style={{ width: 5, height: 5, borderRadius: "50%", display: "inline-block", marginRight: 4, background: tm.color.secondary, verticalAlign: "middle" }} />{tm.name} ({tm.players.length})</button>); })}
         </div>
       )}
 
-      {/* CONTENT */}
-      <div style={{ flex: 1, overflow: "auto", paddingBottom: 78 }}>
+      {/* ★ CONTENT — paddingBottom artırıldı: tab bar + safe area + boşluk */}
+      <div style={{ flex: 1, overflow: "auto", paddingBottom: `calc(${TAB_BAR_HEIGHT}px + ${BOTTOM_SAFE} + 8px)` }}>
         {tab === "field" ? (
           <div style={{ animation: "fadeIn 0.25s" }}>
             {/* Formation bar */}
@@ -861,8 +866,8 @@ export default function LineupPro() {
         )}
       </div>
 
-      {/* TAB BAR — banner reklamın üstünde, paddingBottom artırıldı */}
-      <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, background: "rgba(7,10,15,0.93)", backdropFilter: "blur(16px)", borderTop: "1px solid rgba(255,255,255,0.05)", display: "flex", zIndex: 50, paddingBottom: "env(safe-area-inset-bottom,0px)" }}>
+      {/* ★ TAB BAR — fixed bottom + safe-area-inset-bottom */}
+      <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, background: "rgba(7,10,15,0.96)", backdropFilter: "blur(16px)", borderTop: "1px solid rgba(255,255,255,0.05)", display: "flex", zIndex: 50, paddingBottom: BOTTOM_SAFE }}>
         {[{ id: "field", icon: <I.Field />, label: "Saha" }, { id: "players", icon: <I.Users />, label: "Kadro" }].map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "9px 0 7px", border: "none", cursor: "pointer", background: "transparent", color: tab === t.id ? tc : "rgba(255,255,255,0.28)", fontSize: 9.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 }}>{t.icon}{t.label}</button>
         ))}
