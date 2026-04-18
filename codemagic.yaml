@@ -117,9 +117,10 @@ workflows:
           if [ ! -d "$WORKSPACE" ]; then
             WORKSPACE=$(find ios -name "*.xcworkspace" | head -1)
           fi
-          ARCHIVE_PATH="$CM_BUILD_DIR/build/App.xcarchive"
+          ARCHIVE_PATH="build/App.xcarchive"
 
           echo "Using workspace: $WORKSPACE"
+          echo "Archive path: $ARCHIVE_PATH"
 
           xcodebuild \
             -workspace "$WORKSPACE" \
@@ -131,25 +132,25 @@ workflows:
             DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
             CODE_SIGN_STYLE="Manual" \
             CODE_SIGN_IDENTITY="Apple Distribution" \
-            archive | xcpretty || xcodebuild \
-            -workspace "$WORKSPACE" \
-            -scheme App \
-            -sdk iphoneos \
-            -configuration Release \
-            -archivePath "$ARCHIVE_PATH" \
-            -destination "generic/platform=iOS" \
-            DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
-            CODE_SIGN_STYLE="Manual" \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
             archive
+
+          # Archive'ın oluştuğunu doğrula
+          if [ ! -d "$ARCHIVE_PATH" ]; then
+            echo "❌ Archive bulunamadı: $ARCHIVE_PATH"
+            echo "Mevcut dosyalar:"
+            find . -name "*.xcarchive" -type d 2>/dev/null
+            exit 1
+          fi
+          echo "✅ Archive oluşturuldu: $ARCHIVE_PATH"
 
       # ── IPA Export ──
       - name: Export IPA
         script: |
+          ARCHIVE_PATH="build/App.xcarchive"
           printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' '<plist version="1.0">' '<dict>' '  <key>method</key>' '  <string>app-store</string>' '  <key>teamID</key>' '  <string>Q3BH6457BX</string>' '  <key>signingStyle</key>' '  <string>manual</string>' '  <key>uploadBitcode</key>' '  <false/>' '  <key>uploadSymbols</key>' '  <true/>' '  <key>provisioningProfiles</key>' '  <dict>' '    <key>com.halisahakolik.app</key>' '    <string>match AppStore com.halisahakolik.app</string>' '  </dict>' '</dict>' '</plist>' > exportOptions.plist
           xcodebuild -exportArchive \
-            -archivePath "$CM_BUILD_DIR/build/App.xcarchive" \
-            -exportPath "$CM_BUILD_DIR/build/output" \
+            -archivePath "$ARCHIVE_PATH" \
+            -exportPath "build/output" \
             -exportOptionsPlist exportOptions.plist
 
     artifacts:
