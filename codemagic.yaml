@@ -108,5 +108,5 @@ workflows:
       - build/output/**/*.ipa
       - build/**/*.xcarchive
     publishing:
-      app_store_connect:
+      app_store_connect: Man
         auth: integration
