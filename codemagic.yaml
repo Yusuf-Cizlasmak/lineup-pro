@@ -19,14 +19,9 @@ workflows:
         script: |
           npx cap add ios || true
           npx cap sync ios
-      - name: Debug - find workspace
+      - name: Set encryption flag
         script: |
-          echo "=== Full ios structure ==="
-          find ios -maxdepth 3 -type f \( -name "*.xcworkspace" -o -name "*.xcodeproj" -o -name "Podfile" \) 2>/dev/null
-          echo "=== ios/App contents ==="
-          ls -la ios/App/ 2>/dev/null || echo "ios/App not found"
-          echo "=== ios contents ==="
-          ls -la ios/ 2>/dev/null || echo "ios not found"
+          /usr/libexec/PlistBuddy -c "Add :ITSAppManagesNonExemptEncryption bool false" ios/App/App/Info.plist || true
       - name: Install CocoaPods
         script: |
           PODFILE_DIR=$(find ios -name "Podfile" -exec dirname {} \; | head -1)
@@ -36,10 +31,6 @@ workflows:
           else
             echo "No Podfile found"
           fi
-      - name: Debug - find workspace after pods
-        script: |
-          echo "=== Workspace files ==="
-          find ios -name "*.xcworkspace" 2>/dev/null
       - name: Fix signing
         script: |
           PBXPROJ=$(find ios -name "project.pbxproj" -path "*/App.xcodeproj/*" | head -1)
@@ -52,7 +43,6 @@ workflows:
         script: |
           WORKSPACE=$(find ios -name "*.xcworkspace" | head -1)
           if [ -z "$WORKSPACE" ]; then
-            echo "No workspace found, trying xcodeproj"
             XCODEPROJ=$(find ios -name "App.xcodeproj" | head -1)
             xcodebuild -project "$XCODEPROJ" \
               -scheme App \
@@ -107,3 +97,6 @@ workflows:
     artifacts:
       - build/output/**/*.ipa
       - build/**/*.xcarchive
+    publishing:
+      app_store_connect:
+        auth: integration
