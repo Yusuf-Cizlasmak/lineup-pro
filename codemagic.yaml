@@ -19,6 +19,14 @@ workflows:
         script: |
           npx cap add ios || true
           npx cap sync ios
+      - name: Set app icon
+        script: |
+          if [ -f "AppIcon.png" ]; then
+            cp AppIcon.png ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-1024@1x.png
+            echo "App icon set"
+          else
+            echo "AppIcon.png not found in root, skipping"
+          fi
       - name: Set encryption flag
         script: |
           /usr/libexec/PlistBuddy -c "Add :ITSAppManagesNonExemptEncryption bool false" ios/App/App/Info.plist || true
