@@ -3,8 +3,11 @@ workflows:
     name: iOS Build
     max_build_duration: 60
     instance_type: mac_mini_m2
+
+    # App Store Connect entegrasyonu
     integrations:
       app_store_connect: Man
+
     environment:
       ios_signing:
         distribution_type: app_store
@@ -12,103 +15,149 @@ workflows:
       node: 22
       vars:
         DEVELOPMENT_TEAM: "Q3BH6457BX"
+        BUNDLE_ID: "com.halisahakolik.app"
+        GAD_APP_ID: "ca-app-pub-2886543552287006~2792195810"
+
     scripts:
+      # ── Bağımlılıklar ──
       - name: Install dependencies
         script: npm install
+
       - name: Build web
         script: CI=false npm run build
+
+      # ── Capacitor ──
       - name: Add iOS platform
         script: |
           npx cap add ios || true
           npx cap sync ios
+
+      # ── App Icon ──
       - name: Set app icon
         script: |
-          if [ -f "AppIcon.png" ]; then
-            ICON_DIR="ios/App/App/Assets.xcassets/AppIcon.appiconset"
-            sips -z 1024 1024 AppIcon.png --out "$ICON_DIR/AppIcon-1024@1x.png"
-            cat > "$ICON_DIR/Contents.json" <<'EOF'
-{
-  "images": [
-    {"filename": "AppIcon-1024@1x.png", "idiom": "universal", "platform": "ios", "size": "1024x1024"}
-  ],
-  "info": {"author": "xcode", "version": 1}
-}
-EOF
-            echo "App icon set"
-          else
+          if [ ! -f "AppIcon.png" ]; then
             echo "AppIcon.png not found, using default"
+            exit 0
           fi
-      - name: Fix Info.plist
+
+          ICON_DIR="ios/App/App/Assets.xcassets/AppIcon.appiconset"
+          sips -z 1024 1024 AppIcon.png --out "$ICON_DIR/AppIcon-1024@1x.png"
+
+          cat > "$ICON_DIR/Contents.json" <<'EOF'
+          {
+            "images": [
+              {
+                "filename": "AppIcon-1024@1x.png",
+                "idiom": "universal",
+                "platform": "ios",
+                "size": "1024x1024"
+              }
+            ],
+            "info": {
+              "author": "xcode",
+              "version": 1
+            }
+          }
+          EOF
+
+          echo "App icon set"
+
+      # ── Info.plist Ayarları ──
+      - name: Configure Info.plist
         script: |
           PLIST="ios/App/App/Info.plist"
-          /usr/libexec/PlistBuddy -c "Add :GADApplicationIdentifier string ca-app-pub-2886543552287006~2792195810" "$PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Set :GADApplicationIdentifier ca-app-pub-2886543552287006~2792195810" "$PLIST"
+
+          # AdMob App ID
+          /usr/libexec/PlistBuddy -c "Add :GADApplicationIdentifier string $GAD_APP_ID" "$PLIST" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Set :GADApplicationIdentifier $GAD_APP_ID" "$PLIST"
+
+          # Encryption declaration
           /usr/libexec/PlistBuddy -c "Add :ITSAppManagesNonExemptEncryption bool false" "$PLIST" 2>/dev/null || true
+
+          # ATT izin metni
           /usr/libexec/PlistBuddy -c "Add :NSUserTrackingUsageDescription string Size daha iyi reklam deneyimi sunmak icin izninizi istiyoruz." "$PLIST" 2>/dev/null || true
+
+      # ── CocoaPods ──
       - name: Install CocoaPods
         script: |
           PODFILE_DIR=$(find ios -name "Podfile" -exec dirname {} \; | head -1)
           if [ -n "$PODFILE_DIR" ]; then
             cd "$PODFILE_DIR" && pod install
           else
-            echo "No Podfile found"
+            echo "No Podfile found, skipping"
           fi
-      - name: Fix signing
+
+      # ── Signing Ayarları ──
+      - name: Fix signing settings
         script: |
           PBXPROJ=$(find ios -name "project.pbxproj" -path "*/App.xcodeproj/*" | head -1)
-          if [ -n "$PBXPROJ" ]; then
-            sed -i '' 's/CODE_SIGN_STYLE = Automatic/CODE_SIGN_STYLE = Manual/g' "$PBXPROJ"
-            sed -i '' 's/DEVELOPMENT_TEAM = ""/DEVELOPMENT_TEAM = "Q3BH6457BX"/g' "$PBXPROJ"
-            sed -i '' 's/DEVELOPMENT_TEAM = "";/DEVELOPMENT_TEAM = "Q3BH6457BX";/g' "$PBXPROJ"
+          if [ -z "$PBXPROJ" ]; then
+            echo "project.pbxproj not found"
+            exit 1
           fi
-      - name: Build iOS Archive
+
+          sed -i '' "s/CODE_SIGN_STYLE = Automatic/CODE_SIGN_STYLE = Manual/g" "$PBXPROJ"
+          sed -i '' "s/DEVELOPMENT_TEAM = \"\"/DEVELOPMENT_TEAM = \"$DEVELOPMENT_TEAM\"/g" "$PBXPROJ"
+          sed -i '' "s/DEVELOPMENT_TEAM = \"\";/DEVELOPMENT_TEAM = \"$DEVELOPMENT_TEAM\";/g" "$PBXPROJ"
+
+      # ── Build & Archive ──
+      - name: Build iOS archive
         script: |
           WORKSPACE=$(find ios -name "*.xcworkspace" | head -1)
-          if [ -z "$WORKSPACE" ]; then
-            XCODEPROJ=$(find ios -name "App.xcodeproj" | head -1)
-            xcodebuild -project "$XCODEPROJ" \
-              -scheme App -sdk iphoneos -configuration Release \
-              -archivePath $CM_BUILD_DIR/build/App.xcarchive \
-              -destination "generic/platform=iOS" \
-              DEVELOPMENT_TEAM="Q3BH6457BX" CODE_SIGN_STYLE="Manual" \
-              CODE_SIGN_IDENTITY="Apple Distribution" \
-              PROVISIONING_PROFILE_SPECIFIER="com.halisahakolik.app" archive
+          ARCHIVE_PATH="$CM_BUILD_DIR/build/App.xcarchive"
+
+          BUILD_FLAGS=(
+            -scheme App
+            -sdk iphoneos
+            -configuration Release
+            -archivePath "$ARCHIVE_PATH"
+            -destination "generic/platform=iOS"
+            DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM"
+            CODE_SIGN_STYLE="Manual"
+            CODE_SIGN_IDENTITY="Apple Distribution"
+            PROVISIONING_PROFILE_SPECIFIER="$BUNDLE_ID"
+          )
+
+          if [ -n "$WORKSPACE" ]; then
+            xcodebuild -workspace "$WORKSPACE" "${BUILD_FLAGS[@]}" archive
           else
-            xcodebuild -workspace "$WORKSPACE" \
-              -scheme App -sdk iphoneos -configuration Release \
-              -archivePath $CM_BUILD_DIR/build/App.xcarchive \
-              -destination "generic/platform=iOS" \
-              DEVELOPMENT_TEAM="Q3BH6457BX" CODE_SIGN_STYLE="Manual" \
-              CODE_SIGN_IDENTITY="Apple Distribution" \
-              PROVISIONING_PROFILE_SPECIFIER="com.halisahakolik.app" archive
+            XCODEPROJ=$(find ios -name "App.xcodeproj" | head -1)
+            xcodebuild -project "$XCODEPROJ" "${BUILD_FLAGS[@]}" archive
           fi
+
+      # ── IPA Export ──
       - name: Export IPA
         script: |
-          cat > exportOptions.plist <<'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>method</key>
-  <string>app-store</string>
-  <key>teamID</key>
-  <string>Q3BH6457BX</string>
-  <key>signingStyle</key>
-  <string>manual</string>
-  <key>provisioningProfiles</key>
-  <dict>
-    <key>com.halisahakolik.app</key>
-    <string>com.halisahakolik.app</string>
-  </dict>
-</dict>
-</plist>
-EOF
+          cat > exportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+            "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store</string>
+            <key>teamID</key>
+            <string>$DEVELOPMENT_TEAM</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>$BUNDLE_ID</key>
+              <string>$BUNDLE_ID</string>
+            </dict>
+          </dict>
+          </plist>
+          EOF
+
           xcodebuild -exportArchive \
-            -archivePath $CM_BUILD_DIR/build/App.xcarchive \
-            -exportPath $CM_BUILD_DIR/build/output \
+            -archivePath "$CM_BUILD_DIR/build/App.xcarchive" \
+            -exportPath "$CM_BUILD_DIR/build/output" \
             -exportOptionsPlist exportOptions.plist
+
     artifacts:
       - build/output/**/*.ipa
       - build/**/*.xcarchive
+
     publishing:
       app_store_connect:
         auth: integration
