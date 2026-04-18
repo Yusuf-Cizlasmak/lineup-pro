@@ -5,7 +5,7 @@ import { Capacitor } from '@capacitor/core';
 // ═══ ADMOB REKLAM YÖNETİCİSİ — HalıSaha-Kolik
 // ═══════════════════════════════════════════════════════════════
 
-const IS_TESTING = false;
+const IS_TESTING = true;
 
 const AD_CONFIG = {
   banner:       'ca-app-pub-2886543552287006/3886785053',
