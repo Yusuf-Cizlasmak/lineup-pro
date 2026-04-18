@@ -21,7 +21,10 @@ workflows:
     scripts:
       # ── Bağımlılıklar ──
       - name: Install dependencies
-        script: npm install
+        script: |
+          npm install
+          # Capacitor iOS paketi yoksa yükle
+          npm install @capacitor/ios @capacitor/core @capacitor/cli @capacitor-community/admob --save
 
       - name: Build web
         script: CI=false npm run build
@@ -43,22 +46,22 @@ workflows:
           ICON_DIR="ios/App/App/Assets.xcassets/AppIcon.appiconset"
           sips -z 1024 1024 AppIcon.png --out "$ICON_DIR/AppIcon-1024@1x.png"
 
-          cat > "$ICON_DIR/Contents.json" <<'EOF'
-          {
-            "images": [
-              {
-                "filename": "AppIcon-1024@1x.png",
-                "idiom": "universal",
-                "platform": "ios",
-                "size": "1024x1024"
-              }
-            ],
-            "info": {
-              "author": "xcode",
-              "version": 1
-            }
-          }
-          EOF
+          cat > "$ICON_DIR/Contents.json" << 'ICONEOF'
+{
+  "images": [
+    {
+      "filename": "AppIcon-1024@1x.png",
+      "idiom": "universal",
+      "platform": "ios",
+      "size": "1024x1024"
+    }
+  ],
+  "info": {
+    "author": "xcode",
+    "version": 1
+  }
+}
+ICONEOF
 
           echo "App icon set"
 
@@ -71,28 +74,40 @@ workflows:
           /usr/libexec/PlistBuddy -c "Add :GADApplicationIdentifier string $GAD_APP_ID" "$PLIST" 2>/dev/null \
             || /usr/libexec/PlistBuddy -c "Set :GADApplicationIdentifier $GAD_APP_ID" "$PLIST"
 
+          # SKAdNetwork ID'leri (AdMob için gerekli)
+          /usr/libexec/PlistBuddy -c "Add :SKAdNetworkItems array" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :SKAdNetworkItems:0 dict" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :SKAdNetworkItems:0:SKAdNetworkIdentifier string cstr6suwn9.skadnetwork" "$PLIST" 2>/dev/null || true
+
           # Encryption declaration
           /usr/libexec/PlistBuddy -c "Add :ITSAppManagesNonExemptEncryption bool false" "$PLIST" 2>/dev/null || true
 
-          # ATT izin metni
+          # ATT izin metni (iOS 14+ reklam takibi)
           /usr/libexec/PlistBuddy -c "Add :NSUserTrackingUsageDescription string Size daha iyi reklam deneyimi sunmak icin izninizi istiyoruz." "$PLIST" 2>/dev/null || true
+
+          echo "Info.plist configured"
+          # Doğrulama
+          echo "GADApplicationIdentifier = $(/usr/libexec/PlistBuddy -c "Print :GADApplicationIdentifier" "$PLIST")"
 
       # ── CocoaPods ──
       - name: Install CocoaPods
         script: |
-          PODFILE_DIR=$(find ios -name "Podfile" -exec dirname {} \; | head -1)
-          if [ -n "$PODFILE_DIR" ]; then
-            cd "$PODFILE_DIR" && pod install
-          else
-            echo "No Podfile found, skipping"
-          fi
+          cd ios/App
+          pod install --repo-update
+          echo "CocoaPods installed"
 
       # ── Signing Ayarları ──
       - name: Fix signing settings
         script: |
-          PBXPROJ=$(find ios -name "project.pbxproj" -path "*/App.xcodeproj/*" | head -1)
+          PBXPROJ="ios/App/App.xcodeproj/project.pbxproj"
+          if [ ! -f "$PBXPROJ" ]; then
+            echo "project.pbxproj not found at $PBXPROJ"
+            PBXPROJ=$(find ios -name "project.pbxproj" -path "*/App.xcodeproj/*" | head -1)
+            echo "Found at: $PBXPROJ"
+          fi
+
           if [ -z "$PBXPROJ" ]; then
-            echo "project.pbxproj not found"
+            echo "ERROR: project.pbxproj not found"
             exit 1
           fi
 
@@ -100,61 +115,79 @@ workflows:
           sed -i '' "s/DEVELOPMENT_TEAM = \"\"/DEVELOPMENT_TEAM = \"$DEVELOPMENT_TEAM\"/g" "$PBXPROJ"
           sed -i '' "s/DEVELOPMENT_TEAM = \"\";/DEVELOPMENT_TEAM = \"$DEVELOPMENT_TEAM\";/g" "$PBXPROJ"
 
+          echo "Signing settings fixed"
+
       # ── Build Numarası ──
       - name: Increment build number
         script: |
           PLIST="ios/App/App/Info.plist"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$PLIST"
-          echo "Build number set to $BUILD_NUMBER"
+          CURRENT=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST" 2>/dev/null || echo "0")
+          NEW_BUILD=$((CURRENT + 1))
+          # Codemagic BUILD_NUMBER varsa onu kullan, yoksa artır
+          BUILD_NUM=${BUILD_NUMBER:-$NEW_BUILD}
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUM" "$PLIST"
+          echo "Build number set to $BUILD_NUM"
 
       # ── Build & Archive ──
       - name: Build iOS archive
         script: |
-          WORKSPACE=$(find ios -name "*.xcworkspace" | head -1)
+          WORKSPACE="ios/App/App.xcworkspace"
+          if [ ! -d "$WORKSPACE" ]; then
+            WORKSPACE=$(find ios -name "*.xcworkspace" | head -1)
+          fi
           ARCHIVE_PATH="$CM_BUILD_DIR/build/App.xcarchive"
 
-          BUILD_FLAGS=(
-            -scheme App
-            -sdk iphoneos
-            -configuration Release
-            -archivePath "$ARCHIVE_PATH"
-            -destination "generic/platform=iOS"
-            DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM"
-            CODE_SIGN_STYLE="Manual"
-            CODE_SIGN_IDENTITY="Apple Distribution"
-            PROVISIONING_PROFILE_SPECIFIER="$BUNDLE_ID"
-          )
+          echo "Using workspace: $WORKSPACE"
 
-          if [ -n "$WORKSPACE" ]; then
-            xcodebuild -workspace "$WORKSPACE" "${BUILD_FLAGS[@]}" archive
-          else
-            XCODEPROJ=$(find ios -name "App.xcodeproj" | head -1)
-            xcodebuild -project "$XCODEPROJ" "${BUILD_FLAGS[@]}" archive
-          fi
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme App \
+            -sdk iphoneos \
+            -configuration Release \
+            -archivePath "$ARCHIVE_PATH" \
+            -destination "generic/platform=iOS" \
+            DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
+            CODE_SIGN_STYLE="Manual" \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            archive | xcpretty || xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme App \
+            -sdk iphoneos \
+            -configuration Release \
+            -archivePath "$ARCHIVE_PATH" \
+            -destination "generic/platform=iOS" \
+            DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
+            CODE_SIGN_STYLE="Manual" \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            archive
 
       # ── IPA Export ──
       - name: Export IPA
         script: |
-          cat > exportOptions.plist <<EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-            "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>method</key>
-            <string>app-store</string>
-            <key>teamID</key>
-            <string>$DEVELOPMENT_TEAM</string>
-            <key>signingStyle</key>
-            <string>manual</string>
-            <key>provisioningProfiles</key>
-            <dict>
-              <key>$BUNDLE_ID</key>
-              <string>$BUNDLE_ID</string>
-            </dict>
-          </dict>
-          </plist>
-          EOF
+          cat > exportOptions.plist << 'EXPORTEOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>method</key>
+  <string>app-store</string>
+  <key>teamID</key>
+  <string>Q3BH6457BX</string>
+  <key>signingStyle</key>
+  <string>manual</string>
+  <key>uploadBitcode</key>
+  <false/>
+  <key>uploadSymbols</key>
+  <true/>
+  <key>provisioningProfiles</key>
+  <dict>
+    <key>com.halisahakolik.app</key>
+    <string>match AppStore com.halisahakolik.app</string>
+  </dict>
+</dict>
+</plist>
+EXPORTEOF
 
           xcodebuild -exportArchive \
             -archivePath "$CM_BUILD_DIR/build/App.xcarchive" \
@@ -164,6 +197,7 @@ workflows:
     artifacts:
       - build/output/**/*.ipa
       - build/**/*.xcarchive
+      - ios/App/Pods/Manifest.lock
 
     publishing:
       app_store_connect:
