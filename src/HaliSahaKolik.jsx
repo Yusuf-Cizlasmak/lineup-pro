@@ -2,6 +2,58 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import logo from "./ssssss.png";
 import { startAds, showInterstitial, showRewarded, showBanner, hideBanner } from "./admob";
 
+// ─── SCREENSHOT & SHARE UTILITY ───
+const captureAndShare = async (element, filename = "halisaha-kolik.png") => {
+  if (!element) return;
+  try {
+    // html2canvas'ı dinamik yükle (CDN)
+    if (!window.html2canvas) {
+      await new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
+        s.onload = resolve;
+        s.onerror = reject;
+        document.head.appendChild(s);
+      });
+    }
+    const canvas = await window.html2canvas(element, {
+      backgroundColor: "#0a1628",
+      scale: 2,
+      useCORS: true,
+      logging: false,
+    });
+    const blob = await new Promise((r) => canvas.toBlob(r, "image/png"));
+    const file = new File([blob], filename, { type: "image/png" });
+
+    // Native share (iOS/Android + modern browsers)
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({
+        files: [file],
+        title: "HalıSaha-Kolik",
+        text: "⚽ HalıSaha-Kolik",
+      });
+      return true;
+    }
+    // Fallback: sadece metin paylaş
+    if (navigator.share) {
+      const dataUrl = canvas.toDataURL("image/png");
+      // Yeni sekmede aç
+      const w = window.open();
+      if (w) { w.document.write(`<img src="${dataUrl}" style="max-width:100%">`); }
+      return true;
+    }
+    // Son fallback: indir
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+    return true;
+  } catch (e) {
+    console.error("Share error:", e);
+    return false;
+  }
+};
+
 // ─── FORMATIONS (7-a-side: kaleci + 6 oyuncu)
 const FORMATIONS = {
   "4-2": {
@@ -517,6 +569,7 @@ const MatchResultModal = ({ open, onClose, teamA, teamB }) => {
   const [gName, setGName] = useState("");
   const [gMin, setGMin] = useState("");
   const [copied, setCopied] = useState(false);
+  const scoreRef = useRef(null);
   const acA = teamA.color.secondary;
   const acB = teamB.color.secondary;
   const addGoal = () => { if (!gName.trim()) return; setGoals((g) => [...g, { side: gSide, scorer: gName.trim(), minute: gMin.trim() }]); setGName(""); setGMin(""); };
@@ -532,6 +585,12 @@ const MatchResultModal = ({ open, onClose, teamA, teamB }) => {
 
   const share = async () => {
     await showInterstitial();
+    // Önce screenshot olarak paylaşmayı dene
+    if (scoreRef.current) {
+      const ok = await captureAndShare(scoreRef.current, "mac-sonucu.png");
+      if (ok) { setCopied(true); setTimeout(() => setCopied(false), 2200); return; }
+    }
+    // Fallback: metin olarak paylaş
     const txt = buildText();
     if (navigator.share) { try { await navigator.share({ text: txt }); } catch {} return; }
     navigator.clipboard?.writeText(txt); setCopied(true); setTimeout(() => setCopied(false), 2200);
@@ -546,7 +605,7 @@ const MatchResultModal = ({ open, onClose, teamA, teamB }) => {
           <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#e2e8f0", fontSize: 16, fontWeight: 700 }}><I.Trophy /> Maç Sonucu</div>
           <button onClick={onClose} style={{ ...S.mini, border: "none", background: "none" }}><I.X /></button>
         </div>
-        <div style={{ padding: "0 18px 20px", display: "flex", flexDirection: "column", gap: 18 }}>
+        <div ref={scoreRef} style={{ padding: "0 18px 20px", display: "flex", flexDirection: "column", gap: 18, background: "#0e1117" }}>
           {/* Score board */}
           <div style={{ position: "relative", borderRadius: 18, overflow: "hidden", border: "1px solid rgba(255,255,255,0.07)", padding: "20px 12px", background: "rgba(20,22,30,0.98)" }}>
             <div style={{ position: "absolute", inset: 0, background: `linear-gradient(90deg,${acA}18,transparent 42%,transparent 58%,${acB}18)`, pointerEvents: "none" }} />
@@ -692,8 +751,13 @@ export default function LineupPro() {
     setSR(true);
   };
 
-  const handleShareLineup = () => {
-    toast_("Dizilim paylaşıldı! 📸");
+  const handleShareLineup = async () => {
+    const pitchEl = fieldRef.current;
+    if (!pitchEl) { toast_("Saha bulunamadı"); return; }
+    toast_("Ekran görüntüsü alınıyor...");
+    await showInterstitial();
+    const ok = await captureAndShare(pitchEl, "dizilim.png");
+    if (ok) toast_("Dizilim paylaşıldı! 📸");
   };
 
   const onFieldIds = new Set(team.fieldPlayers.filter(Boolean));
