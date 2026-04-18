@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import logo from "./ssssss.png";
-import { startAds, showInterstitial, showRewarded, showBanner, hideBanner, removeBanner } from "./admob";
+import { startAds, showInterstitial, showRewarded, showBanner, hideBanner } from "./admob";
 
 // ─── FORMATIONS (7-a-side: kaleci + 6 oyuncu)
 const FORMATIONS = {
@@ -334,7 +334,7 @@ const S = {
 const Modal = ({ open, onClose, title, children }) => {
   if (!open) return null;
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.75)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, paddingTop: "calc(16px + env(safe-area-inset-top, 44px))", paddingBottom: "calc(16px + env(safe-area-inset-bottom, 34px))" }}>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.75)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, paddingTop: "calc(16px + env(safe-area-inset-top, 0px))", paddingBottom: "calc(16px + env(safe-area-inset-bottom, 0px))" }}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: "#111318", borderRadius: 16, border: "1px solid rgba(255,255,255,0.08)", width: "100%", maxWidth: 440, maxHeight: "calc(100% - 32px)", overflow: "auto", boxShadow: "0 24px 80px rgba(0,0,0,0.6)", WebkitOverflowScrolling: "touch" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "15px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)", position: "sticky", top: 0, background: "#111318", zIndex: 5, borderRadius: "16px 16px 0 0" }}>
           <h3 style={{ color: "#e2e8f0", fontSize: 16, fontWeight: 700, margin: 0 }}>{title}</h3>
@@ -540,7 +540,7 @@ const MatchResultModal = ({ open, onClose, teamA, teamB }) => {
   if (!open) return null;
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 1100, background: "rgba(0,0,0,0.82)", backdropFilter: "blur(12px)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: "#0e1117", borderRadius: "22px 22px 0 0", border: "1px solid rgba(255,255,255,0.08)", width: "100%", maxWidth: 480, maxHeight: "92vh", overflow: "auto", paddingBottom: "calc(20px + env(safe-area-inset-bottom, 34px))" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#0e1117", borderRadius: "22px 22px 0 0", border: "1px solid rgba(255,255,255,0.08)", width: "100%", maxWidth: 480, maxHeight: "92vh", overflow: "auto", paddingBottom: "calc(20px + env(safe-area-inset-bottom, 0px))" }}>
         <div style={{ display: "flex", justifyContent: "center", paddingTop: 10 }}><div style={{ width: 36, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.14)" }} /></div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 20px 10px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#e2e8f0", fontSize: 16, fontWeight: 700 }}><I.Trophy /> Maç Sonucu</div>
@@ -594,7 +594,7 @@ const MatchResultModal = ({ open, onClose, teamA, teamB }) => {
 
 // ─── TOAST ───
 const Toast = ({ message, show }) => (
-  <div style={{ position: "fixed", bottom: "calc(80px + env(safe-area-inset-bottom, 34px))", left: "50%", transform: "translateX(-50%)", background: "#059669", color: "#fff", padding: "9px 22px", borderRadius: 10, fontSize: 13, fontWeight: 600, boxShadow: "0 8px 28px rgba(5,150,105,0.4)", opacity: show ? 1 : 0, transition: "opacity 0.25s", pointerEvents: "none", zIndex: 2000, whiteSpace: "nowrap" }}>{message}</div>
+  <div style={{ position: "fixed", bottom: "calc(76px + env(safe-area-inset-bottom, 0px))", left: "50%", transform: "translateX(-50%)", background: "#059669", color: "#fff", padding: "9px 22px", borderRadius: 10, fontSize: 13, fontWeight: 600, boxShadow: "0 8px 28px rgba(5,150,105,0.4)", opacity: show ? 1 : 0, transition: "opacity 0.25s", pointerEvents: "none", zIndex: 2000, whiteSpace: "nowrap" }}>{message}</div>
 );
 
 // ═══════════════════════════════════════════════════════════════════
@@ -683,10 +683,8 @@ export default function LineupPro() {
 
   const handleModeSelect = async (newMode) => {
     await showInterstitial();
-    removeBanner();    // Mod seçim ekranındaki banner'ı kaldır
+    hideBanner();
     setMode(newMode);
-    // Oyun içi sayfada banner'ı tekrar göster (kısa gecikme ile)
-    setTimeout(() => showBanner(), 500);
   };
 
   const handleMatchEnd = async () => {
@@ -694,14 +692,7 @@ export default function LineupPro() {
     setSR(true);
   };
 
-  const handleBack = async () => {
-    await showInterstitial();
-    setMode(null);
-    setTimeout(() => showBanner(), 500);
-  };
-
-  const handleShareLineup = async () => {
-    await showInterstitial();
+  const handleShareLineup = () => {
     toast_("Dizilim paylaşıldı! 📸");
   };
 
@@ -716,12 +707,9 @@ export default function LineupPro() {
     @keyframes pulseGlow { 0%,100% { opacity: 0.5 } 50% { opacity: 1 } }
     @keyframes pulse { 0%,100% { opacity: 0.6 } 50% { opacity: 1 } }
     * { box-sizing: border-box; margin: 0; padding: 0 }
-    html { height: 100%; overflow: hidden; -webkit-text-size-adjust: 100%; }
-    body { height: 100%; overflow: hidden; position: fixed; width: 100%; background-color: #070a0f; }
+    html { height: 100%; overflow: hidden; }
+    body { height: 100%; overflow: hidden; position: fixed; width: 100%; }
     #root { height: 100%; overflow: hidden; }
-    @supports (padding-top: env(safe-area-inset-top)) {
-      html { --sat: env(safe-area-inset-top, 0px); --sab: env(safe-area-inset-bottom, 0px); }
-    }
     ::-webkit-scrollbar { width: 3px }
     ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px }
     input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: #fff; border: 3px solid #22c55e; box-shadow: 0 3px 8px rgba(0,0,0,0.4); cursor: pointer; }
@@ -732,7 +720,7 @@ export default function LineupPro() {
   // ══ MODE SELECT SCREEN
   // ══════════════════════════════════════════════
   if (!mode) return (
-    <div style={{ fontFamily: "'DM Sans','Segoe UI',sans-serif", background: "linear-gradient(160deg,#070a0f,#0c1117 45%,#0a1628)", color: "#e2e8f0", position: "fixed", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24, paddingTop: "calc(24px + env(safe-area-inset-top, 44px))", paddingBottom: "calc(24px + env(safe-area-inset-bottom, 34px))", textAlign: "center" }}>
+    <div style={{ fontFamily: "'DM Sans','Segoe UI',sans-serif", background: "linear-gradient(160deg,#070a0f,#0c1117 45%,#0a1628)", color: "#e2e8f0", position: "fixed", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24, paddingTop: "calc(24px + env(safe-area-inset-top, 0px))", paddingBottom: "calc(24px + env(safe-area-inset-bottom, 0px))", textAlign: "center" }}>
       <style>{globalCSS}</style>
       <div style={{ position: "fixed", inset: 0, overflow: "hidden", pointerEvents: "none" }}>
         <div style={{ position: "absolute", top: "15%", left: "10%", width: 180, height: 180, borderRadius: "50%", background: "radial-gradient(circle, rgba(5,150,105,0.08) 0%, transparent 70%)", animation: "pulseGlow 4s ease-in-out infinite" }} />
@@ -769,15 +757,16 @@ export default function LineupPro() {
 
   // ★ SAFE AREA: Tab bar yüksekliği + safe area bottom
   const TAB_BAR_HEIGHT = 56; // px
+  const BOTTOM_SAFE = "env(safe-area-inset-bottom, 0px)";
 
   return (
     <div style={{ fontFamily: "'DM Sans','Segoe UI',sans-serif", background: "linear-gradient(160deg,#070a0f,#0c1117 45%,#0a1628)", color: "#e2e8f0", position: "fixed", inset: 0, maxWidth: 480, margin: "0 auto", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <style>{globalCSS}</style>
 
       {/* ★ HEADER — safe-area-inset-top ile status bar'ın altına itildi */}
-      <div style={{ padding: "12px 13px", paddingTop: "calc(14px + env(safe-area-inset-top, 44px))", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.04)", background: "rgba(7,10,15,0.98)", backdropFilter: "blur(14px)", flexShrink: 0, zIndex: 50 }}>
+      <div style={{ padding: "10px 13px", paddingTop: "calc(10px + env(safe-area-inset-top, 0px))", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.04)", background: "rgba(7,10,15,0.95)", backdropFilter: "blur(14px)", flexShrink: 0, zIndex: 50 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-          <button onClick={handleBack} style={{ ...S.mini, border: "none", background: "none", padding: 6, minWidth: 36, minHeight: 36, display: "flex", alignItems: "center", justifyContent: "center" }}><I.Back /></button>
+          <button onClick={() => { setMode(null); showBanner(); }} style={{ ...S.mini, border: "none", background: "none", padding: 3 }}><I.Back /></button>
           <img src={logo} alt="HalıSaha-Kolik" style={{ width: 32, height: 32, borderRadius: 8, objectFit: "cover" }} />
           <div>
             <div style={{ fontSize: 13, fontWeight: 700 }}>{isMatch ? "Halı Saha" : "Takımım"}</div>
@@ -802,7 +791,7 @@ export default function LineupPro() {
       )}
 
       {/* ★ CONTENT — paddingBottom artırıldı: tab bar + safe area + boşluk */}
-      <div style={{ flex: 1, overflow: "auto", paddingBottom: `calc(${TAB_BAR_HEIGHT}px + env(safe-area-inset-bottom, 34px) + 12px)` }}>
+      <div style={{ flex: 1, overflow: "auto", paddingBottom: `calc(${TAB_BAR_HEIGHT}px + ${BOTTOM_SAFE} + 8px)` }}>
         {tab === "field" ? (
           <div style={{ animation: "fadeIn 0.25s" }}>
             {/* Formation bar */}
@@ -878,9 +867,9 @@ export default function LineupPro() {
       </div>
 
       {/* ★ TAB BAR — fixed bottom + safe-area-inset-bottom */}
-      <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, background: "rgba(7,10,15,0.98)", backdropFilter: "blur(16px)", borderTop: "1px solid rgba(255,255,255,0.05)", display: "flex", zIndex: 50, paddingBottom: "env(safe-area-inset-bottom, 34px)" }}>
+      <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, background: "rgba(7,10,15,0.96)", backdropFilter: "blur(16px)", borderTop: "1px solid rgba(255,255,255,0.05)", display: "flex", zIndex: 50, paddingBottom: BOTTOM_SAFE }}>
         {[{ id: "field", icon: <I.Field />, label: "Saha" }, { id: "players", icon: <I.Users />, label: "Kadro" }].map((t) => (
-          <button key={t.id} onClick={async () => { if (tab !== t.id) { await showInterstitial(); setTab(t.id); } }} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "9px 0 7px", border: "none", cursor: "pointer", background: "transparent", color: tab === t.id ? tc : "rgba(255,255,255,0.28)", fontSize: 9.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 }}>{t.icon}{t.label}</button>
+          <button key={t.id} onClick={() => setTab(t.id)} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "9px 0 7px", border: "none", cursor: "pointer", background: "transparent", color: tab === t.id ? tc : "rgba(255,255,255,0.28)", fontSize: 9.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 }}>{t.icon}{t.label}</button>
         ))}
       </div>
 

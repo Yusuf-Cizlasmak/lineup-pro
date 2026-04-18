@@ -4,6 +4,13 @@ import { Capacitor } from '@capacitor/core';
 // ═══════════════════════════════════════════════════════════════
 // ═══ ADMOB REKLAM YÖNETİCİSİ — HalıSaha-Kolik
 // ═══════════════════════════════════════════════════════════════
+//
+// iOS 14+ GEREKSİNİMLERİ:
+//   1. ATT (App Tracking Transparency) izni istenmeli
+//   2. UMP (User Messaging Platform) consent alınmalı
+//   3. Bunlar olmadan AdMob reklam SERVİS ETMEZ
+//
+// ═══════════════════════════════════════════════════════════════
 
 const IS_TESTING = true;
 
@@ -14,14 +21,14 @@ const AD_CONFIG = {
 };
 
 // ─── SIKLIK KONTROLÜ ───
-const INTERSTITIAL_COOLDOWN_MS = 30000;  // 30 sn (eskiden 120sn — çok uzundu)
-const REWARDED_COOLDOWN_MS = 20000;      // 20 sn
+const INTERSTITIAL_COOLDOWN_MS = 120000;
+const REWARDED_COOLDOWN_MS = 60000;
 let lastInterstitialTime = 0;
 let lastRewardedTime = 0;
 let interstitialCount = 0;
 let rewardedCount = 0;
-const MAX_INTERSTITIALS_PER_SESSION = 15;
-const MAX_REWARDED_PER_SESSION = 20;
+const MAX_INTERSTITIALS_PER_SESSION = 6;
+const MAX_REWARDED_PER_SESSION = 10;
 
 // ─── DURUM ───
 let isInitialized = false;
@@ -30,21 +37,21 @@ let isInterstitialReady = false;
 let isRewardedReady = false;
 let canShowAds = false;
 
-// ─── Promise-based prepare bekleyiciler ───
-let interstitialLoadPromise = null;
-let rewardedLoadPromise = null;
-
+// ─── PLATFORM KONTROLÜ ───
 const isNative = () => Capacitor.isNativePlatform();
 
-// ═══ BAŞLATMA ═══
+// ═══════════════════════════════════════════════════════════════
+// ═══ ANA BAŞLATMA — ATT + UMP + AdMob initialize
+// ═══════════════════════════════════════════════════════════════
 export async function initializeAdMob() {
   if (!isNative()) {
-    console.log('ℹ️ AdMob: Web — atlanıyor');
+    console.log('ℹ️ AdMob: Web ortamı — atlanıyor');
     return false;
   }
   if (isInitialized) return true;
 
   try {
+    // ─── ADIM 1: AdMob SDK'yı başlat ───
     await AdMob.initialize({
       initializeForTesting: IS_TESTING,
       tagForChildDirectedTreatment: false,
@@ -52,75 +59,76 @@ export async function initializeAdMob() {
     });
     console.log('✅ AdMob SDK başlatıldı');
 
-    // ATT izni
+    // ─── ADIM 2: iOS ATT izni iste ───
     try {
       const trackingInfo = await AdMob.trackingAuthorizationStatus();
-      console.log('ℹ️ ATT:', trackingInfo.status);
+      console.log('ℹ️ ATT durumu:', trackingInfo.status);
+
       if (trackingInfo.status === 'notDetermined') {
-        await AdMob.requestTrackingAuthorization();
+        // iOS izin dialogunu göster
+        const result = await AdMob.requestTrackingAuthorization();
+        console.log('ℹ️ ATT sonucu:', result.status);
       }
-    } catch (e) {
-      console.warn('⚠️ ATT hatası:', e);
+    } catch (attErr) {
+      // ATT hatası reklamları engellemez, devam et
+      console.warn('⚠️ ATT hatası (devam ediliyor):', attErr);
     }
 
-    // UMP Consent
+    // ─── ADIM 3: UMP Consent (GDPR/Türkiye) ───
     try {
       const consentInfo = await AdMob.requestConsentInfo();
-      console.log('ℹ️ Consent:', consentInfo.status);
+      console.log('ℹ️ Consent durumu:', consentInfo.status, 'Form var:', consentInfo.isConsentFormAvailable);
+
       if (consentInfo.isConsentFormAvailable && consentInfo.status === AdmobConsentStatus.REQUIRED) {
-        await AdMob.showConsentForm();
+        const consentResult = await AdMob.showConsentForm();
+        console.log('ℹ️ Consent sonucu:', consentResult.status);
       }
+
+      // Consent durumuna göre reklam gösterilebilir mi?
       canShowAds = consentInfo.status === AdmobConsentStatus.OBTAINED
                 || consentInfo.status === AdmobConsentStatus.NOT_REQUIRED;
-    } catch (e) {
-      console.warn('⚠️ Consent hatası:', e);
+    } catch (consentErr) {
+      console.warn('⚠️ Consent hatası (devam ediliyor):', consentErr);
+      // Consent başarısız olsa bile reklam dene — bazı bölgelerde consent gerekmez
       canShowAds = true;
     }
 
-    // ─── Event listener'lar (promise resolve ile) ───
-    AdMob.addListener('onBannerAdLoaded', () => console.log('✅ Banner yüklendi'));
-    AdMob.addListener('onBannerAdFailedToLoad', (e) => {
-      console.error('❌ Banner fail:', JSON.stringify(e));
+    console.log('ℹ️ Reklam gösterilebilir:', canShowAds);
+
+    // ─── ADIM 4: Event listener'lar ───
+    AdMob.addListener('onBannerAdLoaded', () => {
+      console.log('✅ Banner yüklendi');
+    });
+    AdMob.addListener('onBannerAdFailedToLoad', (err) => {
+      console.error('❌ Banner yüklenemedi:', JSON.stringify(err));
       isBannerShowing = false;
     });
-
     AdMob.addListener('onInterstitialAdLoaded', () => {
-      console.log('✅ Interstitial yüklendi');
+      console.log('✅ Interstitial hazır');
       isInterstitialReady = true;
     });
-    AdMob.addListener('onInterstitialAdFailedToLoad', (e) => {
-      console.error('❌ Interstitial fail:', JSON.stringify(e));
+    AdMob.addListener('onInterstitialAdFailedToLoad', (err) => {
+      console.error('❌ Interstitial yüklenemedi:', JSON.stringify(err));
       isInterstitialReady = false;
     });
-    AdMob.addListener('onInterstitialAdDismissed', () => {
-      console.log('ℹ️ Interstitial kapatıldı — yenisi hazırlanıyor');
-      isInterstitialReady = false;
-      setTimeout(() => prepareInterstitial(), 1000);
-    });
-
     AdMob.addListener('onRewardedVideoAdLoaded', () => {
-      console.log('✅ Rewarded yüklendi');
+      console.log('✅ Rewarded hazır');
       isRewardedReady = true;
     });
-    AdMob.addListener('onRewardedVideoAdFailedToLoad', (e) => {
-      console.error('❌ Rewarded fail:', JSON.stringify(e));
+    AdMob.addListener('onRewardedVideoAdFailedToLoad', (err) => {
+      console.error('❌ Rewarded yüklenemedi:', JSON.stringify(err));
       isRewardedReady = false;
-    });
-    AdMob.addListener('onRewardedVideoAdDismissed', () => {
-      console.log('ℹ️ Rewarded kapatıldı — yenisi hazırlanıyor');
-      isRewardedReady = false;
-      setTimeout(() => prepareRewarded(), 1000);
     });
 
     isInitialized = true;
 
-    // İlk reklamları hemen hazırla
+    // İlk reklamları hazırla
     prepareInterstitial();
     prepareRewarded();
 
     return true;
   } catch (e) {
-    console.error('❌ AdMob init:', e);
+    console.error('❌ AdMob init hatası:', e);
     return false;
   }
 }
@@ -136,9 +144,10 @@ export async function showBanner() {
       position: BannerAdPosition.BOTTOM_CENTER,
       margin: 0,
       isTesting: IS_TESTING,
-      npa: !canShowAds,
+      npa: !canShowAds,  // kişiselleştirilmemiş reklam consent yoksa
     });
     isBannerShowing = true;
+    console.log('✅ Banner gösterildi');
   } catch (e) {
     console.error('❌ Banner:', e);
     isBannerShowing = false;
@@ -174,6 +183,7 @@ export async function prepareInterstitial() {
       isTesting: IS_TESTING,
       npa: !canShowAds,
     });
+    console.log('ℹ️ Interstitial hazırlanıyor...');
   } catch (e) {
     console.error('❌ Interstitial prep:', e);
     isInterstitialReady = false;
@@ -184,38 +194,26 @@ export async function showInterstitial() {
   if (!isNative() || !isInitialized) return false;
 
   const now = Date.now();
-  if (now - lastInterstitialTime < INTERSTITIAL_COOLDOWN_MS) {
-    console.log('ℹ️ Interstitial cooldown — atlanıyor');
-    return false;
-  }
+  if (now - lastInterstitialTime < INTERSTITIAL_COOLDOWN_MS) return false;
   if (interstitialCount >= MAX_INTERSTITIALS_PER_SESSION) return false;
 
-  // Hazır değilse bekle
   if (!isInterstitialReady) {
-    console.log('ℹ️ Interstitial hazır değil — hazırlanıyor...');
     await prepareInterstitial();
-    // Yüklenene kadar bekle (max 5sn)
-    for (let i = 0; i < 25; i++) {
-      if (isInterstitialReady) break;
-      await new Promise((r) => setTimeout(r, 200));
-    }
-    if (!isInterstitialReady) {
-      console.log('⚠️ Interstitial yüklenemedi — atlanıyor');
-      return false;
-    }
+    await new Promise((r) => setTimeout(r, 2000));
+    if (!isInterstitialReady) return false;
   }
 
   try {
     await AdMob.showInterstitial();
-    lastInterstitialTime = Date.now();
+    lastInterstitialTime = now;
     interstitialCount++;
     isInterstitialReady = false;
-    // Dismissed listener'da otomatik hazırlanacak
+    setTimeout(() => prepareInterstitial(), 3000);
     return true;
   } catch (e) {
-    console.error('❌ Interstitial show:', e);
+    console.error('❌ Interstitial:', e);
     isInterstitialReady = false;
-    setTimeout(() => prepareInterstitial(), 1000);
+    setTimeout(() => prepareInterstitial(), 3000);
     return false;
   }
 }
@@ -229,6 +227,7 @@ export async function prepareRewarded() {
       isTesting: IS_TESTING,
       npa: !canShowAds,
     });
+    console.log('ℹ️ Rewarded hazırlanıyor...');
   } catch (e) {
     console.error('❌ Rewarded prep:', e);
     isRewardedReady = false;
@@ -243,43 +242,42 @@ export async function showRewarded(onReward) {
   if (rewardedCount >= MAX_REWARDED_PER_SESSION) return false;
 
   if (!isRewardedReady) {
-    console.log('ℹ️ Rewarded hazır değil — hazırlanıyor...');
     await prepareRewarded();
-    for (let i = 0; i < 25; i++) {
-      if (isRewardedReady) break;
-      await new Promise((r) => setTimeout(r, 200));
-    }
-    if (!isRewardedReady) {
-      console.log('⚠️ Rewarded yüklenemedi — atlanıyor');
-      return false;
-    }
+    await new Promise((r) => setTimeout(r, 2000));
+    if (!isRewardedReady) return false;
   }
 
   try {
     const listener = await AdMob.addListener('onRewardedVideoAdReward', (reward) => {
-      console.log('✅ Ödül:', reward);
+      console.log('✅ Ödül alındı:', reward);
       if (onReward) onReward(reward);
       listener.remove();
     });
     await AdMob.showRewardVideoAd();
-    lastRewardedTime = Date.now();
+    lastRewardedTime = now;
     rewardedCount++;
     isRewardedReady = false;
+    setTimeout(() => prepareRewarded(), 3000);
     return true;
   } catch (e) {
-    console.error('❌ Rewarded show:', e);
+    console.error('❌ Rewarded:', e);
     isRewardedReady = false;
-    setTimeout(() => prepareRewarded(), 1000);
+    setTimeout(() => prepareRewarded(), 3000);
     return false;
   }
 }
 
 // ═══ YARDIMCI ═══
 export async function startAds() {
-  if (!isNative()) return;
+  if (!isNative()) {
+    console.log('ℹ️ Web ortamı — reklamlar atlandı');
+    return;
+  }
   const ok = await initializeAdMob();
   if (ok) {
-    setTimeout(() => showBanner(), 1500);
+    setTimeout(async () => {
+      await showBanner();
+    }, 2000);
   }
 }
 
@@ -288,7 +286,7 @@ export async function refreshBanner() {
   try {
     await AdMob.removeBanner();
     isBannerShowing = false;
-    setTimeout(() => showBanner(), 300);
+    setTimeout(() => showBanner(), 500);
   } catch (e) {
     await showBanner();
   }
@@ -299,5 +297,14 @@ export function isRewardedAvailable() {
 }
 
 export function getAdStats() {
-  return { isInitialized, canShowAds, isBannerShowing, isInterstitialReady, isRewardedReady, interstitialCount, rewardedCount };
+  return {
+    isNative: isNative(),
+    isInitialized,
+    canShowAds,
+    isBannerShowing,
+    isInterstitialReady,
+    isRewardedReady,
+    interstitialCount,
+    rewardedCount,
+  };
 }
