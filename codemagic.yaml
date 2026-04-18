@@ -4,7 +4,6 @@ workflows:
     max_build_duration: 60
     instance_type: mac_mini_m2
 
-    # App Store Connect entegrasyonu
     integrations:
       app_store_connect: Man
 
@@ -19,23 +18,19 @@ workflows:
         GAD_APP_ID: "ca-app-pub-2886543552287006~5889085689"
 
     scripts:
-      # ── Bağımlılıklar ──
       - name: Install dependencies
         script: |
           npm install
-          # Capacitor iOS paketi yoksa yükle
           npm install @capacitor/ios @capacitor/core @capacitor/cli @capacitor-community/admob --save
 
       - name: Build web
         script: CI=false npm run build
 
-      # ── Capacitor ──
       - name: Add iOS platform
         script: |
           npx cap add ios || true
           npx cap sync ios
 
-      # ── App Icon ──
       - name: Set app icon
         script: |
           if [ ! -f "AppIcon.png" ]; then
@@ -47,107 +42,91 @@ workflows:
           printf '{"images":[{"filename":"AppIcon-1024@1x.png","idiom":"universal","platform":"ios","size":"1024x1024"}],"info":{"author":"xcode","version":1}}' > "$ICON_DIR/Contents.json"
           echo "App icon set"
 
-      # ── Info.plist Ayarları ──
       - name: Configure Info.plist
         script: |
           PLIST="ios/App/App/Info.plist"
-
-          # AdMob App ID
           /usr/libexec/PlistBuddy -c "Add :GADApplicationIdentifier string $GAD_APP_ID" "$PLIST" 2>/dev/null \
             || /usr/libexec/PlistBuddy -c "Set :GADApplicationIdentifier $GAD_APP_ID" "$PLIST"
-
-          # SKAdNetwork ID'leri (AdMob için gerekli)
           /usr/libexec/PlistBuddy -c "Add :SKAdNetworkItems array" "$PLIST" 2>/dev/null || true
           /usr/libexec/PlistBuddy -c "Add :SKAdNetworkItems:0 dict" "$PLIST" 2>/dev/null || true
           /usr/libexec/PlistBuddy -c "Add :SKAdNetworkItems:0:SKAdNetworkIdentifier string cstr6suwn9.skadnetwork" "$PLIST" 2>/dev/null || true
-
-          # Encryption declaration
           /usr/libexec/PlistBuddy -c "Add :ITSAppManagesNonExemptEncryption bool false" "$PLIST" 2>/dev/null || true
-
-          # ATT izin metni (iOS 14+ reklam takibi)
           /usr/libexec/PlistBuddy -c "Add :NSUserTrackingUsageDescription string Size daha iyi reklam deneyimi sunmak icin izninizi istiyoruz." "$PLIST" 2>/dev/null || true
+          echo "GADApplicationIdentifier = $(/usr/libexec/PlistBuddy -c 'Print :GADApplicationIdentifier' "$PLIST")"
 
-          echo "Info.plist configured"
-          # Doğrulama
-          echo "GADApplicationIdentifier = $(/usr/libexec/PlistBuddy -c "Print :GADApplicationIdentifier" "$PLIST")"
-
-      # ── CocoaPods ──
-      - name: Install CocoaPods
-        script: |
-          cd ios/App
-          pod install --repo-update
-          echo "CocoaPods installed"
-
-      # ── Signing Ayarları ──
-      - name: Fix signing settings
+      - name: Setup signing
         script: |
           PBXPROJ="ios/App/App.xcodeproj/project.pbxproj"
-          if [ ! -f "$PBXPROJ" ]; then
-            echo "project.pbxproj not found at $PBXPROJ"
-            PBXPROJ=$(find ios -name "project.pbxproj" -path "*/App.xcodeproj/*" | head -1)
-            echo "Found at: $PBXPROJ"
+
+          # Codemagic'in indirdigi provisioning profile'i bul
+          PROFILE_PATH=$(find "$HOME/Library/MobileDevice/Provisioning Profiles" -name "*.mobileprovision" 2>/dev/null | head -1)
+          if [ -n "$PROFILE_PATH" ]; then
+            PROFILE_UUID=$(security cms -D -i "$PROFILE_PATH" 2>/dev/null | grep -A1 'UUID' | grep '<string>' | sed 's/.*<string>\(.*\)<\/string>/\1/')
+            PROFILE_NAME=$(security cms -D -i "$PROFILE_PATH" 2>/dev/null | grep -A1 'Name' | head -1 | grep '<string>' | sed 's/.*<string>\(.*\)<\/string>/\1/')
+            echo "Profile: $PROFILE_NAME ($PROFILE_UUID)"
+          else
+            echo "WARNING: No provisioning profile found"
+            PROFILE_UUID=""
+            PROFILE_NAME=""
           fi
 
-          if [ -z "$PBXPROJ" ]; then
-            echo "ERROR: project.pbxproj not found"
-            exit 1
-          fi
-
+          # pbxproj guncelle
           sed -i '' "s/CODE_SIGN_STYLE = Automatic/CODE_SIGN_STYLE = Manual/g" "$PBXPROJ"
           sed -i '' "s/DEVELOPMENT_TEAM = \"\"/DEVELOPMENT_TEAM = \"$DEVELOPMENT_TEAM\"/g" "$PBXPROJ"
           sed -i '' "s/DEVELOPMENT_TEAM = \"\";/DEVELOPMENT_TEAM = \"$DEVELOPMENT_TEAM\";/g" "$PBXPROJ"
 
-          echo "Signing settings fixed"
+          echo "$PROFILE_UUID" > /tmp/profile_uuid.txt
+          echo "$PROFILE_NAME" > /tmp/profile_name.txt
+          echo "Signing setup done"
 
-      # ── Build Numarası ──
       - name: Increment build number
         script: |
           PLIST="ios/App/App/Info.plist"
-          CURRENT=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST" 2>/dev/null || echo "0")
-          NEW_BUILD=$((CURRENT + 1))
-          # Codemagic BUILD_NUMBER varsa onu kullan, yoksa artır
-          BUILD_NUM=${BUILD_NUMBER:-$NEW_BUILD}
+          BUILD_NUM=${BUILD_NUMBER:-1}
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUM" "$PLIST"
-          echo "Build number set to $BUILD_NUM"
+          echo "Build number: $BUILD_NUM"
 
-      # ── Build & Archive ──
       - name: Build iOS archive
         script: |
-          WORKSPACE="ios/App/App.xcworkspace"
-          if [ ! -d "$WORKSPACE" ]; then
-            WORKSPACE=$(find ios -name "*.xcworkspace" | head -1)
-          fi
+          XCODE_PROJ="ios/App/App.xcodeproj"
           ARCHIVE_PATH="build/App.xcarchive"
+          PROFILE_UUID=$(cat /tmp/profile_uuid.txt 2>/dev/null || echo "")
 
-          echo "Using workspace: $WORKSPACE"
-          echo "Archive path: $ARCHIVE_PATH"
+          echo "Project: $XCODE_PROJ"
+          echo "Profile UUID: $PROFILE_UUID"
 
           xcodebuild \
-            -workspace "$WORKSPACE" \
+            -project "$XCODE_PROJ" \
             -scheme App \
             -sdk iphoneos \
             -configuration Release \
             -archivePath "$ARCHIVE_PATH" \
             -destination "generic/platform=iOS" \
+            -allowProvisioningUpdates \
             DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
             CODE_SIGN_STYLE="Manual" \
             CODE_SIGN_IDENTITY="Apple Distribution" \
+            PROVISIONING_PROFILE="$PROFILE_UUID" \
             archive
 
-          # Archive'ın oluştuğunu doğrula
           if [ ! -d "$ARCHIVE_PATH" ]; then
-            echo "❌ Archive bulunamadı: $ARCHIVE_PATH"
-            echo "Mevcut dosyalar:"
+            echo "Archive bulunamadi!"
             find . -name "*.xcarchive" -type d 2>/dev/null
             exit 1
           fi
-          echo "✅ Archive oluşturuldu: $ARCHIVE_PATH"
+          echo "Archive olusturuldu"
 
-      # ── IPA Export ──
       - name: Export IPA
         script: |
           ARCHIVE_PATH="build/App.xcarchive"
-          printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' '<plist version="1.0">' '<dict>' '  <key>method</key>' '  <string>app-store</string>' '  <key>teamID</key>' '  <string>Q3BH6457BX</string>' '  <key>signingStyle</key>' '  <string>manual</string>' '  <key>uploadBitcode</key>' '  <false/>' '  <key>uploadSymbols</key>' '  <true/>' '  <key>provisioningProfiles</key>' '  <dict>' '    <key>com.halisahakolik.app</key>' '    <string>match AppStore com.halisahakolik.app</string>' '  </dict>' '</dict>' '</plist>' > exportOptions.plist
+          PROFILE_NAME=$(cat /tmp/profile_name.txt 2>/dev/null || echo "")
+          PROFILE_UUID=$(cat /tmp/profile_uuid.txt 2>/dev/null || echo "")
+          PROFILE_REF="${PROFILE_NAME:-$PROFILE_UUID}"
+
+          printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' '<plist version="1.0">' '<dict>' '  <key>method</key>' '  <string>app-store</string>' '  <key>teamID</key>' '  <string>Q3BH6457BX</string>' '  <key>signingStyle</key>' '  <string>manual</string>' '  <key>uploadBitcode</key>' '  <false/>' '  <key>uploadSymbols</key>' '  <true/>' '  <key>provisioningProfiles</key>' '  <dict>' "    <key>com.halisahakolik.app</key>" "    <string>${PROFILE_REF}</string>" '  </dict>' '</dict>' '</plist>' > exportOptions.plist
+
+          cat exportOptions.plist
+
           xcodebuild -exportArchive \
             -archivePath "$ARCHIVE_PATH" \
             -exportPath "build/output" \
@@ -156,7 +135,6 @@ workflows:
     artifacts:
       - build/output/**/*.ipa
       - build/**/*.xcarchive
-      - ios/App/Pods/Manifest.lock
 
     publishing:
       app_store_connect:
