@@ -42,27 +42,9 @@ workflows:
             echo "AppIcon.png not found, using default"
             exit 0
           fi
-
           ICON_DIR="ios/App/App/Assets.xcassets/AppIcon.appiconset"
           sips -z 1024 1024 AppIcon.png --out "$ICON_DIR/AppIcon-1024@1x.png"
-
-          cat > "$ICON_DIR/Contents.json" << 'ICONEOF'
-{
-  "images": [
-    {
-      "filename": "AppIcon-1024@1x.png",
-      "idiom": "universal",
-      "platform": "ios",
-      "size": "1024x1024"
-    }
-  ],
-  "info": {
-    "author": "xcode",
-    "version": 1
-  }
-}
-ICONEOF
-
+          printf '{"images":[{"filename":"AppIcon-1024@1x.png","idiom":"universal","platform":"ios","size":"1024x1024"}],"info":{"author":"xcode","version":1}}' > "$ICON_DIR/Contents.json"
           echo "App icon set"
 
       # ── Info.plist Ayarları ──
@@ -164,31 +146,7 @@ ICONEOF
       # ── IPA Export ──
       - name: Export IPA
         script: |
-          cat > exportOptions.plist << 'EXPORTEOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>method</key>
-  <string>app-store</string>
-  <key>teamID</key>
-  <string>Q3BH6457BX</string>
-  <key>signingStyle</key>
-  <string>manual</string>
-  <key>uploadBitcode</key>
-  <false/>
-  <key>uploadSymbols</key>
-  <true/>
-  <key>provisioningProfiles</key>
-  <dict>
-    <key>com.halisahakolik.app</key>
-    <string>match AppStore com.halisahakolik.app</string>
-  </dict>
-</dict>
-</plist>
-EXPORTEOF
-
+          printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' '<plist version="1.0">' '<dict>' '  <key>method</key>' '  <string>app-store</string>' '  <key>teamID</key>' '  <string>Q3BH6457BX</string>' '  <key>signingStyle</key>' '  <string>manual</string>' '  <key>uploadBitcode</key>' '  <false/>' '  <key>uploadSymbols</key>' '  <true/>' '  <key>provisioningProfiles</key>' '  <dict>' '    <key>com.halisahakolik.app</key>' '    <string>match AppStore com.halisahakolik.app</string>' '  </dict>' '</dict>' '</plist>' > exportOptions.plist
           xcodebuild -exportArchive \
             -archivePath "$CM_BUILD_DIR/build/App.xcarchive" \
             -exportPath "$CM_BUILD_DIR/build/output" \
