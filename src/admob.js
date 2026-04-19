@@ -1,7 +1,7 @@
 import { AdMob, BannerAdSize, BannerAdPosition, MaxAdContentRating, AdmobConsentStatus } from '@capacitor-community/admob';
 import { Capacitor } from '@capacitor/core';
 
-const IS_TESTING = true;
+const IS_TESTING = false;
 
 const AD_CONFIG = {
   banner:       'ca-app-pub-2886543552287006/3886785053',
