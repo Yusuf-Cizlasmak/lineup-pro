@@ -45,16 +45,44 @@ workflows:
       - name: Configure Info.plist
         script: |
           PLIST="ios/App/App/Info.plist"
+
+          # ─── AdMob App ID ───
           /usr/libexec/PlistBuddy -c "Add :GADApplicationIdentifier string $GAD_APP_ID" "$PLIST" 2>/dev/null \
             || /usr/libexec/PlistBuddy -c "Set :GADApplicationIdentifier $GAD_APP_ID" "$PLIST"
+
           /usr/libexec/PlistBuddy -c "Add :GADIsAdManagerApp bool true" "$PLIST" 2>/dev/null || true
+
+          # ─── SKAdNetwork ───
           /usr/libexec/PlistBuddy -c "Add :SKAdNetworkItems array" "$PLIST" 2>/dev/null || true
           /usr/libexec/PlistBuddy -c "Add :SKAdNetworkItems:0 dict" "$PLIST" 2>/dev/null || true
           /usr/libexec/PlistBuddy -c "Add :SKAdNetworkItems:0:SKAdNetworkIdentifier string cstr6suwn9.skadnetwork" "$PLIST" 2>/dev/null || true
+
+          # ─── Encryption ───
           /usr/libexec/PlistBuddy -c "Add :ITSAppManagesNonExemptEncryption bool false" "$PLIST" 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Add :NSUserTrackingUsageDescription string Size daha iyi reklam deneyimi sunmak icin izninizi istiyoruz." "$PLIST" 2>/dev/null || true
+
+          # ─── ATT (App Tracking Transparency) — GARANTİ EKLEME ───
+          # Apple, bu key olmadan ATT dialogunu göstermez.
+          # Önce Add dene, başarısız olursa Set ile ÜZERİNE YAZ.
+          ATT_MSG="Size daha alakali reklamlar gosterebilmek icin izninize ihtiyacimiz var."
+          /usr/libexec/PlistBuddy -c "Add :NSUserTrackingUsageDescription string $ATT_MSG" "$PLIST" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Set :NSUserTrackingUsageDescription $ATT_MSG" "$PLIST"
+
+          # ─── DOĞRULAMA — Her key gerçekten yazıldı mı? ───
+          echo "═══════════════════════════════════════"
+          echo "Info.plist doğrulama:"
+          echo "═══════════════════════════════════════"
           echo "GADApplicationIdentifier = $(/usr/libexec/PlistBuddy -c 'Print :GADApplicationIdentifier' "$PLIST")"
-          echo "GADIsAdManagerApp = $(/usr/libexec/PlistBuddy -c 'Print :GADIsAdManagerApp' "$PLIST")"
+          echo "GADIsAdManagerApp        = $(/usr/libexec/PlistBuddy -c 'Print :GADIsAdManagerApp' "$PLIST")"
+
+          ATT_VALUE=$(/usr/libexec/PlistBuddy -c 'Print :NSUserTrackingUsageDescription' "$PLIST" 2>/dev/null)
+          if [ -z "$ATT_VALUE" ]; then
+            echo "❌ KRİTİK HATA: NSUserTrackingUsageDescription eklenemedi!"
+            echo "Apple ATT dialogunu göstermeyecek — build iptal ediliyor."
+            exit 1
+          fi
+          echo "NSUserTrackingUsageDescription = $ATT_VALUE"
+          echo "═══════════════════════════════════════"
+          echo "✅ Info.plist hazır"
 
       - name: Setup signing
         script: |
