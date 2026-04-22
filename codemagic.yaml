@@ -63,7 +63,7 @@ workflows:
           # ─── ATT (App Tracking Transparency) — GARANTİ EKLEME ───
           # Apple, bu key olmadan ATT dialogunu göstermez.
           # Önce Add dene, başarısız olursa Set ile ÜZERİNE YAZ.
-          ATT_MSG="HalıSaha-Kolik'i ücretsiz sunabilmek için reklam gelirlerine ihtiyaç duyuyoruz. İzniniz, size ilgi çekici reklamlar göstermemizi ve uygulamayı geliştirmemizi sağlar."
+          ATT_MSG="Reklamları ilgi alanlarınıza göre kişiselleştirmek için izninizi rica ediyoruz."
           /usr/libexec/PlistBuddy -c "Add :NSUserTrackingUsageDescription string $ATT_MSG" "$PLIST" 2>/dev/null \
             || /usr/libexec/PlistBuddy -c "Set :NSUserTrackingUsageDescription $ATT_MSG" "$PLIST"
 
