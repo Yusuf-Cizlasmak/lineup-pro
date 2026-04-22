@@ -25,6 +25,29 @@ let isRewardedReady = false;
 let canShowAds = false;
 
 const isNative = () => Capacitor.isNativePlatform();
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ─── ATT (App Tracking Transparency) ───
+// Apple, ATT isteğinin uygulama tam "active" state'e geçtikten sonra
+// gösterilmesini bekler. SDK init'ten ÖNCE ve küçük bir delay ile çağırıyoruz.
+async function requestATT() {
+  if (!isNative() || Capacitor.getPlatform() !== 'ios') return;
+
+  try {
+    // UI'ın tam render olması ve app'in "active" state'e geçmesi için kısa bekleme
+    await sleep(500);
+
+    const trackingInfo = await AdMob.trackingAuthorizationStatus();
+    console.log('ℹ️ ATT mevcut durum:', trackingInfo.status);
+
+    if (trackingInfo.status === 'notDetermined') {
+      const result = await AdMob.requestTrackingAuthorization();
+      console.log('ℹ️ ATT yeni durum:', result?.status || 'tamamlandı');
+    }
+  } catch (e) {
+    console.warn('⚠️ ATT hatası:', e);
+  }
+}
 
 export async function initializeAdMob() {
   if (!isNative()) {
@@ -34,6 +57,10 @@ export async function initializeAdMob() {
   if (isInitialized) return true;
 
   try {
+    // ═══ 1) ÖNCE ATT iste — herhangi bir tracking verisi toplanmadan önce ═══
+    await requestATT();
+
+    // ═══ 2) SONRA AdMob SDK'yı başlat ═══
     await AdMob.initialize({
       initializeForTesting: IS_TESTING,
       tagForChildDirectedTreatment: false,
@@ -41,18 +68,7 @@ export async function initializeAdMob() {
     });
     console.log('✅ AdMob SDK başlatıldı');
 
-    // ATT
-    try {
-      const trackingInfo = await AdMob.trackingAuthorizationStatus();
-      console.log('ℹ️ ATT:', trackingInfo.status);
-      if (trackingInfo.status === 'notDetermined') {
-        await AdMob.requestTrackingAuthorization();
-      }
-    } catch (e) {
-      console.warn('⚠️ ATT hatası:', e);
-    }
-
-    // UMP Consent
+    // ═══ 3) UMP Consent ═══
     try {
       const consentInfo = await AdMob.requestConsentInfo();
       console.log('ℹ️ Consent:', consentInfo.status);
