@@ -23,11 +23,22 @@ export default function App() {
     localStorage.setItem(LAUNCH_COUNT_KEY, String(count));
     const alreadyRated = localStorage.getItem(RATED_KEY) === "1";
 
-    // 3. açılışta rate prompt — ama onboarding bittikten sonra gösterilsin
-    if (!alreadyRated && count >= 3 && onboarded) {
+    // İlk olarak 3. açılışta, sonra değerlendirmediyse her 10'da bir tekrar sor
+    // 3, 13, 23, 33, ...
+    const shouldShow =
+      !alreadyRated &&
+      onboarded &&
+      (count === 3 || (count > 3 && (count - 3) % 10 === 0));
+
+    if (shouldShow) {
       // Kısa gecikme — kullanıcı uygulamaya yerleşsin
       setTimeout(() => setShowRate(true), 1500);
     }
+
+    // ★ Ayarlardan "Tanıtımı tekrar göster"
+    const onReplay = () => setShowOnboarding(true);
+    window.addEventListener("halisaha:replay-onboarding", onReplay);
+    return () => window.removeEventListener("halisaha:replay-onboarding", onReplay);
   }, []);
 
   const finishOnboarding = () => {

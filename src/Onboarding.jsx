@@ -4,6 +4,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import logo from "./ssssss.png";
 import { t, useLang, setLang } from "./i18n";
+import { hideBanner, showBanner } from "./admob";
 
 const STEPS = [
   { key: 1, icon: "⚽", color: "#34d399", bg: "rgba(5,150,105,0.18)" },
@@ -48,6 +49,12 @@ export default function Onboarding({ onFinish }) {
     window.addEventListener("keydown", fn);
     return () => window.removeEventListener("keydown", fn);
   }, [idx, onFinish]);
+
+  // ★ Onboarding boyunca banner reklamı gizle (İleri butonunu kapatmasın)
+  // Geri yüklemeyi ana app'in useEffect'i yönetir
+  useEffect(() => {
+    hideBanner();
+  }, []);
 
   return (
     <div

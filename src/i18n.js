@@ -123,6 +123,45 @@ const DICT = {
     premium_error: "Bir hata oluştu, tekrar dene.",
     premium_restored: "Satın alım geri yüklendi ✓",
     premium_no_purchase: "Geri yüklenecek satın alım bulunamadı.",
+    // Position'lar (TR yoksa İngilizce için altta var)
+    pos_KALECİ: "KALECİ",
+    pos_DEFANS: "DEFANS",
+    "pos_ORTA SAHA": "ORTA SAHA",
+    pos_FORVET: "FORVET",
+    "pos_SOL BEK": "SOL BEK",
+    "pos_SAĞ BEK": "SAĞ BEK",
+    pos_STOPER: "STOPER",
+    // Empty state mikro-ödüller
+    t_first_player: "İlk oyuncun eklendi! 🎉",
+    t_squad_complete: "Kadro hazır! 7 oyuncu sahada ✓",
+    t_first_match: "İlk maçın için bol şans! ⚽",
+    // Settings menu (yeni eklenen)
+    settings_title: "Ayarlar",
+    settings_show_intro: "Tanıtımı tekrar göster",
+    settings_show_intro_sub: "5 adımlık karşılama ekranını yeniden aç",
+    settings_haptics: "Titreşim geri bildirimi",
+    settings_haptics_sub: "Buton ve sürükleme anında hafif titreşim",
+    settings_lang: "Dil",
+    settings_team: "Takım Ayarları",
+    settings_team_sub: "İsim ve forma rengi",
+    settings_about: "Hakkında",
+    settings_version: "Sürüm",
+    quick_empty_squad: "Henüz boşta oyuncun yok",
+    quick_empty_squad_sub: "Önce kadro sekmesinden oyuncu ekle",
+    // Tour (rehber)
+    tour_skip: "Atla",
+    tour_1_title: "Kadro Sekmesi",
+    tour_1_desc: "Önce oyuncularını eklemen gerek. Aşağıdaki Kadro sekmesine dokun.",
+    tour_2_title: "Oyuncu Ekle",
+    tour_2_desc: "İlk oyuncunu eklemek için + butonuna dokun.",
+    tour_3_title: "Bilgileri Doldur",
+    tour_3_desc: "Adı, mevkisi ve gücünü gir, sonra Kaydet'e bas.",
+    tour_4_title: "Saha Sekmesi",
+    tour_4_desc: "Harika! Şimdi oyuncuyu sahaya yerleştirelim. Saha sekmesine dön.",
+    tour_5_title: "Sahaya Yerleştir",
+    tour_5_desc: "Boş bir pozisyona dokun ve oyuncunu yerleştir. Sürükleyerek de taşıyabilirsin.",
+    settings_show_tour: "Rehber turu yeniden başlat",
+    settings_show_tour_sub: "Oyuncu ekleme adımlarını tekrar göster",
   },
   en: {
     onb_skip: "Skip",
@@ -225,13 +264,51 @@ const DICT = {
     premium_error: "Something went wrong, please try again.",
     premium_restored: "Purchase restored ✓",
     premium_no_purchase: "No purchase to restore.",
+    // Position translations
+    pos_KALECİ: "GOALKEEPER",
+    pos_DEFANS: "DEFENDER",
+    "pos_ORTA SAHA": "MIDFIELDER",
+    pos_FORVET: "FORWARD",
+    "pos_SOL BEK": "LEFT BACK",
+    "pos_SAĞ BEK": "RIGHT BACK",
+    pos_STOPER: "CENTRE-BACK",
+    // Empty state micro-rewards
+    t_first_player: "Your first player added! 🎉",
+    t_squad_complete: "Squad ready! 7 players on pitch ✓",
+    t_first_match: "Good luck with your first match! ⚽",
+    // Settings menu
+    settings_title: "Settings",
+    settings_show_intro: "Replay intro",
+    settings_show_intro_sub: "Open the 5-step welcome again",
+    settings_haptics: "Haptic feedback",
+    settings_haptics_sub: "Subtle vibration on taps and drags",
+    settings_lang: "Language",
+    settings_team: "Team Settings",
+    settings_team_sub: "Name and kit color",
+    settings_about: "About",
+    settings_version: "Version",
+    quick_empty_squad: "No available players yet",
+    quick_empty_squad_sub: "Add players from the Squad tab first",
+    // Tour
+    tour_skip: "Skip",
+    tour_1_title: "Squad Tab",
+    tour_1_desc: "First, you need to add players. Tap the Squad tab below.",
+    tour_2_title: "Add Player",
+    tour_2_desc: "Tap the + button to add your first player.",
+    tour_3_title: "Fill Details",
+    tour_3_desc: "Enter their name, position and rating, then tap Save.",
+    tour_4_title: "Pitch Tab",
+    tour_4_desc: "Great! Now let's place them on the pitch. Go back to the Pitch tab.",
+    tour_5_title: "Place on Pitch",
+    tour_5_desc: "Tap any empty position to place your player. You can also drag them around.",
+    settings_show_tour: "Restart tour guide",
+    settings_show_tour_sub: "Replay the player-adding walkthrough",
   },
 };
 
 let _lang =
   (typeof localStorage !== "undefined" && localStorage.getItem(STORAGE_KEY)) ||
-  // Otomatik algılama: tarayıcı dili TR ise tr, değilse en
-  (typeof navigator !== "undefined" && /^tr/i.test(navigator.language) ? "tr" : "en");
+  "tr"; // ★ Her zaman Türkçe default
 
 const listeners = new Set();
 
@@ -250,6 +327,9 @@ export const t = (key, vars) => {
   if (vars) Object.keys(vars).forEach((k) => { s = s.replace(`{${k}}`, vars[k]); });
   return s;
 };
+
+// Position çevirisi — internal key TR'dir, sadece görüntüde çevrilir
+export const tPos = (role) => t(`pos_${role}`);
 
 export const useLang = () => {
   const [lang, setLangState] = useState(_lang);
