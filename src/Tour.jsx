@@ -128,20 +128,30 @@ export default function Tour({ active, onFinish }) {
     h: Math.min(vh, rect.h + PAD * 2),
   } : null;
 
+  // ★ Center step (form modal'ı zaten açık) — karartma YOK, sadece üstte yardımcı ipucu
+  const isCenterStep = !hole && step.placement === "center";
+
   // 4-panel cutout — hole çevresini karart, içi dokunulmaz
   const panels = hole ? [
     { left: 0, top: 0, width: vw, height: hole.y },                                    // Üst
     { left: 0, top: hole.y + hole.h, width: vw, height: vh - (hole.y + hole.h) },     // Alt
     { left: 0, top: hole.y, width: hole.x, height: hole.h },                           // Sol
     { left: hole.x + hole.w, top: hole.y, width: vw - (hole.x + hole.w), height: hole.h }, // Sağ
-  ] : [
-    { left: 0, top: 0, width: vw, height: vh },
-  ];
+  ] : [];
+  // (isCenterStep ise panels boş — modal'ın üstüne karartma binmez)
 
   // Tooltip pozisyonu
   const TIP_W = Math.min(280, vw - 32);
   let tipStyle = {};
-  if (!hole || step.placement === "center") {
+  if (isCenterStep) {
+    // Modal zaten açık — tooltip'i ekranın üstünde, modal'ı kapatmayacak şekilde göster
+    tipStyle = {
+      top: "calc(env(safe-area-inset-top, 0px) + 14px)",
+      left: "50%",
+      transform: "translateX(-50%)",
+      width: Math.min(320, vw - 24),
+    };
+  } else if (!hole) {
     tipStyle = { top: "50%", left: "50%", transform: "translate(-50%, -50%)", width: TIP_W };
   } else if (step.placement === "top") {
     tipStyle = {
@@ -207,60 +217,95 @@ export default function Tour({ active, onFinish }) {
         style={{
           position: "fixed",
           ...tipStyle,
-          background: "linear-gradient(160deg,#0e1117,#111318)",
+          background: isCenterStep
+            ? "linear-gradient(160deg,rgba(14,17,23,0.96),rgba(17,19,24,0.96))"
+            : "linear-gradient(160deg,#0e1117,#111318)",
+          backdropFilter: isCenterStep ? "blur(16px)" : "none",
+          WebkitBackdropFilter: isCenterStep ? "blur(16px)" : "none",
           color: "#e2e8f0",
-          padding: "14px 16px",
-          borderRadius: 14,
-          border: "1px solid rgba(52,211,153,0.3)",
-          boxShadow: "0 16px 40px rgba(0,0,0,0.5), 0 0 24px rgba(52,211,153,0.15)",
+          padding: isCenterStep ? "12px 14px" : "14px 16px",
+          borderRadius: isCenterStep ? 12 : 14,
+          border: "1px solid rgba(52,211,153,0.35)",
+          boxShadow: isCenterStep
+            ? "0 12px 32px rgba(0,0,0,0.55), 0 0 20px rgba(52,211,153,0.18)"
+            : "0 16px 40px rgba(0,0,0,0.5), 0 0 24px rgba(52,211,153,0.15)",
           fontFamily: "'DM Sans','Segoe UI',sans-serif",
           zIndex: 4502,
           pointerEvents: "auto",
           animation: "tourFadeIn 0.25s ease-out",
         }}
       >
-        <div style={{
-          display: "flex", justifyContent: "space-between", alignItems: "center",
-          marginBottom: 8,
-        }}>
-          <div style={{ display: "flex", gap: 4 }}>
-            {STEPS.map((_, i) => (
-              <div key={i} style={{
-                width: i === stepIdx ? 18 : 5, height: 5,
-                borderRadius: 3,
-                background: i <= stepIdx ? "#34d399" : "rgba(255,255,255,0.18)",
-                transition: "all 0.25s",
-              }} />
-            ))}
+        {isCenterStep ? (
+          // Banner görünümü — modal'ın üstünde sade ipucu
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ fontSize: 20, flexShrink: 0 }}>💡</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: "#34d399", marginBottom: 2 }}>
+                {t(step.title)}
+              </div>
+              <div style={{ fontSize: 11.5, lineHeight: 1.4, color: "rgba(255,255,255,0.7)" }}>
+                {t(step.desc)}
+              </div>
+            </div>
+            <button
+              onClick={finish}
+              style={{
+                border: "none", background: "rgba(255,255,255,0.05)",
+                color: "rgba(255,255,255,0.55)",
+                fontSize: 11, fontWeight: 600,
+                cursor: "pointer", padding: "5px 10px",
+                borderRadius: 6, fontFamily: "inherit", flexShrink: 0,
+              }}
+            >
+              {t("tour_skip")}
+            </button>
           </div>
-          <button
-            onClick={finish}
-            style={{
-              border: "none", background: "rgba(255,255,255,0.05)",
-              color: "rgba(255,255,255,0.55)",
-              fontSize: 11, fontWeight: 600,
-              cursor: "pointer",
-              padding: "4px 10px",
-              borderRadius: 6,
-              fontFamily: "inherit",
-            }}
-          >
-            {t("tour_skip")}
-          </button>
-        </div>
+        ) : (
+          <>
+            <div style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              marginBottom: 8,
+            }}>
+              <div style={{ display: "flex", gap: 4 }}>
+                {STEPS.map((_, i) => (
+                  <div key={i} style={{
+                    width: i === stepIdx ? 18 : 5, height: 5,
+                    borderRadius: 3,
+                    background: i <= stepIdx ? "#34d399" : "rgba(255,255,255,0.18)",
+                    transition: "all 0.25s",
+                  }} />
+                ))}
+              </div>
+              <button
+                onClick={finish}
+                style={{
+                  border: "none", background: "rgba(255,255,255,0.05)",
+                  color: "rgba(255,255,255,0.55)",
+                  fontSize: 11, fontWeight: 600,
+                  cursor: "pointer",
+                  padding: "4px 10px",
+                  borderRadius: 6,
+                  fontFamily: "inherit",
+                }}
+              >
+                {t("tour_skip")}
+              </button>
+            </div>
 
-        <div style={{
-          fontSize: 14, fontWeight: 700, color: "#34d399",
-          marginBottom: 4, letterSpacing: -0.2,
-        }}>
-          {t(step.title)}
-        </div>
-        <div style={{
-          fontSize: 12.5, lineHeight: 1.5,
-          color: "rgba(255,255,255,0.7)",
-        }}>
-          {t(step.desc)}
-        </div>
+            <div style={{
+              fontSize: 14, fontWeight: 700, color: "#34d399",
+              marginBottom: 4, letterSpacing: -0.2,
+            }}>
+              {t(step.title)}
+            </div>
+            <div style={{
+              fontSize: 12.5, lineHeight: 1.5,
+              color: "rgba(255,255,255,0.7)",
+            }}>
+              {t(step.desc)}
+            </div>
+          </>
+        )}
       </div>
     </>
   );
