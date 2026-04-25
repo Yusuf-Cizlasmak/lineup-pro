@@ -1,6 +1,8 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import logo from "./ssssss.png";
 import { startAds, showInterstitial, showRewarded, showBanner, hideBanner } from "./admob";
+import { t, useLang, setLang } from "./i18n";
+import { LangToggle } from "./Onboarding";
 
 // ─── SCREENSHOT & SHARE UTILITY ───
 const captureAndShare = async (element, filename = "halisaha-kolik.png") => {
@@ -278,7 +280,7 @@ const Pitch = ({ colA, colB, isMatch }) => (
 );
 
 // ─── FIELD PLAYER ───
-const FieldPlayer = ({ player, x, y, fieldRef, teamColor, isCaptain, onToggleCaptain, onRemove, isMatch, side }) => {
+const FieldPlayer = ({ player, x, y, fieldRef, teamColor, isCaptain, onToggleCaptain, onRemove, isMatch, side, isGoalkeeper }) => {
   const [pos, setPos] = useState({ x, y });
   const [drag, setDrag] = useState(false);
   const [hover, setHover] = useState(false);
@@ -294,6 +296,7 @@ const FieldPlayer = ({ player, x, y, fieldRef, teamColor, isCaptain, onToggleCap
   const clampX = useCallback((raw) => Math.max(3, Math.min(97, raw)), []);
 
   const begin = (cx, cy) => {
+    if (isGoalkeeper) return; // ★ Kaleci sabit — taşınamaz
     const r = fieldRef.current?.getBoundingClientRect();
     if (!r) return;
     off.current = { x: (cx - r.left) / r.width * 100 - pos.x, y: (cy - r.top) / r.height * 100 - pos.y };
@@ -331,7 +334,7 @@ const FieldPlayer = ({ player, x, y, fieldRef, teamColor, isCaptain, onToggleCap
       onTouchStart={(e) => begin(e.touches[0].clientX, e.touches[0].clientY)}
       onMouseEnter={() => !drag && setHover(true)}
       onMouseLeave={() => setHover(false)}
-      style={{ position: "absolute", left: `${pos.x}%`, top: `${pos.y}%`, transform: "translate(-50%,-50%)", zIndex: drag || hover ? 100 : 10, cursor: drag ? "grabbing" : "grab", userSelect: "none", touchAction: "none", transition: drag ? "none" : "left 0.4s cubic-bezier(.4,0,.2,1), top 0.4s cubic-bezier(.4,0,.2,1)" }}
+      style={{ position: "absolute", left: `${pos.x}%`, top: `${pos.y}%`, transform: "translate(-50%,-50%)", zIndex: drag || hover ? 100 : 10, cursor: isGoalkeeper ? "default" : (drag ? "grabbing" : "grab"), userSelect: "none", touchAction: "none", transition: drag ? "none" : "left 0.4s cubic-bezier(.4,0,.2,1), top 0.4s cubic-bezier(.4,0,.2,1)" }}
     >
       {hover && !drag && (
         <div style={{ position: "absolute", [isBottom ? "bottom" : "top"]: "100%", left: "50%", transform: `translate(-50%, ${isBottom ? "-8px" : "8px"})`, background: "rgba(8,12,20,0.96)", border: `1px solid ${teamColor}55`, backdropFilter: "blur(12px)", padding: "6px 12px", borderRadius: 10, display: "flex", flexDirection: "column", alignItems: "center", gap: 2, boxShadow: `0 10px 28px rgba(0,0,0,0.7), 0 0 14px ${teamColor}22`, zIndex: 110, whiteSpace: "nowrap", animation: "tooltipIn 0.18s ease-out" }}>
@@ -441,26 +444,26 @@ const PlayerForm = ({ player, onSave, onCancel, accent }) => {
         <input ref={fr} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => { const file = e.target.files?.[0]; if (!file) return; const r = new FileReader(); r.onload = (ev) => sF((p) => ({ ...p, photo: ev.target.result })); r.readAsDataURL(file); }} />
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        <div><label style={S.label}>Ad</label><input style={S.input} value={f.name} onChange={(e) => sF((p) => ({ ...p, name: e.target.value }))} placeholder="Ad" /></div>
-        <div><label style={S.label}>Soyad</label><input style={S.input} value={f.surname} onChange={(e) => sF((p) => ({ ...p, surname: e.target.value }))} placeholder="Soyad" /></div>
+        <div><label style={S.label}>{t("name")}</label><input style={S.input} value={f.name} onChange={(e) => sF((p) => ({ ...p, name: e.target.value }))} placeholder={t("name")} /></div>
+        <div><label style={S.label}>{t("surname")}</label><input style={S.input} value={f.surname} onChange={(e) => sF((p) => ({ ...p, surname: e.target.value }))} placeholder={t("surname")} /></div>
       </div>
       <div>
-        <label style={S.label}>Mevki</label>
+        <label style={S.label}>{t("position")}</label>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
           {POSITIONS_LIST.map((p) => (<button key={p} onClick={() => sF((x) => ({ ...x, position: p }))} style={{ padding: "5px 11px", borderRadius: 6, fontSize: 10, fontWeight: 600, cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.4, border: f.position === p ? `1px solid ${accent}` : "1px solid rgba(255,255,255,0.08)", background: f.position === p ? `${accent}22` : "rgba(255,255,255,0.03)", color: f.position === p ? accent : "rgba(255,255,255,0.45)" }}>{p}</button>))}
         </div>
       </div>
       <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, padding: "14px", marginTop: 4 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-          <label style={{ ...S.label, marginBottom: 0 }}>Oyuncu Gücü</label>
+          <label style={{ ...S.label, marginBottom: 0 }}>{t("rating")}</label>
           <div style={{ background: `${ratingColor(f.rating)}22`, color: ratingColor(f.rating), padding: "2px 8px", borderRadius: 6, fontSize: 16, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", border: `1px solid ${ratingColor(f.rating)}55` }}>{f.rating}</div>
         </div>
         <input type="range" min="40" max="99" value={f.rating} style={{ width: "100%", height: 6, borderRadius: 6, appearance: "none", outline: "none", background: `linear-gradient(to right, ${ratingColor(f.rating)} ${((f.rating - 40) / (99 - 40)) * 100}%, rgba(255,255,255,0.08) ${((f.rating - 40) / (99 - 40)) * 100}%)` }} onChange={(e) => sF((p) => ({ ...p, rating: +e.target.value }))} />
         <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 10, color: "rgba(255,255,255,0.25)", fontWeight: 600 }}><span>40</span><span>99</span></div>
       </div>
       <div style={{ display: "flex", gap: 9 }}>
-        <button onClick={onCancel} style={{ ...S.btn, background: "rgba(255,255,255,0.06)", flex: 1 }}>İptal</button>
-        <button onClick={() => { if (!f.name.trim()) return; onSave({ ...player, ...f, id: player?.id || generateId() }); }} style={{ ...S.btn, flex: 1, background: `linear-gradient(135deg,${accent},${accent}bb)` }}><I.Check /> {player?.id ? "Güncelle" : "Kaydet"}</button>
+        <button onClick={onCancel} style={{ ...S.btn, background: "rgba(255,255,255,0.06)", flex: 1 }}>{t("cancel")}</button>
+        <button onClick={() => { if (!f.name.trim()) return; onSave({ ...player, ...f, id: player?.id || generateId() }); }} style={{ ...S.btn, flex: 1, background: `linear-gradient(135deg,${accent},${accent}bb)` }}><I.Check /> {player?.id ? t("update") : t("save")}</button>
       </div>
     </div>
   );
@@ -486,12 +489,12 @@ const QuickSelect = ({ role, players, onSelect, teamColor, onFieldIds }) => {
   );
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 }}>{role} mevkisi için adaylar</div>
+      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 }}>{t("candidates_for", {role})}</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 5, maxHeight: 300, overflow: "auto" }}>
         {candidates.map((p) => (<PlayerBtn key={p.id} p={p} />))}
-        {candidates.length === 0 && others.length === 0 && (<div style={{ textAlign: "center", padding: 20, color: "rgba(255,255,255,0.2)", fontSize: 12 }}>Bu mevki için uygun boşta oyuncu yok.</div>)}
+        {candidates.length === 0 && others.length === 0 && (<div style={{ textAlign: "center", padding: 20, color: "rgba(255,255,255,0.2)", fontSize: 12 }}>{t("no_candidates")}</div>)}
       </div>
-      {others.length > 0 && (<><div style={{ fontSize: 9, color: "rgba(255,255,255,0.25)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, marginTop: 4 }}>Diğer boşta oyuncular</div><div style={{ display: "flex", flexDirection: "column", gap: 5, maxHeight: 200, overflow: "auto" }}>{others.map((p) => (<PlayerBtn key={p.id} p={p} />))}</div></>)}
+      {others.length > 0 && (<><div style={{ fontSize: 9, color: "rgba(255,255,255,0.25)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, marginTop: 4 }}>{t("other_free")}</div><div style={{ display: "flex", flexDirection: "column", gap: 5, maxHeight: 200, overflow: "auto" }}>{others.map((p) => (<PlayerBtn key={p.id} p={p} />))}</div></>)}
     </div>
   );
 };
@@ -513,7 +516,7 @@ const CaptainSelector = ({ team, onSelect, accent }) => {
         <div style={{ flex: 1, minWidth: 0 }}><div style={{ color: "#e2e8f0", fontSize: 13, fontWeight: 600 }}>{p.name} {p.surname}</div><div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", fontWeight: 500, textTransform: "uppercase" }}>{p.position}</div></div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span style={{ color: rc, fontSize: 12, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace" }}>{p.rating}</span>
-          {isCap ? (<div style={{ background: "linear-gradient(135deg,#fbbf24,#f59e0b)", borderRadius: 6, padding: "3px 8px", fontSize: 10, fontWeight: 800, color: "#78350f" }}>Kaptan</div>) : (<div style={{ background: "rgba(255,255,255,0.06)", borderRadius: 6, padding: "3px 8px", fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,0.35)" }}>Seç</div>)}
+          {isCap ? (<div style={{ background: "linear-gradient(135deg,#fbbf24,#f59e0b)", borderRadius: 6, padding: "3px 8px", fontSize: 10, fontWeight: 800, color: "#78350f" }}>{t("captain")}</div>) : (<div style={{ background: "rgba(255,255,255,0.06)", borderRadius: 6, padding: "3px 8px", fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,0.35)" }}>{t("select")}</div>)}
         </div>
       </button>
     );
@@ -522,12 +525,12 @@ const CaptainSelector = ({ team, onSelect, accent }) => {
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(251,191,36,0.08)", borderRadius: 10, border: "1px solid rgba(251,191,36,0.15)" }}>
         <div style={{ fontSize: 20 }}>👑</div>
-        <div><div style={{ fontSize: 12, fontWeight: 700, color: "#fbbf24" }}>Kaptan Seçimi</div><div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)" }}>Kaptanın kolundaki bant sahada görünecek</div></div>
+        <div><div style={{ fontSize: 12, fontWeight: 700, color: "#fbbf24" }}>{t("captain_select")}</div><div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)" }}>{t("captain_hint")}</div></div>
       </div>
-      {team.captain && (<button onClick={() => onSelect(null)} style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid rgba(239,68,68,0.25)", background: "rgba(239,68,68,0.08)", cursor: "pointer", color: "#f87171", fontSize: 12, fontWeight: 600, textAlign: "center", width: "100%" }}>Kaptanlığı Kaldır</button>)}
-      {fieldPlayers.length > 0 && (<div><div style={{ fontSize: 9, color: "rgba(255,255,255,0.25)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 6 }}>Sahada</div><div style={{ display: "flex", flexDirection: "column", gap: 4 }}>{fieldPlayers.map((p) => (<PlayerRow key={p.id} p={p} />))}</div></div>)}
-      {benchPlayers.length > 0 && (<div><div style={{ fontSize: 9, color: "rgba(255,255,255,0.25)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 6 }}>Yedekler</div><div style={{ display: "flex", flexDirection: "column", gap: 4 }}>{benchPlayers.map((p) => (<PlayerRow key={p.id} p={p} />))}</div></div>)}
-      {team.players.length === 0 && (<div style={{ textAlign: "center", padding: 24, color: "rgba(255,255,255,0.2)" }}><div style={{ fontSize: 26, marginBottom: 6 }}>👥</div><div style={{ fontSize: 12 }}>Önce kadroyu oluşturun</div></div>)}
+      {team.captain && (<button onClick={() => onSelect(null)} style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid rgba(239,68,68,0.25)", background: "rgba(239,68,68,0.08)", cursor: "pointer", color: "#f87171", fontSize: 12, fontWeight: 600, textAlign: "center", width: "100%" }}>{t("captain_remove")}</button>)}
+      {fieldPlayers.length > 0 && (<div><div style={{ fontSize: 9, color: "rgba(255,255,255,0.25)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 6 }}>{t("on_pitch")}</div><div style={{ display: "flex", flexDirection: "column", gap: 4 }}>{fieldPlayers.map((p) => (<PlayerRow key={p.id} p={p} />))}</div></div>)}
+      {benchPlayers.length > 0 && (<div><div style={{ fontSize: 9, color: "rgba(255,255,255,0.25)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 6 }}>{t("on_bench")}</div><div style={{ display: "flex", flexDirection: "column", gap: 4 }}>{benchPlayers.map((p) => (<PlayerRow key={p.id} p={p} />))}</div></div>)}
+      {team.players.length === 0 && (<div style={{ textAlign: "center", padding: 24, color: "rgba(255,255,255,0.2)" }}><div style={{ fontSize: 26, marginBottom: 6 }}>👥</div><div style={{ fontSize: 12 }}>{t("captain_first_squad")}</div></div>)}
     </div>
   );
 };
@@ -539,9 +542,9 @@ const TeamStatsCard = ({ team, accent }) => {
   const topPlayer = [...team.players].sort((a, b) => b.rating - a.rating)[0];
   return (
     <div style={{ background: "rgba(255,255,255,0.03)", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}><I.Stats /><span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>Takım İstatistikleri</span></div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}><I.Stats /><span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>{t("team_stats")}</span></div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-        {[{ label: "Kadro", value: team.players.length, icon: "👥" }, { label: "Sahada", value: `${onField}/7`, icon: "⚽" }, { label: "Ort. Güç", value: avgRating, icon: "⭐" }].map((s) => (
+        {[{ label: t("stat_squad"), value: team.players.length, icon: "👥" }, { label: t("stat_field"), value: `${onField}/7`, icon: "⚽" }, { label: t("stat_avg"), value: avgRating, icon: "⭐" }].map((s) => (
           <div key={s.label} style={{ background: "rgba(255,255,255,0.03)", borderRadius: 8, padding: "8px 6px", textAlign: "center" }}>
             <div style={{ fontSize: 14, marginBottom: 2 }}>{s.icon}</div>
             <div style={{ fontSize: 16, fontWeight: 800, color: "#e2e8f0", fontFamily: "'JetBrains Mono',monospace" }}>{s.value}</div>
@@ -552,7 +555,7 @@ const TeamStatsCard = ({ team, accent }) => {
       {topPlayer && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, background: `${accent}0a`, borderRadius: 8, padding: "6px 10px", border: `1px solid ${accent}22` }}>
           <div style={{ width: 24, height: 24, borderRadius: "50%", flexShrink: 0, background: topPlayer.photo ? `url(${topPlayer.photo}) center/cover` : avatarColor(topPlayer.id), display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: 9, fontFamily: "'Bebas Neue',sans-serif", border: `2px solid ${accent}` }}>{!topPlayer.photo && getInitials(topPlayer.name, topPlayer.surname)}</div>
-          <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", fontWeight: 600 }}>En İyi Oyuncu</div><div style={{ fontSize: 12, color: "#e2e8f0", fontWeight: 700 }}>{topPlayer.name} {topPlayer.surname}</div></div>
+          <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", fontWeight: 600 }}>{t("top_player")}</div><div style={{ fontSize: 12, color: "#e2e8f0", fontWeight: 700 }}>{topPlayer.name} {topPlayer.surname}</div></div>
           <div style={{ color: ratingColor(topPlayer.rating), fontSize: 14, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace" }}>{topPlayer.rating}</div>
         </div>
       )}
@@ -597,7 +600,7 @@ const MatchResultModal = ({ open, onClose, teamA, teamB }) => {
       <div onClick={(e) => e.stopPropagation()} style={{ background: "#0e1117", borderRadius: "22px 22px 0 0", border: "1px solid rgba(255,255,255,0.08)", width: "100%", maxWidth: 480, maxHeight: "92vh", overflow: "auto", paddingBottom: "calc(20px + env(safe-area-inset-bottom, 0px))" }}>
         <div style={{ display: "flex", justifyContent: "center", paddingTop: 10 }}><div style={{ width: 36, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.14)" }} /></div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 20px 10px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#e2e8f0", fontSize: 16, fontWeight: 700 }}><I.Trophy /> Maç Sonucu</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#e2e8f0", fontSize: 16, fontWeight: 700 }}><I.Trophy /> {t("match_result")}</div>
           <button onClick={onClose} style={{ ...S.mini, border: "none", background: "none" }}><I.X /></button>
         </div>
         <div ref={scoreRef} style={{ padding: "0 18px 20px", display: "flex", flexDirection: "column", gap: 18, background: "#0e1117" }}>
@@ -623,23 +626,23 @@ const MatchResultModal = ({ open, onClose, teamA, teamB }) => {
                 </div>
               </div>
             </div>
-            {(scoreA > 0 || scoreB > 0) && (<div style={{ textAlign: "center", marginTop: 12, fontSize: 13, fontWeight: 700, color: winner ? "#fbbf24" : "rgba(255,255,255,0.45)", letterSpacing: 0.3 }}>{winner ? `🏆 ${winner} kazandı!` : "🤝 Beraberlik"}</div>)}
+            {(scoreA > 0 || scoreB > 0) && (<div style={{ textAlign: "center", marginTop: 12, fontSize: 13, fontWeight: 700, color: winner ? "#fbbf24" : "rgba(255,255,255,0.45)", letterSpacing: 0.3 }}>{winner ? t("winner", {name: winner}) : t("draw")}</div>)}
           </div>
           {/* Goals */}
           <div>
-            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>Goller <span style={{ color: "rgba(255,255,255,0.2)", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>(opsiyonel)</span></div>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>{t("goals")} <span style={{ color: "rgba(255,255,255,0.2)", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>{t("optional")}</span></div>
             <div style={{ display: "flex", gap: 5, marginBottom: 8 }}>
               <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: "1px solid rgba(255,255,255,0.08)", flexShrink: 0 }}>
                 {["A", "B"].map((s) => { const ac = s === "A" ? acA : acB; return (<button key={s} onClick={() => setGSide(s)} style={{ padding: "7px 10px", border: "none", cursor: "pointer", fontSize: 10, fontWeight: 700, background: gSide === s ? `${ac}20` : "transparent", color: gSide === s ? ac : "rgba(255,255,255,0.28)" }}>{s === "A" ? teamA.name.slice(0, 5) : teamB.name.slice(0, 5)}</button>); })}
               </div>
-              <input list="scorer-opts" value={gName} onChange={(e) => setGName(e.target.value)} placeholder="Gol atan..." onKeyDown={(e) => e.key === "Enter" && addGoal()} style={{ ...S.input, flex: 1, fontSize: 12, padding: "7px 10px" }} />
+              <input list="scorer-opts" value={gName} onChange={(e) => setGName(e.target.value)} placeholder={t("scorer_ph")} onKeyDown={(e) => e.key === "Enter" && addGoal()} style={{ ...S.input, flex: 1, fontSize: 12, padding: "7px 10px" }} />
               <datalist id="scorer-opts">{(gSide === "A" ? teamA : teamB).players.map((p) => (<option key={p.id} value={`${p.name} ${p.surname}`} />))}</datalist>
               <input value={gMin} onChange={(e) => setGMin(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addGoal()} type="number" min="1" max="120" placeholder="'" style={{ ...S.input, width: 46, fontSize: 12, padding: "7px 6px", textAlign: "center" }} />
               <button onClick={addGoal} style={{ ...S.mini, padding: "7px 9px", borderRadius: 8, color: gSide === "A" ? acA : acB, border: `1px solid ${gSide === "A" ? acA : acB}33`, background: gSide === "A" ? `${acA}14` : `${acB}14` }}><I.Plus /></button>
             </div>
             {goals.length > 0 && (<div style={{ display: "flex", flexDirection: "column", gap: 4 }}>{goals.map((g, i) => (<div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", background: "rgba(255,255,255,0.03)", borderRadius: 8, borderLeft: `3px solid ${g.side === "A" ? acA : acB}` }}><span style={{ fontSize: 14 }}>⚽</span><span style={{ flex: 1, fontSize: 13, color: "#e2e8f0", fontWeight: 600 }}>{g.scorer}</span>{g.minute && (<span style={{ fontSize: 11, color: "rgba(255,255,255,0.32)", fontFamily: "'JetBrains Mono',monospace" }}>{g.minute}'</span>)}<span style={{ fontSize: 9.5, color: g.side === "A" ? acA : acB, fontWeight: 700, letterSpacing: 0.3 }}>{g.side === "A" ? teamA.name.slice(0, 8) : teamB.name.slice(0, 8)}</span><button onClick={() => setGoals((gl) => gl.filter((_, j) => j !== i))} style={{ ...S.mini, padding: 2, border: "none", background: "none", color: "#f87171" }}>×</button></div>))}</div>)}
           </div>
-          <button onClick={share} style={{ ...S.btn, borderRadius: 13, padding: "14px", fontSize: 15, letterSpacing: 0.4, background: copied ? "linear-gradient(135deg,#059669,#10b981)" : "linear-gradient(135deg,#7c3aed,#a855f7)", boxShadow: copied ? "0 8px 24px rgba(5,150,105,0.35)" : "0 8px 28px rgba(124,58,237,0.38)" }}><I.Share />{copied ? "Panoya Kopyalandı ✓" : "Sonucu Paylaş"}</button>
+          <button onClick={share} style={{ ...S.btn, borderRadius: 13, padding: "14px", fontSize: 15, letterSpacing: 0.4, background: copied ? "linear-gradient(135deg,#059669,#10b981)" : "linear-gradient(135deg,#7c3aed,#a855f7)", boxShadow: copied ? "0 8px 24px rgba(5,150,105,0.35)" : "0 8px 28px rgba(124,58,237,0.38)" }}><I.Share />{copied ? t("copied") : t("share_result")}</button>
         </div>
       </div>
     </div>
@@ -651,10 +654,12 @@ const Toast = ({ message, show }) => (
   <div style={{ position: "fixed", bottom: "calc(76px + env(safe-area-inset-bottom, 0px))", left: "50%", transform: "translateX(-50%)", background: "#059669", color: "#fff", padding: "9px 22px", borderRadius: 10, fontSize: 13, fontWeight: 600, boxShadow: "0 8px 28px rgba(5,150,105,0.4)", opacity: show ? 1 : 0, transition: "opacity 0.25s", pointerEvents: "none", zIndex: 2000, whiteSpace: "nowrap" }}>{message}</div>
 );
 
+
 // ═══════════════════════════════════════════════════════════════════
 // ═══ MAIN APP
 // ═══════════════════════════════════════════════════════════════════
 export default function LineupPro() {
+  const [lang] = useLang(); // ★ Dil değişikliklerinde re-render
   const [mode, setMode] = useState(null);
   const [tab, setTab] = useState("field");
   const [teamA, setTeamA] = useState(() => loadTeam("teamA", "Takımım", TEAM_COLORS[0], true));
@@ -692,12 +697,12 @@ export default function LineupPro() {
 
   const savePlayer = (p) => {
     setTeam((t) => { const i = t.players.findIndex((x) => x.id === p.id); return { ...t, players: i >= 0 ? t.players.map((x, j) => (j === i ? p : x)) : [...t.players, p] }; });
-    setSP(false); setEP(null); toast_("Oyuncu kaydedildi!");
+    setSP(false); setEP(null); toast_(t("t_saved"));
   };
 
   const deletePlayer = (id) => {
     setTeam((t) => ({ ...t, players: t.players.filter((x) => x.id !== id), fieldPlayers: t.fieldPlayers.map((x) => (x === id ? null : x)), captain: t.captain === id ? null : t.captain }));
-    toast_("Oyuncu silindi!");
+    toast_(t("t_deleted"));
   };
 
   const autoFill = async (side) => {
@@ -714,7 +719,7 @@ export default function LineupPro() {
         for (let i = 0; i < 7; i++) { if (!n[i] && av.length) { n[i] = av.shift().id; } }
         return { ...t, fieldPlayers: n };
       });
-      toast_("Kadro otomatik kuruldu! 🤖");
+      toast_(t("t_auto_filled"));
     };
 
     const rewarded = await showRewarded(doFill);
@@ -724,7 +729,7 @@ export default function LineupPro() {
     }
   };
 
-  const clearField = (side) => { (side === "A" ? setTeamA : setTeamB)((t) => ({ ...t, fieldPlayers: Array(7).fill(null) })); toast_("Saha temizlendi!"); };
+  const clearField = (side) => { (side === "A" ? setTeamA : setTeamB)((t) => ({ ...t, fieldPlayers: Array(7).fill(null) })); toast_(t("t_field_cleared")); };
 
   const placePlayer = (side, idx, id) => {
     const setter = side === "A" ? setTeamA : setTeamB;
@@ -748,11 +753,11 @@ export default function LineupPro() {
 
   const handleShareLineup = async () => {
     const pitchEl = fieldRef.current;
-    if (!pitchEl) { toast_("Saha bulunamadı"); return; }
-    toast_("Ekran görüntüsü alınıyor...");
+    if (!pitchEl) { toast_(t("t_field_not_found")); return; }
+    toast_(t("t_screenshot"));
     showInterstitial();
     const ok = await captureAndShare(pitchEl, "dizilim.png");
-    if (ok) toast_("Dizilim paylaşıldı! 📸");
+    if (ok) toast_(t("t_lineup_shared"));
   };
 
   const onFieldIds = new Set(team.fieldPlayers.filter(Boolean));
@@ -785,15 +790,21 @@ export default function LineupPro() {
         <div style={{ position: "absolute", top: "15%", left: "10%", width: 180, height: 180, borderRadius: "50%", background: "radial-gradient(circle, rgba(5,150,105,0.08) 0%, transparent 70%)", animation: "pulseGlow 4s ease-in-out infinite" }} />
         <div style={{ position: "absolute", bottom: "20%", right: "5%", width: 140, height: 140, borderRadius: "50%", background: "radial-gradient(circle, rgba(245,158,11,0.06) 0%, transparent 70%)", animation: "pulseGlow 5s ease-in-out infinite 1s" }} />
       </div>
+
+      {/* ★ TOP BAR: Sadece dil seçici (sağ üst) */}
+      <div style={{ position: "absolute", top: "calc(14px + env(safe-area-inset-top, 0px))", right: 16, zIndex: 2 }}>
+        <LangToggle lang={lang} onChange={setLang} />
+      </div>
+
       <div style={{ position: "relative", zIndex: 1 }}>
         <img src={logo} alt="HalıSaha-Kolik" style={{ width: 72, height: 72, borderRadius: 18, objectFit: "cover", boxShadow: "0 12px 36px rgba(5,150,105,0.35), 0 0 60px rgba(5,150,105,0.15)", margin: "0 auto 18px", animation: "fadeUp 0.45s" }} />
         <h1 style={{ fontSize: 30, fontWeight: 700, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 3, marginBottom: 4, animation: "fadeUp 0.45s 0.08s both" }}>HalıSaha-Kolik</h1>
-        <p style={{ color: "rgba(255,255,255,0.32)", fontSize: 13, marginBottom: 10, animation: "fadeUp 0.45s 0.16s both" }}>Halı Saha Taktik & Takım Yönetimi</p>
+        <p style={{ color: "rgba(255,255,255,0.32)", fontSize: 13, marginBottom: 10, animation: "fadeUp 0.45s 0.16s both" }}>{t("mode_subtitle")}</p>
         <div style={{ fontSize: 10, color: "rgba(255,255,255,0.15)", fontWeight: 600, letterSpacing: 2, textTransform: "uppercase", marginBottom: 32, animation: "fadeUp 0.45s 0.2s both" }} />
           <div style={{ display: "flex", flexDirection: "column", gap: 12, width: "100%", maxWidth: 360 }}>
             {[
-              { key: "myteam", icon: <I.Shield />, col: "#34d399", bg: "rgba(5,150,105,0.12)", bd: "rgba(52,211,153,0.2)", title: "Kendi Takımım", sub: "Tek takım kur, kadro yönet, dizilim paylaş", detail: "7 kişilik kadro · 7 formasyon · Paylaşım" },
-              { key: "match", icon: <I.Trophy />, col: "#fbbf24", bg: "rgba(245,158,11,0.12)", bd: "rgba(251,191,36,0.2)", title: "Tüm Halı Saha", sub: "İki takım kur, maçı yönet, sonucu paylaş", detail: "2 takım · Yarı saha dizilimi · Gol kaydı" },
+              { key: "myteam", icon: <I.Shield />, col: "#34d399", bg: "rgba(5,150,105,0.12)", bd: "rgba(52,211,153,0.2)", title: t("mode_myteam_title"), sub: t("mode_myteam_sub"), detail: t("mode_myteam_detail") },
+              { key: "match", icon: <I.Trophy />, col: "#fbbf24", bg: "rgba(245,158,11,0.12)", bd: "rgba(251,191,36,0.2)", title: t("mode_match_title"), sub: t("mode_match_sub"), detail: t("mode_match_detail") },
             ].map((m, i) => (
               <button key={m.key} onClick={() => handleModeSelect(m.key)} style={{ padding: "18px 20px", borderRadius: 16, background: m.bg, border: `1px solid ${m.bd}`, cursor: "pointer", display: "flex", alignItems: "center", gap: 14, textAlign: "left", animation: `fadeUp 0.45s ${0.24 + i * 0.08}s both`, transition: "transform 0.15s, box-shadow 0.15s" }}>
                 <div style={{ width: 48, height: 48, borderRadius: 13, background: `${m.col}22`, display: "flex", alignItems: "center", justifyContent: "center", color: m.col, flexShrink: 0 }}>{m.icon}</div>
@@ -828,14 +839,14 @@ export default function LineupPro() {
           <button onClick={() => { setMode(null); showBanner(); }} style={{ ...S.mini, border: "none", background: "none", padding: 3 }}><I.Back /></button>
           <img src={logo} alt="HalıSaha-Kolik" style={{ width: 32, height: 32, borderRadius: 8, objectFit: "cover" }} />
           <div>
-            <div style={{ fontSize: 13, fontWeight: 700 }}>{isMatch ? "Halı Saha" : "Takımım"}</div>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>{isMatch ? t("hdr_match") : t("hdr_myteam")}</div>
             <div style={{ fontSize: 8, color: "rgba(255,255,255,0.28)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>{isMatch ? `${teamA.name} vs ${teamB.name}` : teamA.name}</div>
           </div>
         </div>
         <div style={{ display: "flex", gap: 4 }}>
           <button onClick={() => setSS(activeTeam)} style={{ ...S.mini, padding: "5px 7px", fontSize: 10 }}>⚙️</button>
           {isMatch ? (
-            <button onClick={handleMatchEnd} style={{ ...S.mini, padding: "5px 10px", gap: 5, fontSize: 10, fontWeight: 700, color: "#fbbf24", border: "1px solid rgba(251,191,36,0.3)", background: "rgba(251,191,36,0.08)", borderRadius: 8, display: "flex", alignItems: "center" }}><I.Flag /> Maçı Bitir</button>
+            <button onClick={handleMatchEnd} style={{ ...S.mini, padding: "5px 10px", gap: 5, fontSize: 10, fontWeight: 700, color: "#fbbf24", border: "1px solid rgba(251,191,36,0.3)", background: "rgba(251,191,36,0.08)", borderRadius: 8, display: "flex", alignItems: "center" }}><I.Flag /> {t("hdr_end_match")}</button>
           ) : (
             <button onClick={handleShareLineup} style={{ ...S.mini, padding: "5px 10px", gap: 4, display: "flex", alignItems: "center", borderRadius: 8, fontSize: 10, fontWeight: 600, color: tc, border: `1px solid ${tc}33`, background: `${tc}11` }}><I.Share /></button>
           )}
@@ -868,7 +879,7 @@ export default function LineupPro() {
                 ); })}
               </div>
               <div style={{ display: "flex", gap: 2 }}>
-                {(isMatch ? ["A", "B"] : ["A"]).map((s) => (<button key={`af${s}`} onClick={() => autoFill(s)} style={{ ...S.mini, padding: "4px 6px", fontSize: 9, fontWeight: 800, gap: 3, display: "flex", alignItems: "center", color: (s === "A" ? teamA : teamB).color.secondary, border: `1px solid ${(s === "A" ? teamA : teamB).color.secondary}33` }}><I.Zap />{isMatch ? s : "Otomatik"}</button>))}
+                {(isMatch ? ["A", "B"] : ["A"]).map((s) => (<button key={`af${s}`} onClick={() => autoFill(s)} style={{ ...S.mini, padding: "4px 6px", fontSize: 9, fontWeight: 800, gap: 3, display: "flex", alignItems: "center", color: (s === "A" ? teamA : teamB).color.secondary, border: `1px solid ${(s === "A" ? teamA : teamB).color.secondary}33` }}><I.Zap />{isMatch ? s : t("auto_fill")}</button>))}
                 <button onClick={() => { clearField("A"); if (isMatch) clearField("B"); }} style={{ ...S.mini, padding: 5, color: "#f87171" }}><I.Reset /></button>
               </div>
             </div>
@@ -878,13 +889,13 @@ export default function LineupPro() {
               <div ref={fieldRef} style={{ position: "relative", width: "100%", paddingTop: isMatch ? "170%" : "145%", borderRadius: "0 0 24px 24px", overflow: "hidden", background: "linear-gradient(180deg,#1a6b31 0%,#1e7a38 25%,#1a6b31 50%,#1e7a38 75%,#1a6b31 100%)", boxShadow: "0 12px 40px rgba(0,0,0,0.55), inset 0 0 80px rgba(0,0,0,0.3)", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
                 <div style={{ position: "absolute", inset: 0 }}>
                   <Pitch colA={teamA.color.secondary} colB={isMatch ? teamB.color.secondary : teamA.color.secondary} isMatch={isMatch} />
-                  {isMatch && (<div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", display: "flex", alignItems: "center", gap: 6, zIndex: 2, pointerEvents: "none" }}><div style={{ background: "rgba(0,0,0,0.5)", padding: "2px 8px", borderRadius: 4, fontSize: 7, color: "rgba(255,255,255,0.3)", fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", fontFamily: "'Bebas Neue',sans-serif", backdropFilter: "blur(4px)" }}>ORTA SAHA</div></div>)}
+                  {isMatch && (<div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", display: "flex", alignItems: "center", gap: 6, zIndex: 2, pointerEvents: "none" }}><div style={{ background: "rgba(0,0,0,0.5)", padding: "2px 8px", borderRadius: 4, fontSize: 7, color: "rgba(255,255,255,0.3)", fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", fontFamily: "'Bebas Neue',sans-serif", backdropFilter: "blur(4px)" }}>{t("midfield")}</div></div>)}
 
                   {/* Team A */}
-                  {getPositions("A").map((pos, idx) => { const pid = teamA.fieldPlayers[idx]; const p = pid ? teamA.players.find((x) => x.id === pid) : null; return p ? (<FieldPlayer key={`a${idx}`} player={p} x={pos.x} y={pos.y} fieldRef={fieldRef} teamColor={teamA.color.secondary} isCaptain={teamA.captain === p.id} side="A" isMatch={isMatch} onToggleCaptain={() => toggleCaptain("A", p.id)} onRemove={() => removeFromField("A", idx)} />) : (<EmptySlot key={`ae${idx}`} x={pos.x} y={pos.y} role={pos.role} teamColor={teamA.color.secondary} onDrop={(id) => placePlayer("A", idx, id)} onClickPlus={() => setQS({ side: "A", idx, role: pos.role })} />); })}
+                  {getPositions("A").map((pos, idx) => { const pid = teamA.fieldPlayers[idx]; const p = pid ? teamA.players.find((x) => x.id === pid) : null; return p ? (<FieldPlayer key={`a${idx}`} player={p} x={pos.x} y={pos.y} fieldRef={fieldRef} teamColor={teamA.color.secondary} isCaptain={teamA.captain === p.id} side="A" isMatch={isMatch} isGoalkeeper={pos.role === "KALECİ"} onToggleCaptain={() => toggleCaptain("A", p.id)} onRemove={() => removeFromField("A", idx)} />) : (<EmptySlot key={`ae${idx}`} x={pos.x} y={pos.y} role={pos.role} teamColor={teamA.color.secondary} onDrop={(id) => placePlayer("A", idx, id)} onClickPlus={() => setQS({ side: "A", idx, role: pos.role })} />); })}
 
                   {/* Team B */}
-                  {isMatch && getPositions("B").map((pos, idx) => { const pid = teamB.fieldPlayers[idx]; const p = pid ? teamB.players.find((x) => x.id === pid) : null; return p ? (<FieldPlayer key={`b${idx}`} player={p} x={pos.x} y={pos.y} fieldRef={fieldRef} teamColor={teamB.color.secondary} isCaptain={teamB.captain === p.id} side="B" isMatch={isMatch} onToggleCaptain={() => toggleCaptain("B", p.id)} onRemove={() => removeFromField("B", idx)} />) : (<EmptySlot key={`be${idx}`} x={pos.x} y={pos.y} role={pos.role} teamColor={teamB.color.secondary} onDrop={(id) => placePlayer("B", idx, id)} onClickPlus={() => setQS({ side: "B", idx, role: pos.role })} />); })}
+                  {isMatch && getPositions("B").map((pos, idx) => { const pid = teamB.fieldPlayers[idx]; const p = pid ? teamB.players.find((x) => x.id === pid) : null; return p ? (<FieldPlayer key={`b${idx}`} player={p} x={pos.x} y={pos.y} fieldRef={fieldRef} teamColor={teamB.color.secondary} isCaptain={teamB.captain === p.id} side="B" isMatch={isMatch} isGoalkeeper={pos.role === "KALECİ"} onToggleCaptain={() => toggleCaptain("B", p.id)} onRemove={() => removeFromField("B", idx)} />) : (<EmptySlot key={`be${idx}`} x={pos.x} y={pos.y} role={pos.role} teamColor={teamB.color.secondary} onDrop={(id) => placePlayer("B", idx, id)} onClickPlus={() => setQS({ side: "B", idx, role: pos.role })} />); })}
 
                   {/* Labels */}
                   <div style={{ position: "absolute", bottom: 3, left: 7, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 4, height: 4, borderRadius: "50%", background: teamA.color.secondary }} /><span style={{ fontSize: 6.5, color: "rgba(255,255,255,0.2)", fontWeight: 700, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>{teamA.name}</span></div>
@@ -897,7 +908,7 @@ export default function LineupPro() {
             {/* Drag list */}
             <div style={{ padding: "6px 13px 10px" }}>
               {isMatch && (<div style={{ display: "flex", gap: 4, marginBottom: 7 }}>{["A", "B"].map((s) => (<button key={s} onClick={() => setAT(s)} style={{ flex: 1, padding: "5px", borderRadius: 6, border: "none", cursor: "pointer", background: activeTeam === s ? `${(s === "A" ? teamA : teamB).color.secondary}20` : "rgba(255,255,255,0.03)", color: activeTeam === s ? (s === "A" ? teamA : teamB).color.secondary : "rgba(255,255,255,0.28)", fontSize: 11, fontWeight: 700 }}>{(s === "A" ? teamA : teamB).name}</button>))}</div>)}
-              <div style={{ fontSize: 8.5, color: "rgba(255,255,255,0.22)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.9, marginBottom: 5 }}>{team.players.length ? "Sürükle → sahaya bırak" : "Kadro sekmesinden oyuncu ekle"}</div>
+              <div style={{ fontSize: 8.5, color: "rgba(255,255,255,0.22)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.9, marginBottom: 5 }}>{team.players.length ? t("drag_hint") : t("no_squad_hint")}</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
                 {team.players.map((p) => (<PlayerCard key={p.id} player={p} compact isOnField={onFieldIds.has(p.id)} teamColor={tc} isCaptain={team.captain === p.id} onEdit={(pl) => { setEP(pl); setSP(true); }} onDelete={deletePlayer} />))}
               </div>
@@ -907,18 +918,18 @@ export default function LineupPro() {
           /* PLAYERS TAB */
           <div style={{ animation: "fadeIn 0.25s", padding: "11px 13px" }}>
             <div style={{ display: "flex", gap: 7, marginBottom: 11 }}>
-              <input style={{ ...S.input, flex: 1 }} placeholder="Oyuncu ara..." value={search} onChange={(e) => setSearch(e.target.value)} />
+              <input style={{ ...S.input, flex: 1 }} placeholder={t("search_player")} value={search} onChange={(e) => setSearch(e.target.value)} />
               <button onClick={() => { setEP(null); setSP(true); }} style={{ ...S.btn, width: "auto", padding: "10px 13px", borderRadius: 8, background: `linear-gradient(135deg,${team.color.primary},${team.color.secondary})` }}><I.Plus /></button>
             </div>
             <button onClick={async () => { showInterstitial(); setSC(true); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: "rgba(251,191,36,0.06)", borderRadius: 10, marginBottom: 10, border: "1px solid rgba(251,191,36,0.15)", cursor: "pointer", width: "100%" }}>
               <div style={{ fontSize: 16 }}>👑</div>
-              <div style={{ flex: 1, textAlign: "left" }}><div style={{ fontSize: 11, fontWeight: 700, color: "#fbbf24" }}>Kaptan</div><div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)" }}>{team.captain ? (() => { const cp = team.players.find((p) => p.id === team.captain); return cp ? `${cp.name} ${cp.surname}` : "Seçilmedi"; })() : "Kaptan seçilmedi"}</div></div>
+              <div style={{ flex: 1, textAlign: "left" }}><div style={{ fontSize: 11, fontWeight: 700, color: "#fbbf24" }}>{t("captain")}</div><div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)" }}>{team.captain ? (() => { const cp = team.players.find((p) => p.id === team.captain); return cp ? `${cp.name} ${cp.surname}` : t("captain_none"); })() : t("captain_none")}</div></div>
               <div style={{ color: "rgba(251,191,36,0.5)", transform: "rotate(-90deg)" }}><I.Chevron /></div>
             </button>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 9 }}><span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontWeight: 600 }}>{filtered.length} oyuncu</span><span style={{ fontSize: 10, color: "rgba(255,255,255,0.22)" }}>{onFieldIds.size}/7 sahada</span></div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 9 }}><span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontWeight: 600 }}>{t("players_count", {n: filtered.length})}</span><span style={{ fontSize: 10, color: "rgba(255,255,255,0.22)" }}>{t("on_field", {n: onFieldIds.size})}</span></div>
             <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
               {filtered.map((p) => (<PlayerCard key={p.id} player={p} isOnField={onFieldIds.has(p.id)} teamColor={tc} isCaptain={team.captain === p.id} onToggleCaptain={(id) => toggleCaptain(activeTeam, id)} onEdit={(pl) => { setEP(pl); setSP(true); }} onDelete={deletePlayer} />))}
-              {filtered.length === 0 && (<div style={{ textAlign: "center", padding: 38, color: "rgba(255,255,255,0.18)" }}><div style={{ fontSize: 30, marginBottom: 7 }}>⚽</div><div style={{ fontSize: 13, marginBottom: 11 }}>Oyuncu bulunamadı</div><button onClick={() => { setSearch(""); setEP(null); setSP(true); }} style={{ ...S.btn, width: "auto", padding: "7px 18px", fontSize: 12, display: "inline-flex", background: `linear-gradient(135deg,${team.color.primary},${team.color.secondary})` }}><I.Plus /> Oyuncu Ekle</button></div>)}
+              {filtered.length === 0 && (<div style={{ textAlign: "center", padding: 38, color: "rgba(255,255,255,0.18)" }}><div style={{ fontSize: 30, marginBottom: 7 }}>⚽</div><div style={{ fontSize: 13, marginBottom: 11 }}>{t("no_player_found")}</div><button onClick={() => { setSearch(""); setEP(null); setSP(true); }} style={{ ...S.btn, width: "auto", padding: "7px 18px", fontSize: 12, display: "inline-flex", background: `linear-gradient(135deg,${team.color.primary},${team.color.secondary})` }}><I.Plus /> {t("add_player")}</button></div>)}
             </div>
             <div style={{ marginTop: 14 }}><TeamStatsCard team={team} accent={tc} /></div>
           </div>
@@ -927,22 +938,22 @@ export default function LineupPro() {
 
       {/* ★ TAB BAR — fixed bottom + safe-area-inset-bottom */}
       <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, background: "rgba(7,10,15,0.96)", backdropFilter: "blur(16px)", borderTop: "1px solid rgba(255,255,255,0.05)", display: "flex", zIndex: 50, paddingBottom: BOTTOM_SAFE }}>
-        {[{ id: "field", icon: <I.Field />, label: "Saha" }, { id: "players", icon: <I.Users />, label: "Kadro" }].map((t) => (
+        {[{ id: "field", icon: <I.Field />, label: t("tab_field") }, { id: "players", icon: <I.Users />, label: t("tab_squad") }].map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "9px 0 7px", border: "none", cursor: "pointer", background: "transparent", color: tab === t.id ? tc : "rgba(255,255,255,0.28)", fontSize: 9.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 }}>{t.icon}{t.label}</button>
         ))}
       </div>
 
       {/* MODALS */}
-      <Modal open={showPlayer} onClose={() => { setSP(false); setEP(null); }} title={editPlayer ? "Oyuncuyu Düzenle" : "Yeni Oyuncu"}><PlayerForm player={editPlayer} onSave={savePlayer} onCancel={() => { setSP(false); setEP(null); }} accent={tc} /></Modal>
-      <Modal open={showCaptain} onClose={() => setSC(false)} title="Kaptan Seçimi"><CaptainSelector team={team} accent={tc} onSelect={(id) => { toggleCaptain(activeTeam, id); if (id) { setSC(false); toast_("Kaptan atandı! 👑"); } else { toast_("Kaptanlık kaldırıldı"); } }} /></Modal>
-      <Modal open={!!quickSelect} onClose={() => setQS(null)} title="Oyuncu Seç">{quickSelect && (<QuickSelect role={quickSelect.role} players={(quickSelect.side === "A" ? teamA : teamB).players} teamColor={(quickSelect.side === "A" ? teamA : teamB).color.secondary} onFieldIds={new Set((quickSelect.side === "A" ? teamA : teamB).fieldPlayers.filter(Boolean))} onSelect={(id) => { placePlayer(quickSelect.side, quickSelect.idx, id); setQS(null); }} />)}</Modal>
-      <Modal open={!!showSettings} onClose={() => setSS(null)} title="Takım Ayarları">
+      <Modal open={showPlayer} onClose={() => { setSP(false); setEP(null); }} title={editPlayer ? t("edit_player") : t("new_player")}><PlayerForm player={editPlayer} onSave={savePlayer} onCancel={() => { setSP(false); setEP(null); }} accent={tc} /></Modal>
+      <Modal open={showCaptain} onClose={() => setSC(false)} title={t("captain_select")}><CaptainSelector team={team} accent={tc} onSelect={(id) => { toggleCaptain(activeTeam, id); if (id) { setSC(false); toast_(t("t_captain_set")); } else { toast_(t("t_captain_removed")); } }} /></Modal>
+      <Modal open={!!quickSelect} onClose={() => setQS(null)} title={t("select")}>{quickSelect && (<QuickSelect role={quickSelect.role} players={(quickSelect.side === "A" ? teamA : teamB).players} teamColor={(quickSelect.side === "A" ? teamA : teamB).color.secondary} onFieldIds={new Set((quickSelect.side === "A" ? teamA : teamB).fieldPlayers.filter(Boolean))} onSelect={(id) => { placePlayer(quickSelect.side, quickSelect.idx, id); setQS(null); }} />)}</Modal>
+      <Modal open={!!showSettings} onClose={() => setSS(null)} title={t("team_settings")}>
         {showSettings && (() => { const tm = showSettings === "A" ? teamA : teamB; const setter = showSettings === "A" ? setTeamA : setTeamB; return (
           <div style={{ display: "flex", flexDirection: "column", gap: 15 }}>
             {isMatch && (<div style={{ display: "flex", gap: 5 }}>{["A", "B"].map((s) => { const t = s === "A" ? teamA : teamB; return (<button key={s} onClick={() => setSS(s)} style={{ flex: 1, padding: "7px", borderRadius: 8, border: "none", cursor: "pointer", background: showSettings === s ? `${t.color.secondary}20` : "transparent", color: showSettings === s ? t.color.secondary : "rgba(255,255,255,0.38)", fontWeight: 600, fontSize: 12, borderBottom: showSettings === s ? `2px solid ${t.color.secondary}` : "none" }}>{t.name}</button>); })}</div>)}
-            <div><label style={S.label}>Takım Adı</label><input style={S.input} value={tm.name} onChange={(e) => setter((t) => ({ ...t, name: e.target.value }))} /></div>
-            <div><label style={S.label}>Forma Rengi</label><ColorPicker value={tm.color} onChange={(c) => setter((t) => ({ ...t, color: c }))} /></div>
-            <button onClick={() => setSS(null)} style={{ ...S.btn, background: `linear-gradient(135deg,${tm.color.primary},${tm.color.secondary})` }}><I.Check /> Tamam</button>
+            <div><label style={S.label}>{t("team_name")}</label><input style={S.input} value={tm.name} onChange={(e) => setter((t) => ({ ...t, name: e.target.value }))} /></div>
+            <div><label style={S.label}>{t("team_color")}</label><ColorPicker value={tm.color} onChange={(c) => setter((t) => ({ ...t, color: c }))} /></div>
+            <button onClick={() => setSS(null)} style={{ ...S.btn, background: `linear-gradient(135deg,${tm.color.primary},${tm.color.secondary})` }}><I.Check /> {t("ok")}</button>
           </div>
         ); })()}
       </Modal>
