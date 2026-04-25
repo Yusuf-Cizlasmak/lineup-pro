@@ -22,6 +22,10 @@ workflows:
         script: |
           npm install
           npm install @capacitor/ios @capacitor/core @capacitor/cli @capacitor-community/admob --save
+          # ★ Native review dialog + browser fallback (RatePrompt)
+          npm install @capacitor-community/in-app-review @capacitor/browser --save
+          # ★ Haptic feedback (iOS Taptic Engine + Android Vibrator)
+          npm install @capacitor/haptics --save
 
       - name: Build web
         script: CI=false npm run build
@@ -61,13 +65,11 @@ workflows:
           /usr/libexec/PlistBuddy -c "Add :ITSAppManagesNonExemptEncryption bool false" "$PLIST" 2>/dev/null || true
 
           # ─── ATT (App Tracking Transparency) — GARANTİ EKLEME ───
-          # Apple, bu key olmadan ATT dialogunu göstermez.
-          # Önce Add dene, başarısız olursa Set ile ÜZERİNE YAZ.
           ATT_MSG="Reklamları ilgi alanlarınıza göre kişiselleştirmek için izninizi rica ediyoruz."
           /usr/libexec/PlistBuddy -c "Add :NSUserTrackingUsageDescription string $ATT_MSG" "$PLIST" 2>/dev/null \
             || /usr/libexec/PlistBuddy -c "Set :NSUserTrackingUsageDescription $ATT_MSG" "$PLIST"
 
-          # ─── DOĞRULAMA — Her key gerçekten yazıldı mı? ───
+          # ─── DOĞRULAMA ───
           echo "═══════════════════════════════════════"
           echo "Info.plist doğrulama:"
           echo "═══════════════════════════════════════"
@@ -77,7 +79,6 @@ workflows:
           ATT_VALUE=$(/usr/libexec/PlistBuddy -c 'Print :NSUserTrackingUsageDescription' "$PLIST" 2>/dev/null)
           if [ -z "$ATT_VALUE" ]; then
             echo "❌ KRİTİK HATA: NSUserTrackingUsageDescription eklenemedi!"
-            echo "Apple ATT dialogunu göstermeyecek — build iptal ediliyor."
             exit 1
           fi
           echo "NSUserTrackingUsageDescription = $ATT_VALUE"
@@ -88,7 +89,6 @@ workflows:
         script: |
           PBXPROJ="ios/App/App.xcodeproj/project.pbxproj"
 
-          # Codemagic'in indirdigi provisioning profile'i bul
           PROFILE_PATH=$(find "$HOME/Library/MobileDevice/Provisioning Profiles" -name "*.mobileprovision" 2>/dev/null | head -1)
           if [ -n "$PROFILE_PATH" ]; then
             PROFILE_UUID=$(security cms -D -i "$PROFILE_PATH" 2>/dev/null | grep -A1 'UUID' | grep '<string>' | sed 's/.*<string>\(.*\)<\/string>/\1/')
@@ -100,7 +100,6 @@ workflows:
             PROFILE_NAME=""
           fi
 
-          # pbxproj guncelle
           sed -i '' "s/CODE_SIGN_STYLE = Automatic/CODE_SIGN_STYLE = Manual/g" "$PBXPROJ"
           sed -i '' "s/DEVELOPMENT_TEAM = \"\"/DEVELOPMENT_TEAM = \"$DEVELOPMENT_TEAM\"/g" "$PBXPROJ"
           sed -i '' "s/DEVELOPMENT_TEAM = \"\";/DEVELOPMENT_TEAM = \"$DEVELOPMENT_TEAM\";/g" "$PBXPROJ"
