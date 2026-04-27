@@ -633,11 +633,13 @@ const MatchResultModal = ({ open, onClose, teamA, teamB }) => {
   };
 
   const share = async () => {
-    showInterstitial();
+    // iOS user-gesture chain için reklamı paylaşım sonrası göster
     if (scoreRef.current) {
       const ok = await captureAndShare(scoreRef.current, "mac-sonucu.png");
       if (ok) { setCopied(true); setTimeout(() => setCopied(false), 2200); }
     }
+    // Paylaşımdan sonra reklamı göster
+    setTimeout(() => { showInterstitial(); }, 500);
   };
 
   if (!open) return null;
@@ -984,14 +986,20 @@ export default function LineupPro() {
     setSR(true);
   };
 
-  const handleShareLineup = async () => {
+const handleShareLineup = async () => {
     const pitchEl = fieldRef.current;
     if (!pitchEl) { toast_(t("t_field_not_found")); return; }
     hapticLight();
     toast_(t("t_screenshot"));
-    showInterstitial();
+    
+    // iOS engelini aşmak için reklamı burdan sildik, en sona aldık.
     const ok = await captureAndShare(pitchEl, "dizilim.png");
     if (ok) { hapticSuccess(); toast_(t("t_lineup_shared")); }
+    
+    // İşlem bittikten sonra reklamı göster
+    setTimeout(() => {
+      showInterstitial();
+    }, 500);
   };
 
   const onFieldIds = new Set(team.fieldPlayers.filter(Boolean));
@@ -1079,10 +1087,13 @@ export default function LineupPro() {
         </div>
         <div style={{ display: "flex", gap: 4 }}>
           <button onClick={() => { hapticLight(); setShowAppSettings(true); }} style={{ ...S.mini, padding: "5px 7px", fontSize: 10 }}>⚙️</button>
-          {isMatch ? (
+
+          {/* PAYLAŞ BUTONU: Her iki modda da görünür */}
+          <button onClick={handleShareLineup} style={{ ...S.mini, padding: "5px 10px", gap: 4, display: "flex", alignItems: "center", borderRadius: 8, fontSize: 10, fontWeight: 600, color: tc, border: `1px solid ${tc}33`, background: `${tc}11` }}><I.Share /></button>
+
+          {/* MAÇI BİTİR BUTONU: Sadece maç modunda */}
+          {isMatch && (
             <button onClick={handleMatchEnd} style={{ ...S.mini, padding: "5px 10px", gap: 5, fontSize: 10, fontWeight: 700, color: "#fbbf24", border: "1px solid rgba(251,191,36,0.3)", background: "rgba(251,191,36,0.08)", borderRadius: 8, display: "flex", alignItems: "center" }}><I.Flag /> {t("hdr_end_match")}</button>
-          ) : (
-            <button onClick={handleShareLineup} style={{ ...S.mini, padding: "5px 10px", gap: 4, display: "flex", alignItems: "center", borderRadius: 8, fontSize: 10, fontWeight: 600, color: tc, border: `1px solid ${tc}33`, background: `${tc}11` }}><I.Share /></button>
           )}
         </div>
       </div>
