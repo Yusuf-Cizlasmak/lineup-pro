@@ -5,6 +5,7 @@ import { t, useLang, setLang, tPos } from "./i18n";
 import { LangToggle } from "./Onboarding";
 import { hapticLight, hapticMedium, hapticHeavy, hapticSuccess, hapticWarning, hapticSelection, isHapticsEnabled, setHapticsEnabled } from "./haptics";
 import { isTourDone, resetTour } from "./Tour";
+import { Share } from "@capacitor/share";
 
 // ─── SCREENSHOT & SHARE UTILITY ───
 const captureAndShare = async (element, filename = "halisaha-kolik.png") => {
@@ -73,27 +74,49 @@ const captureAndShare = async (element, filename = "halisaha-kolik.png") => {
 
     // ★ FİLİGRAN SONU
 
-    const blob = await new Promise((r) => canvas.toBlob(r, "image/png"));
-    const file = new File([blob], filename, { type: "image/png" });
+    const dataUrl = canvas.toDataURL("image/png");
 
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      await navigator.share({ files: [file], title: "HalıSaha-Kolik", text: "⚽ HalıSaha-Kolik" });
-      return true;
-    }
-    if (navigator.share) {
-      const dataUrl = canvas.toDataURL("image/png");
-      const w = window.open();
-      if (w) { w.document.write(`<img src="${dataUrl}" style="max-width:100%">`); }
-      return true;
-    }
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = filename; a.click();
-    URL.revokeObjectURL(url);
+    // Use Capacitor Share API
+    await Share.share({
+      title: "HalıSaha-Kolik",
+      text: "⚽ HalıSaha-Kolik",
+      url: dataUrl,
+      dialogTitle: "Paylaş",
+    });
+
     return true;
   } catch (e) {
+    // Fallback for web or if share fails
     console.error("Share error:", e);
-    return false;
+    try {
+      const canvas = await window.html2canvas(element, {
+        backgroundColor: "#0a1628",
+        scale: 2,
+        useCORS: true,
+        logging: false,
+      });
+      const blob = await new Promise((r) => canvas.toBlob(r, "image/png"));
+      const file = new File([blob], filename, { type: "image/png" });
+
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: "HalıSaha-Kolik", text: "⚽ HalıSaha-Kolik" });
+        return true;
+      }
+      if (navigator.share) {
+        const dataUrl = canvas.toDataURL("image/png");
+        const w = window.open();
+        if (w) { w.document.write(`<img src="${dataUrl}" style="max-width:100%">`); }
+        return true;
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = filename; a.click();
+      URL.revokeObjectURL(url);
+      return true;
+    } catch (e2) {
+      console.error("Fallback share error:", e2);
+      return false;
+    }
   }
 };
 
