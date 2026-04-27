@@ -10,7 +10,6 @@ import Tour, { isTourDone, resetTour } from "./Tour";
 const captureAndShare = async (element, filename = "halisaha-kolik.png") => {
   if (!element) return;
   try {
-    // html2canvas'ı dinamik yükle (CDN)
     if (!window.html2canvas) {
       await new Promise((resolve, reject) => {
         const s = document.createElement("script");
@@ -26,27 +25,67 @@ const captureAndShare = async (element, filename = "halisaha-kolik.png") => {
       useCORS: true,
       logging: false,
     });
+
+    // ★ FİLİGRAN EKLE
+    const ctx = canvas.getContext("2d");
+    const cw = canvas.width;
+    const ch = canvas.height;
+
+    // Sağ alt köşe filigranı — yarı saydam pill
+    const wmText = "⚽ HalıSaha-Kolik";
+    const fontSize = Math.max(18, Math.round(cw * 0.022));
+    ctx.font = `700 ${fontSize}px 'Bebas Neue', 'Oswald', sans-serif`;
+    const textW = ctx.measureText(wmText).width;
+    const padX = fontSize * 0.7;
+    const padY = fontSize * 0.45;
+    const pillW = textW + padX * 2;
+    const pillH = fontSize + padY * 2;
+    const margin = fontSize * 0.8;
+    const pillX = cw - pillW - margin;
+    const pillY = ch - pillH - margin;
+    const radius = pillH / 2;
+
+    // Pill arka planı
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.beginPath();
+    ctx.moveTo(pillX + radius, pillY);
+    ctx.lineTo(pillX + pillW - radius, pillY);
+    ctx.quadraticCurveTo(pillX + pillW, pillY, pillX + pillW, pillY + radius);
+    ctx.lineTo(pillX + pillW, pillY + pillH - radius);
+    ctx.quadraticCurveTo(pillX + pillW, pillY + pillH, pillX + pillW - radius, pillY + pillH);
+    ctx.lineTo(pillX + radius, pillY + pillH);
+    ctx.quadraticCurveTo(pillX, pillY + pillH, pillX, pillY + pillH - radius);
+    ctx.lineTo(pillX, pillY + radius);
+    ctx.quadraticCurveTo(pillX, pillY, pillX + radius, pillY);
+    ctx.closePath();
+    ctx.fill();
+
+    // İnce yeşil çerçeve
+    ctx.strokeStyle = "rgba(52,211,153,0.45)";
+    ctx.lineWidth = Math.max(1, fontSize * 0.06);
+    ctx.stroke();
+
+    // Metin
+    ctx.fillStyle = "rgba(255,255,255,0.95)";
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "center";
+    ctx.fillText(wmText, pillX + pillW / 2, pillY + pillH / 2 + 1);
+
+    // ★ FİLİGRAN SONU
+
     const blob = await new Promise((r) => canvas.toBlob(r, "image/png"));
     const file = new File([blob], filename, { type: "image/png" });
 
-    // Native share (iOS/Android + modern browsers)
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      await navigator.share({
-        files: [file],
-        title: "HalıSaha-Kolik",
-        text: "⚽ HalıSaha-Kolik",
-      });
+      await navigator.share({ files: [file], title: "HalıSaha-Kolik", text: "⚽ HalıSaha-Kolik" });
       return true;
     }
-    // Fallback: sadece metin paylaş
     if (navigator.share) {
       const dataUrl = canvas.toDataURL("image/png");
-      // Yeni sekmede aç
       const w = window.open();
       if (w) { w.document.write(`<img src="${dataUrl}" style="max-width:100%">`); }
       return true;
     }
-    // Son fallback: indir
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url; a.download = filename; a.click();
@@ -660,9 +699,9 @@ const MatchResultModal = ({ open, onClose, teamA, teamB }) => {
 const AppSettingsModal = ({ open, onClose, onReplayOnboarding, onReplayTour, onOpenTeamSettings, hapticsOn, onToggleHaptics, lang }) => {
   if (!open) return null;
   const Row = ({ icon, title, sub, right, onClick }) => (
-    <button
+    <div
       onClick={onClick}
-      disabled={!onClick}
+      role={onClick ? "button" : undefined}
       style={{
         display: "flex", alignItems: "center", gap: 12,
         padding: "12px 14px", width: "100%",
@@ -678,7 +717,7 @@ const AppSettingsModal = ({ open, onClose, onReplayOnboarding, onReplayTour, onO
         {sub && <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>{sub}</div>}
       </div>
       {right}
-    </button>
+    </div>
   );
 
   const Switch = ({ on, onChange }) => (
@@ -802,6 +841,15 @@ export default function LineupPro() {
     startAds();
   }, []);
 
+
+  useEffect(() => {
+  if (!mode && !isTourDone() && teamA.players.length === 0 && teamB.players.length === 0) {
+    const timer = setTimeout(() => setTourActive(true), 800);
+    return () => clearTimeout(timer);
+  }
+  }, []); // sadece ilk mount
+
+
   // ★ Banner kontrolü — SADECE mode select ekranında ve hiçbir modal/tour açık değilken görünsün
   useEffect(() => {
     const anyModalOpen =
@@ -912,10 +960,7 @@ export default function LineupPro() {
       milestones.current.firstMatch = true;
       setTimeout(() => toast_(t("t_first_match")), 600);
     }
-    // ★ Rehber turu — sadece "myteam" modunda ve henüz tamamlanmamışsa
-    if (newMode === "myteam" && !isTourDone() && teamA.players.length === 0) {
-      setTimeout(() => setTourActive(true), 700);
-    }
+
   };
 
   const handleMatchEnd = async () => {
@@ -980,7 +1025,7 @@ export default function LineupPro() {
               { key: "myteam", icon: <I.Shield />, col: "#34d399", bg: "rgba(5,150,105,0.12)", bd: "rgba(52,211,153,0.2)", title: t("mode_myteam_title"), sub: t("mode_myteam_sub"), detail: t("mode_myteam_detail") },
               { key: "match", icon: <I.Trophy />, col: "#fbbf24", bg: "rgba(245,158,11,0.12)", bd: "rgba(251,191,36,0.2)", title: t("mode_match_title"), sub: t("mode_match_sub"), detail: t("mode_match_detail") },
             ].map((m, i) => (
-              <button key={m.key} onClick={() => handleModeSelect(m.key)} style={{ padding: "18px 20px", borderRadius: 16, background: m.bg, border: `1px solid ${m.bd}`, cursor: "pointer", display: "flex", alignItems: "center", gap: 14, textAlign: "left", animation: `fadeUp 0.45s ${0.24 + i * 0.08}s both`, transition: "transform 0.15s, box-shadow 0.15s" }}>
+              <button key={m.key} data-tour={m.key === "myteam" ? "mode-myteam" : undefined} onClick={() => handleModeSelect(m.key)} style={{ padding: "18px 20px", borderRadius: 16, background: m.bg, border: `1px solid ${m.bd}`, cursor: "pointer", display: "flex", alignItems: "center", gap: 14, textAlign: "left", animation: `fadeUp 0.45s ${0.24 + i * 0.08}s both`, transition: "transform 0.15s, box-shadow 0.15s" }}>
                 <div style={{ width: 48, height: 48, borderRadius: 13, background: `${m.col}22`, display: "flex", alignItems: "center", justifyContent: "center", color: m.col, flexShrink: 0 }}>{m.icon}</div>
                 <div style={{ flex: 1 }}>
                   <div style={{ color: m.col, fontSize: 15, fontWeight: 700, marginBottom: 2 }}>{m.title}</div>

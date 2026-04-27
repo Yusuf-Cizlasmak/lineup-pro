@@ -9,6 +9,8 @@ const STORAGE_KEY = "halisaha_lang";
 const DICT = {
   tr: {
     // Onboarding
+    tour_0_title: "Hadi Başlayalım",
+    tour_0_desc: "Önce bir mod seç. \"Kendi Takımım\" seçeneğine dokunarak devam et.",
     onb_skip: "Atla",
     onb_next: "İleri",
     onb_start: "Başla",
@@ -164,6 +166,8 @@ const DICT = {
     settings_show_tour_sub: "Oyuncu ekleme adımlarını tekrar göster",
   },
   en: {
+    tour_0_title: "Let's Get Started",
+    tour_0_desc: "First, pick a mode. Tap \"My Team\" to continue.",
     onb_skip: "Skip",
     onb_next: "Next",
     onb_start: "Get Started",
