@@ -4,7 +4,7 @@ import { startAds, showInterstitial, showRewarded, showBanner, hideBanner } from
 import { t, useLang, setLang, tPos } from "./i18n";
 import { LangToggle } from "./Onboarding";
 import { hapticLight, hapticMedium, hapticHeavy, hapticSuccess, hapticWarning, hapticSelection, isHapticsEnabled, setHapticsEnabled } from "./haptics";
-import Tour, { isTourDone, resetTour } from "./Tour";
+import { isTourDone, resetTour } from "./Tour";
 
 // ─── SCREENSHOT & SHARE UTILITY ───
 const captureAndShare = async (element, filename = "halisaha-kolik.png") => {
@@ -824,7 +824,8 @@ export default function LineupPro() {
   const [showCaptain, setSC] = useState(false);
   const [showAppSettings, setShowAppSettings] = useState(false); // ★ Genel ayarlar modal
   const [hapticsOn, setHapticsOnState] = useState(isHapticsEnabled());
-  const [tourActive, setTourActive] = useState(false); // ★ Rehber turu
+  // ★ Rehber turu — App.js'teki tek Tour instance'ı window event ile yönetilir
+  const tourActive = false; // sadece banner kontrolü için placeholder
   const [quickSelect, setQS] = useState(null);
   const [search, setSearch] = useState("");
   const [toast, setToast] = useState({ show: false, msg: "" });
@@ -843,18 +844,21 @@ export default function LineupPro() {
 
 
   useEffect(() => {
-  if (!mode && !isTourDone() && teamA.players.length === 0 && teamB.players.length === 0) {
-    const timer = setTimeout(() => setTourActive(true), 800);
-    return () => clearTimeout(timer);
-  }
+    if (!mode && !isTourDone() && teamA.players.length === 0 && teamB.players.length === 0) {
+      const timer = setTimeout(() => {
+        window.dispatchEvent(new CustomEvent("halisaha:start-tour"));
+      }, 800);
+      return () => clearTimeout(timer);
+    }
   }, []); // sadece ilk mount
 
 
-  // ★ Banner kontrolü — SADECE mode select ekranında ve hiçbir modal/tour açık değilken görünsün
+  // ★ Banner kontrolü — SADECE mode select ekranında ve hiçbir modal/tour/onboarding açık değilken görünsün
   useEffect(() => {
+    const onbActive = window.__onboardingActive === true;
     const anyModalOpen =
       showPlayer || showCaptain || showAppSettings || showResult ||
-      !!showSettings || !!quickSelect || tourActive;
+      !!showSettings || !!quickSelect || tourActive || onbActive;
     const onModeSelect = mode === null;
 
     if (onModeSelect && !anyModalOpen) {
@@ -863,6 +867,15 @@ export default function LineupPro() {
       hideBanner();
     }
   }, [mode, showPlayer, showCaptain, showAppSettings, showResult, showSettings, quickSelect, tourActive]);
+
+  // ★ Onboarding bittiğinde banner'ı tekrar göster
+  useEffect(() => {
+    const onDone = () => {
+      if (mode === null) showBanner();
+    };
+    window.addEventListener("halisaha:onboarding-done", onDone);
+    return () => window.removeEventListener("halisaha:onboarding-done", onDone);
+  }, [mode]);
 
   // ★ KAYIT: Takım verilerini localStorage'a kaydet
   useEffect(() => {
@@ -955,12 +968,14 @@ export default function LineupPro() {
     hapticMedium();
     showInterstitial();
     setMode(newMode);
-    // İlk maç mikro-ödülü
+    
+    // ★ Tour için: mod seçildi sinyali
+    window.dispatchEvent(new CustomEvent("halisaha:mode-selected"));
+
     if (newMode === "match" && !milestones.current.firstMatch) {
       milestones.current.firstMatch = true;
       setTimeout(() => toast_(t("t_first_match")), 600);
     }
-
   };
 
   const handleMatchEnd = async () => {
@@ -1198,13 +1213,12 @@ export default function LineupPro() {
         open={showAppSettings}
         onClose={() => setShowAppSettings(false)}
         onReplayOnboarding={() => { window.dispatchEvent(new CustomEvent("halisaha:replay-onboarding")); }}
-        onReplayTour={() => { resetTour(); setTourActive(true); }}
+        onReplayTour={() => { resetTour(); setMode(null); setTimeout(() => window.dispatchEvent(new CustomEvent("halisaha:start-tour")), 300); }}
         onOpenTeamSettings={() => setSS(activeTeam)}
         hapticsOn={hapticsOn}
         onToggleHaptics={(v) => { setHapticsEnabled(v); setHapticsOnState(v); }}
         lang={lang}
       />
-      <Tour active={tourActive} onFinish={() => setTourActive(false)} />
       <Toast message={toast.msg} show={toast.show} />
     </div>
   );

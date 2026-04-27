@@ -19,7 +19,7 @@ export const resetTour = () => {
 };
 
 const STEPS = [
-  { target: "mode-myteam",    title: "tour_0_title", desc: "tour_0_desc", placement: "bottom", waitFor: "click" },
+  { target: "mode-myteam",    title: "tour_0_title", desc: "tour_0_desc", placement: "bottom", waitFor: "event:mode-selected" }, // ← değişti
   { target: "tab-squad",      title: "tour_1_title", desc: "tour_1_desc", placement: "top",    waitFor: "click" },
   { target: "btn-add-player", title: "tour_2_title", desc: "tour_2_desc", placement: "bottom", waitFor: "click" },
   { target: null,             title: "tour_3_title", desc: "tour_3_desc", placement: "center", waitFor: "event:player-saved" },
@@ -62,7 +62,7 @@ export default function Tour({ active, onFinish }) {
   useEffect(() => {
     if (!active || !step) return;
     measure();
-    const tries = [50, 200, 450, 800];
+    const tries = [100, 400, 800, 1500]; // ← önceden [50, 200, 450, 800
     const timers = tries.map((ms) => setTimeout(measure, ms));
     return () => timers.forEach(clearTimeout);
   }, [active, step, tick, measure]);
@@ -84,8 +84,11 @@ export default function Tour({ active, onFinish }) {
     if (!active || !step || step.waitFor !== "click") return;
     const el = targetElRef.current;
     if (!el) return;
+    let fired = false;
     const handler = () => {
-      setTimeout(() => advance(), 200);
+      if (fired) return;
+      fired = true;
+      setTimeout(() => advance(), 350);
     };
     el.addEventListener("click", handler, true);
     return () => el.removeEventListener("click", handler, true);
