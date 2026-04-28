@@ -53,19 +53,23 @@ export default function Onboarding({ onFinish }) {
   // ★ Onboarding boyunca banner reklamı gizle (İleri butonunu kapatmasın)
   // Geri yüklemeyi ana app'in useEffect'i yönetir
   useEffect(() => {
-  window.__onboardingActive = true;
-  hideBanner();
-  
-  // Her step değişiminde de banner'ı gizle (React re-render güvencesi)
-  const interval = setInterval(() => {
-    if (window.__onboardingActive) hideBanner();
-  }, 500);
-  
-  return () => {
-    clearInterval(interval);
-    window.__onboardingActive = false;
-    window.dispatchEvent(new CustomEvent("halisaha:onboarding-done"));
-  };
+    window.__onboardingActive = true;
+    hideBanner();
+
+    // Her step değişiminde de banner'ı gizle (React re-render güvencesi)
+    const interval = setInterval(() => {
+      if (window.__onboardingActive) hideBanner();
+    }, 500);
+
+    return () => {
+      clearInterval(interval);
+      // ★ Önce flag'i false yap — listener'lar doğru durumu görsün
+      window.__onboardingActive = false;
+      // ★ Sonra event dispatch et — bir microtask sonra ki React unmount tamamlansın
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent("halisaha:onboarding-done"));
+      }, 50);
+    };
   }, []);
 
   return (

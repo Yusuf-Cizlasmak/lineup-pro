@@ -6,6 +6,8 @@ import { LangToggle } from "./Onboarding";
 import { hapticLight, hapticMedium, hapticHeavy, hapticSuccess, hapticWarning, hapticSelection, isHapticsEnabled, setHapticsEnabled } from "./haptics";
 import { isTourDone, resetTour } from "./Tour";
 import { Share } from "@capacitor/share";
+import { Filesystem, Directory } from "@capacitor/filesystem";
+import { Capacitor } from "@capacitor/core";
 
 // ─── SCREENSHOT & SHARE UTILITY ───
 const captureAndShare = async (element, filename = "halisaha-kolik.png") => {
@@ -76,36 +78,65 @@ const captureAndShare = async (element, filename = "halisaha-kolik.png") => {
 
     const dataUrl = canvas.toDataURL("image/png");
 
-    // Use Capacitor Share API
-    await Share.share({
-      title: "HalıSaha-Kolik",
-      text: "⚽ HalıSaha-Kolik",
-      url: dataUrl,
-      dialogTitle: "Paylaş",
-    });
+    // ★ NATIVE (iOS + Android) — dosyayı önce cache'e yaz, sonra file:// URI paylaş
+    if (Capacitor.isNativePlatform()) {
+      // dataUrl → base64 (data:image/png;base64,XXX → XXX)
+      const base64 = dataUrl.split(",")[1];
+      // Her seferinde unique isim — cache'te eski dosya kalmasın
+      const safeName = `halisaha_${Date.now()}.png`;
 
+      const written = await Filesystem.writeFile({
+        path: safeName,
+        data: base64,
+        directory: Directory.Cache,
+      });
+
+      // Capacitor 5+ : .uri ; 4 ve öncesi: writeFile bazen path döner — ikisini de tolere et
+      const fileUri = written?.uri || written?.path;
+      if (!fileUri) throw new Error("Filesystem.writeFile uri vermedi");
+
+      await Share.share({
+        title: "HalıSaha-Kolik",
+        text: "⚽ HalıSaha-Kolik",
+        url: fileUri,            // ← Android için ŞART: gerçek file:// URI
+        dialogTitle: "Paylaş",
+      });
+      return true;
+    }
+
+    // ★ WEB fallback — Web Share Level 2 (files) varsa onu kullan
+    const blob = await new Promise((r) => canvas.toBlob(r, "image/png"));
+    const file = new File([blob], filename, { type: "image/png" });
+
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: "HalıSaha-Kolik", text: "⚽ HalıSaha-Kolik" });
+      return true;
+    }
+
+    // Son çare: indir
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
     return true;
   } catch (e) {
-    // Fallback for web or if share fails
     console.error("Share error:", e);
+    // Native'de iptal etme (UserCancelled) hatası gelirse sessizce yut
+    if (typeof e?.message === "string" && /cancel|cancelled|canceled/i.test(e.message)) {
+      return false;
+    }
+    // Web fallback bir kez daha denensin
     try {
-      const canvas = await window.html2canvas(element, {
+      const canvas2 = await window.html2canvas(element, {
         backgroundColor: "#0a1628",
         scale: 2,
         useCORS: true,
         logging: false,
       });
-      const blob = await new Promise((r) => canvas.toBlob(r, "image/png"));
+      const blob = await new Promise((r) => canvas2.toBlob(r, "image/png"));
       const file = new File([blob], filename, { type: "image/png" });
-
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({ files: [file], title: "HalıSaha-Kolik", text: "⚽ HalıSaha-Kolik" });
-        return true;
-      }
-      if (navigator.share) {
-        const dataUrl = canvas.toDataURL("image/png");
-        const w = window.open();
-        if (w) { w.document.write(`<img src="${dataUrl}" style="max-width:100%">`); }
         return true;
       }
       const url = URL.createObjectURL(blob);
@@ -887,16 +918,24 @@ export default function LineupPro() {
     const onModeSelect = mode === null;
 
     if (onModeSelect && !anyModalOpen) {
-      showBanner();
+      // ★ SDK init için kısa bir tampon — açılışta yarışı önler
+      const t1 = setTimeout(() => showBanner(), 100);
+      // ★ Native flag yarışına karşı bir kez daha dene
+      const t2 = setTimeout(() => {
+        if (window.__onboardingActive !== true && mode === null) showBanner();
+      }, 1500);
+      return () => { clearTimeout(t1); clearTimeout(t2); };
     } else {
       hideBanner();
     }
   }, [mode, showPlayer, showCaptain, showAppSettings, showResult, showSettings, quickSelect, tourActive]);
 
-  // ★ Onboarding bittiğinde banner'ı tekrar göster
+  // ★ Onboarding bittiğinde banner'ı tekrar göster — kademeli retry
   useEffect(() => {
     const onDone = () => {
-      if (mode === null) showBanner();
+      // Onboarding'in cleanup tamamlanması için kısa bekleme + iki kademeli retry
+      setTimeout(() => { if (mode === null) showBanner(); }, 200);
+      setTimeout(() => { if (mode === null) showBanner(); }, 1200);
     };
     window.addEventListener("halisaha:onboarding-done", onDone);
     return () => window.removeEventListener("halisaha:onboarding-done", onDone);
@@ -991,9 +1030,12 @@ export default function LineupPro() {
 
   const handleModeSelect = async (newMode) => {
     hapticMedium();
-    showInterstitial();
+
+    // Reklam Promise'ini bekle — show başarısız olsa bile (false dönerse) anında devam eder.
+    try { await showInterstitial(); } catch (_) {}
+
     setMode(newMode);
-    
+
     // ★ Tour için: mod seçildi sinyali
     window.dispatchEvent(new CustomEvent("halisaha:mode-selected"));
 

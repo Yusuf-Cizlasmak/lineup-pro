@@ -14,8 +14,9 @@ const config: CapacitorConfig = {
     // ─── AdMob Plugin Ayarları ───
     AdMob: {
       appIdIos: 'ca-app-pub-2886543552287006~5889085689',
-      // Android kullanılırsa buraya da eklenebilir:
-      // appIdAndroid: 'ca-app-pub-XXXX~YYYY',
+      // ★ Android App ID'ni AdMob konsolundan al (Apps → HaliSahaKolik Android → App settings)
+      // Format: ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY  (tilde ~ ile, slash / değil!)
+      appIdAndroid: 'ca-app-pub-2886543552287006~2792195810',
     },
     // ─── Status Bar ───
     StatusBar: {

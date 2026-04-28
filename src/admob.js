@@ -1,22 +1,37 @@
 import { AdMob, BannerAdSize, BannerAdPosition, MaxAdContentRating, AdmobConsentStatus } from '@capacitor-community/admob';
 import { Capacitor } from '@capacitor/core';
 
-const IS_TESTING = false;
+const IS_TESTING = true;
 
-const AD_CONFIG = {
-  banner:       'ca-app-pub-2886543552287006/3886785053',
-  interstitial: 'ca-app-pub-2886543552287006/2573703388',
-  rewarded:     'ca-app-pub-2886543552287006/6520687257',
+// ═══ PLATFORM-SPECIFIC AD IDs ═══
+const PLATFORM = Capacitor.getPlatform(); // 'ios' | 'android' | 'web'
+
+const AD_IDS = {
+  ios: {
+    banner:       'ca-app-pub-2886543552287006/3886785053',
+    interstitial: 'ca-app-pub-2886543552287006/2573703388',
+    rewarded:     'ca-app-pub-2886543552287006/6520687257',
+  },
+  android: {
+    // ★ ANDROID REKLAM BİRİMİ ID'LERİNİ BURAYA YAZ
+    banner:       'ca-app-pub-2886543552287006/5847500924',
+    interstitial: 'ca-app-pub-2886543552287006/1389381160',
+    rewarded:     'ca-app-pub-2886543552287006/5254707624',
+  },
 };
 
+const AD_CONFIG = AD_IDS[PLATFORM] || AD_IDS.android;
+
+// ═══ COOLDOWN & SESSION LIMITS ═══
 const INTERSTITIAL_COOLDOWN_MS = 20000;
 const REWARDED_COOLDOWN_MS = 20000;
+const MAX_INTERSTITIALS_PER_SESSION = 6;
+const MAX_REWARDED_PER_SESSION = 10;
+
 let lastInterstitialTime = 0;
 let lastRewardedTime = 0;
 let interstitialCount = 0;
 let rewardedCount = 0;
-const MAX_INTERSTITIALS_PER_SESSION = 6;
-const MAX_REWARDED_PER_SESSION = 10;
 
 let isInitialized = false;
 let isBannerShowing = false;
@@ -27,11 +42,9 @@ let canShowAds = false;
 const isNative = () => Capacitor.isNativePlatform();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// ─── ATT (App Tracking Transparency) ───
-// Apple, ATT isteğinin uygulama tam "active" state'e geçtikten sonra
-// gösterilmesini bekler. SDK init'ten ÖNCE ve küçük bir delay ile çağırıyoruz.
+// ─── ATT (App Tracking Transparency) — Sadece iOS ───
 async function requestATT() {
-  if (!isNative() || Capacitor.getPlatform() !== 'ios') return;
+  if (!isNative() || PLATFORM !== 'ios') return;
 
   try {
     // UI'ın tam render olması ve app'in "active" state'e geçmesi için kısa bekleme
@@ -49,6 +62,7 @@ async function requestATT() {
   }
 }
 
+// ═══ INITIALIZATION ═══
 export async function initializeAdMob() {
   if (!isNative()) {
     console.log('ℹ️ AdMob: Web ortamı — atlanıyor');
@@ -56,8 +70,11 @@ export async function initializeAdMob() {
   }
   if (isInitialized) return true;
 
+  console.log(`ℹ️ AdMob platform: ${PLATFORM}`);
+  console.log(`ℹ️ AdMob banner ID: ${AD_CONFIG.banner}`);
+
   try {
-    // ═══ 1) ÖNCE ATT iste — herhangi bir tracking verisi toplanmadan önce ═══
+    // ═══ 1) ÖNCE ATT iste (sadece iOS) ═══
     await requestATT();
 
     // ═══ 2) SONRA AdMob SDK'yı başlat ═══
@@ -82,13 +99,14 @@ export async function initializeAdMob() {
       canShowAds = true;
     }
 
-    // ─── Event listener'lar ───
+    // ─── Banner event listener'ları ───
     AdMob.addListener('onBannerAdLoaded', () => console.log('✅ Banner yüklendi'));
     AdMob.addListener('onBannerAdFailedToLoad', (e) => {
       console.error('❌ Banner fail:', JSON.stringify(e));
       isBannerShowing = false;
     });
 
+    // ─── Interstitial event listener'ları ───
     AdMob.addListener('onInterstitialAdLoaded', () => {
       console.log('✅ Interstitial yüklendi');
       isInterstitialReady = true;
@@ -103,6 +121,7 @@ export async function initializeAdMob() {
       setTimeout(() => prepareInterstitial(), 1000);
     });
 
+    // ─── Rewarded event listener'ları ───
     AdMob.addListener('onRewardedVideoAdLoaded', () => {
       console.log('✅ Rewarded yüklendi');
       isRewardedReady = true;
@@ -132,6 +151,8 @@ export async function showBanner() {
   if (!isNative() || !isInitialized) return;
   if (isBannerShowing) return;
   try {
+    // ★ Önceki bir banner kalıntısı varsa temizle (Android race condition)
+    try { await AdMob.removeBanner(); } catch (_) { /* yoksa sorun değil */ }
     await AdMob.showBanner({
       adId: AD_CONFIG.banner,
       adSize: BannerAdSize.ADAPTIVE_BANNER,
@@ -148,15 +169,26 @@ export async function showBanner() {
 }
 
 export async function hideBanner() {
-  if (!isNative() || !isBannerShowing) return;
-  try { await AdMob.hideBanner(); isBannerShowing = false; }
-  catch (e) { console.error('❌ Banner hide:', e); }
+  if (!isNative()) return;
+  // ★ State ne olursa olsun çağır (Android'de bazen flag yanlış kalıyor)
+  try {
+    await AdMob.hideBanner();
+    isBannerShowing = false;
+  } catch (e) {
+    console.log('ℹ️ Banner hide (zaten gizli olabilir):', e?.message);
+    isBannerShowing = false;
+  }
 }
 
 export async function removeBanner() {
   if (!isNative()) return;
-  try { await AdMob.removeBanner(); isBannerShowing = false; }
-  catch (e) { console.error('❌ Banner remove:', e); }
+  try {
+    await AdMob.removeBanner();
+    isBannerShowing = false;
+  } catch (e) {
+    console.error('❌ Banner remove:', e);
+    isBannerShowing = false;
+  }
 }
 
 // ═══ INTERSTITIAL ═══
@@ -178,7 +210,7 @@ export async function showInterstitial() {
   if (!isNative() || !isInitialized) return false;
 
   const now = Date.now();
-  if (now - lastInterstitialTime < INTERSTITIAL_COOLDOWN_MS) {
+  if (now - lastInterstitialTime < INTERSTITIAL_COOLDOWN_MS && lastInterstitialTime > 0) {
     console.log('ℹ️ Interstitial cooldown — atlanıyor');
     return false;
   }
@@ -263,7 +295,9 @@ export async function refreshBanner() {
     await AdMob.removeBanner();
     isBannerShowing = false;
     setTimeout(() => showBanner(), 300);
-  } catch (e) { await showBanner(); }
+  } catch (e) {
+    await showBanner();
+  }
 }
 
 export function isRewardedAvailable() {
@@ -271,5 +305,14 @@ export function isRewardedAvailable() {
 }
 
 export function getAdStats() {
-  return { isInitialized, canShowAds, isBannerShowing, isInterstitialReady, isRewardedReady, interstitialCount, rewardedCount };
+  return {
+    platform: PLATFORM,
+    isInitialized,
+    canShowAds,
+    isBannerShowing,
+    isInterstitialReady,
+    isRewardedReady,
+    interstitialCount,
+    rewardedCount,
+  };
 }
