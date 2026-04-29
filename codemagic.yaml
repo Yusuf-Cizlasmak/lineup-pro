@@ -26,7 +26,7 @@ workflows:
           npm install @capacitor-community/in-app-review @capacitor/browser --save
           # ★ Haptic feedback (iOS Taptic Engine + Android Vibrator)
           npm install @capacitor/haptics --save
-          # ★ Native kamera/galeri (iOS crash fix)
+          # ★ Native kamera/galeri (iOS crash fix — Apple Review Guideline 2.1a)
           npm install @capacitor/camera --save
 
       - name: Build web
@@ -66,7 +66,7 @@ workflows:
           # ─── Encryption ───
           /usr/libexec/PlistBuddy -c "Add :ITSAppManagesNonExemptEncryption bool false" "$PLIST" 2>/dev/null || true
 
-          # ─── KAMERA & FOTOĞRAF İZİNLERİ — ZORUNLU (olmadan iOS crash atar) ───
+          # ─── KAMERA & FOTOĞRAF İZİNLERİ — ZORUNLU ───
           CAM_MSG="Oyuncu profili icin fotograf cekmek uzere kameraya erisim gereklidir."
           /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string $CAM_MSG" "$PLIST" 2>/dev/null \
             || /usr/libexec/PlistBuddy -c "Set :NSCameraUsageDescription $CAM_MSG" "$PLIST"
@@ -97,8 +97,8 @@ workflows:
             exit 1
           fi
           echo "NSUserTrackingUsageDescription = $ATT_VALUE"
-          echo "NSCameraUsageDescription      = $(/usr/libexec/PlistBuddy -c 'Print :NSCameraUsageDescription' "$PLIST" 2>/dev/null)"
-          echo "NSPhotoLibraryUsageDescription= $(/usr/libexec/PlistBuddy -c 'Print :NSPhotoLibraryUsageDescription' "$PLIST" 2>/dev/null)"
+          echo "NSCameraUsageDescription       = $(/usr/libexec/PlistBuddy -c 'Print :NSCameraUsageDescription' "$PLIST" 2>/dev/null)"
+          echo "NSPhotoLibraryUsageDescription = $(/usr/libexec/PlistBuddy -c 'Print :NSPhotoLibraryUsageDescription' "$PLIST" 2>/dev/null)"
           echo "═══════════════════════════════════════"
           echo "✅ Info.plist hazır"
 
@@ -117,6 +117,7 @@ workflows:
             PROFILE_NAME=""
           fi
 
+          # Ana target Manual, SPM paketleri Automatic bırakılır (IONCameraLib uyumluluğu için)
           sed -i '' "s/CODE_SIGN_STYLE = Automatic/CODE_SIGN_STYLE = Manual/g" "$PBXPROJ"
           sed -i '' "s/DEVELOPMENT_TEAM = \"\"/DEVELOPMENT_TEAM = \"$DEVELOPMENT_TEAM\"/g" "$PBXPROJ"
           sed -i '' "s/DEVELOPMENT_TEAM = \"\";/DEVELOPMENT_TEAM = \"$DEVELOPMENT_TEAM\";/g" "$PBXPROJ"
@@ -150,9 +151,9 @@ workflows:
             -destination "generic/platform=iOS" \
             -allowProvisioningUpdates \
             DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
-            CODE_SIGN_STYLE="Manual" \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
-            PROVISIONING_PROFILE="$PROFILE_UUID" \
+            CODE_SIGN_STYLE="Automatic" \
+            CODE_SIGN_IDENTITY="Apple Distribution: " \
+            -skipPackageSignatureValidation \
             archive
 
           if [ ! -d "$ARCHIVE_PATH" ]; then
@@ -169,7 +170,7 @@ workflows:
           PROFILE_UUID=$(cat /tmp/profile_uuid.txt 2>/dev/null || echo "")
           PROFILE_REF="${PROFILE_NAME:-$PROFILE_UUID}"
 
-          printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' '<plist version="1.0">' '<dict>' '  <key>method</key>' '  <string>app-store</string>' '  <key>teamID</key>' '  <string>Q3BH6457BX</string>' '  <key>signingStyle</key>' '  <string>manual</string>' '  <key>uploadBitcode</key>' '  <false/>' '  <key>uploadSymbols</key>' '  <true/>' '  <key>provisioningProfiles</key>' '  <dict>' "    <key>com.halisahakolik.app</key>" "    <string>${PROFILE_REF}</string>" '  </dict>' '</dict>' '</plist>' > exportOptions.plist
+          printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' '<plist version="1.0">' '<dict>' '  <key>method</key>' '  <string>app-store</string>' '  <key>teamID</key>' '  <string>Q3BH6457BX</string>' '  <key>signingStyle</key>' '  <string>automatic</string>' '  <key>uploadBitcode</key>' '  <false/>' '  <key>uploadSymbols</key>' '  <true/>' '</dict>' '</plist>' > exportOptions.plist
 
           cat exportOptions.plist
 
