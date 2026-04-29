@@ -21,10 +21,7 @@ workflows:
       - name: Install dependencies
         script: |
           npm install
-          npm install @capacitor/ios @capacitor/core @capacitor/cli @capacitor-community/admob --save
-          npm install @capacitor-community/in-app-review @capacitor/browser --save
-          npm install @capacitor/haptics --save
-          npm install @capacitor/camera --save
+          npm install @capacitor/ios @capacitor/core @capacitor/cli @capacitor-community/admob @capacitor-community/in-app-review @capacitor/browser @capacitor/haptics @capacitor/camera --save
 
       - name: Build web
         script: CI=false npm run build
@@ -34,35 +31,16 @@ workflows:
           npx cap add ios || true
           npx cap sync ios
 
-      - name: Set app icon
-        script: |
-          if [ ! -f "AppIcon.png" ]; then
-            echo "AppIcon.png not found, using default"
-            exit 0
-          fi
-          ICON_DIR="ios/App/App/Assets.xcassets/AppIcon.appiconset"
-          sips -z 1024 1024 AppIcon.png --out "$ICON_DIR/AppIcon-1024@1x.png"
-          printf '{"images":[{"filename":"AppIcon-1024@1x.png","idiom":"universal","platform":"ios","size":"1024x1024"}],"info":{"author":"xcode","version":1}}' > "$ICON_DIR/Contents.json"
-          echo "App icon set"
-
       - name: Configure Info.plist
         script: |
           PLIST="ios/App/App/Info.plist"
           /usr/libexec/PlistBuddy -c "Add :GADApplicationIdentifier string $GAD_APP_ID" "$PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Set :GADApplicationIdentifier $GAD_APP_ID" "$PLIST"
           /usr/libexec/PlistBuddy -c "Add :GADIsAdManagerApp bool true" "$PLIST" 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Add :SKAdNetworkItems array" "$PLIST" 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Add :SKAdNetworkItems:0 dict" "$PLIST" 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Add :SKAdNetworkItems:0:SKAdNetworkIdentifier string cstr6suwn9.skadnetwork" "$PLIST" 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Add :ITSAppManagesNonExemptEncryption bool false" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string Oyuncu profili için kamera erişimi gereklidir." "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryUsageDescription string Galeri erişimi gereklidir." "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :NSUserTrackingUsageDescription string Reklamları kişiselleştirmek için izin rica ediyoruz." "$PLIST" 2>/dev/null || true
 
-          # Kamera ve Fotoğraf İzinleri
-          /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string Oyuncu profili icin fotograf cekmek uzere kameraya erisim gereklidir." "$PLIST" 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryUsageDescription string Oyuncu profili icin fotograflariniza erisim gereklidir." "$PLIST" 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryAddUsageDescription string Dizilim gorsellerini galeriye kaydetmek icin izin gereklidir." "$PLIST" 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Add :NSUserTrackingUsageDescription string Reklamları ilgi alanlarınıza göre kişiselleştirmek için izninizi rica ediyoruz." "$PLIST" 2>/dev/null || true
-          echo "✅ Info.plist hazır"
-
-      - name: Setup signing
+      - name: Setup signing and Patch Project
         script: |
           PBXPROJ="ios/App/App.xcodeproj/project.pbxproj"
           PROFILE_PATH=$(find "$HOME/Library/MobileDevice/Provisioning Profiles" -name "*.mobileprovision" 2>/dev/null | head -1)
@@ -70,38 +48,35 @@ workflows:
           if [ -n "$PROFILE_PATH" ]; then
             PROFILE_UUID=$(security cms -D -i "$PROFILE_PATH" 2>/dev/null | grep -A1 'UUID' | grep '<string>' | sed 's/.*<string>\(.*\)<\/string>/\1/')
             PROFILE_NAME=$(security cms -D -i "$PROFILE_PATH" 2>/dev/null | grep -A1 'Name' | head -1 | grep '<string>' | sed 's/.*<string>\(.*\)<\/string>/\1/')
-            echo "Profile: $PROFILE_NAME ($PROFILE_UUID)"
+            echo "Found Profile: $PROFILE_NAME ($PROFILE_UUID)"
           else
-            echo "ERROR: No provisioning profile found"
+            echo "ERROR: Provisioning profile not found!"
             exit 1
           fi
 
-          # 1. Tüm projeyi Manual Signing'e zorla
+          # 1. Xcode projesinde 'Automatic' olan her şeyi 'Manual' yap
           sed -i '' "s/CODE_SIGN_STYLE = Automatic/CODE_SIGN_STYLE = Manual/g" "$PBXPROJ"
-          sed -i '' "s/DEVELOPMENT_TEAM = \"\"/DEVELOPMENT_TEAM = \"$DEVELOPMENT_TEAM\"/g" "$PBXPROJ"
-          sed -i '' "s/DEVELOPMENT_TEAM = \"\";/DEVELOPMENT_TEAM = \"$DEVELOPMENT_TEAM\";/g" "$PBXPROJ"
-
-          # 2. ÖNEMLİ: SPM paketlerinin (IONCameraLib gibi) signing hatasını önlemek için 
-          # onlara boş değer atanmasını sağlayan patch (Opsiyonel ama güvenli yol)
-          echo "Patching for SPM support..."
           
+          # 2. PROVISIONING_PROFILE ayarını dosyaya yaz (Komut satırından geçmeyeceğiz)
+          # Bu sayede sadece ana target etkilenir, SPM paketleri etkilenmez.
+          sed -i '' "s/PROVISIONING_PROFILE = \".*\";/PROVISIONING_PROFILE = \"$PROFILE_UUID\";/g" "$PBXPROJ"
+          sed -i '' "s/PROVISIONING_PROFILE = .*;/PROVISIONING_PROFILE = \"$PROFILE_UUID\";/g" "$PBXPROJ"
+          
+          # 3. Development Team'i ayarla
+          sed -i '' "s/DEVELOPMENT_TEAM = \".*\";/DEVELOPMENT_TEAM = \"$DEVELOPMENT_TEAM\";/g" "$PBXPROJ"
+          sed -i '' "s/DEVELOPMENT_TEAM = .*;/DEVELOPMENT_TEAM = \"$DEVELOPMENT_TEAM\";/g" "$PBXPROJ"
+
           echo "$PROFILE_UUID" > /tmp/profile_uuid.txt
           echo "$PROFILE_NAME" > /tmp/profile_name.txt
-          echo "Signing setup done"
-
-      - name: Increment build number
-        script: |
-          PLIST="ios/App/App/Info.plist"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$PLIST"
 
       - name: Build iOS archive
         script: |
           XCODE_PROJ="ios/App/App.xcodeproj"
           ARCHIVE_PATH="build/App.xcarchive"
-          PROFILE_UUID=$(cat /tmp/profile_uuid.txt 2>/dev/null || echo "")
-
-          # 'PROVISIONING_PROFILE_SPECIFIER=""' ekleyerek SPM paketlerinin 
-          # ana app'in profilini kullanmaya çalışmasını engelliyoruz.
+          
+          # ÖNEMLİ: Burada PROVISIONING_PROFILE parametresini KALDIRDIK. 
+          # Çünkü yukarıdaki script ile bunu project.pbxproj içine zaten enjekte ettik.
+          # Bu sayede SPM paketleri (IONCameraLib) kendi haline bırakılır.
           xcodebuild \
             -project "$XCODE_PROJ" \
             -scheme App \
@@ -110,11 +85,6 @@ workflows:
             -archivePath "$ARCHIVE_PATH" \
             -destination "generic/platform=iOS" \
             -allowProvisioningUpdates \
-            DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
-            CODE_SIGN_STYLE="Manual" \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
-            PROVISIONING_PROFILE="$PROFILE_UUID" \
-            PROVISIONING_PROFILE_SPECIFIER="" \
             -skipPackagePluginValidation \
             -skipMacroValidation \
             archive
@@ -122,9 +92,8 @@ workflows:
       - name: Export IPA
         script: |
           ARCHIVE_PATH="build/App.xcarchive"
-          PROFILE_NAME=$(cat /tmp/profile_name.txt 2>/dev/null || echo "")
+          PROFILE_NAME=$(cat /tmp/profile_name.txt)
           
-          # ExportOptions.plist oluşturma
           cat > exportOptions.plist <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
