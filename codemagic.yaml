@@ -24,7 +24,6 @@ workflows:
       - name: Install dependencies
         script: |
           npm install
-          # Camera + diğer Capacitor plugin'leri
           npm install \
             @capacitor/ios \
             @capacitor/core \
@@ -73,8 +72,8 @@ workflows:
           add_or_set_string "NSPhotoLibraryAddUsageDescription" \
             "Oluşturulan kadro görselini galeriye kaydetmek için izin gerekir."
 
-          echo "----- Info.plist sonucu -----"
-          /usr/libexec/PlistBuddy -c "Print" "$PLIST" | grep -E "Camera|Photo" || true
+          echo "----- Info.plist Camera/Photo keys -----"
+          /usr/libexec/PlistBuddy -c "Print" "$PLIST" | grep -E "Camera|Photo" || echo "⚠️ Eklenememiş!"
 
       # ✅ Profile bul
       - name: Detect provisioning profile
@@ -95,29 +94,16 @@ workflows:
           echo "$PROFILE_UUID" > /tmp/profile_uuid.txt
           echo "$PROFILE_NAME" > /tmp/profile_name.txt
 
-      # ✅ Signing patch — pbxproj'u sed ile bozmak yerine xcconfig kullan
-      # Tek bir override.xcconfig dosyası yazıyoruz, xcodebuild'e -xcconfig ile
-      # geçeceğiz. Bu pbxproj'a hiç dokunmadığı için "damaged project" hatası olmaz.
-      - name: Create signing xcconfig
-        script: |
-          PROFILE_UUID=$(cat /tmp/profile_uuid.txt)
-          PROFILE_NAME=$(cat /tmp/profile_name.txt)
-
-          cat > /tmp/signing.xcconfig <<EOF
-          CODE_SIGN_STYLE = Manual
-          CODE_SIGN_IDENTITY = Apple Distribution
-          DEVELOPMENT_TEAM = $DEVELOPMENT_TEAM
-          PROVISIONING_PROFILE_SPECIFIER = $PROFILE_NAME
-          PRODUCT_BUNDLE_IDENTIFIER = $BUNDLE_ID
-          EOF
-
-          echo "----- signing.xcconfig -----"
-          cat /tmp/signing.xcconfig
-
+      # ✅ Build archive — signing ayarlarını xcconfig yerine direkt xcodebuild
+      # parametresi olarak geçiyoruz. Bu sayede ayarlar SADECE App target'a
+      # uygulanır, SPM target'ları (IONCameraLib, Capacitor, vs.) kendi
+      # otomatik signing'lerinde kalır. xcconfig kullanırsak SPM target'ları
+      # da provisioning profile zorlamaya çalışıp patlıyor.
       - name: Build archive
         script: |
           XCODE_PROJ="ios/App/App.xcodeproj"
           ARCHIVE_PATH="build/App.xcarchive"
+          PROFILE_NAME=$(cat /tmp/profile_name.txt)
 
           xcodebuild \
             -project "$XCODE_PROJ" \
@@ -126,8 +112,12 @@ workflows:
             -configuration Release \
             -archivePath "$ARCHIVE_PATH" \
             -destination "generic/platform=iOS" \
-            -xcconfig /tmp/signing.xcconfig \
             -allowProvisioningUpdates \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
+            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
+            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
             archive
 
           if [ ! -d "$ARCHIVE_PATH" ]; then
@@ -136,6 +126,18 @@ workflows:
           fi
 
           echo "✅ Archive OK"
+
+      - name: Verify Info.plist in archive
+        script: |
+          ARCHIVE_PLIST="build/App.xcarchive/Products/Applications/App.app/Info.plist"
+          if [ -f "$ARCHIVE_PLIST" ]; then
+            echo "----- Archive Info.plist Camera/Photo keys -----"
+            /usr/libexec/PlistBuddy -c "Print :NSCameraUsageDescription" "$ARCHIVE_PLIST" || echo "⚠️ NSCameraUsageDescription YOK"
+            /usr/libexec/PlistBuddy -c "Print :NSPhotoLibraryUsageDescription" "$ARCHIVE_PLIST" || echo "⚠️ NSPhotoLibraryUsageDescription YOK"
+            /usr/libexec/PlistBuddy -c "Print :NSPhotoLibraryAddUsageDescription" "$ARCHIVE_PLIST" || echo "⚠️ NSPhotoLibraryAddUsageDescription YOK"
+          else
+            echo "⚠️ Archive plist bulunamadı: $ARCHIVE_PLIST"
+          fi
 
       - name: Export IPA
         script: |
