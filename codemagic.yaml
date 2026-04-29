@@ -71,7 +71,7 @@ workflows:
           /usr/libexec/PlistBuddy -c "Add :NSUserTrackingUsageDescription string $ATT_MSG" "$PLIST" 2>/dev/null \
             || /usr/libexec/PlistBuddy -c "Set :NSUserTrackingUsageDescription $ATT_MSG" "$PLIST"
 
-          # ─── ★ YENİ: Camera & Photo Library izinleri (Apple reddetme fix'i) ───
+          # ─── ★ YENİ: Camera & Photo Library izinleri (Apple "Take Photo crash" fix) ───
           CAM_MSG="Oyuncu profili için fotoğraf çekmek üzere kameraya erişim gerekir."
           /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string $CAM_MSG" "$PLIST" 2>/dev/null \
             || /usr/libexec/PlistBuddy -c "Set :NSCameraUsageDescription $CAM_MSG" "$PLIST"
@@ -136,15 +136,9 @@ workflows:
       - name: Increment build number
         script: |
           PLIST="ios/App/App/Info.plist"
-          # ★ Codemagic BUILD_NUMBER'a güvenli taban ekle (App Store'da en yüksek 37'ydi)
-          # En az 38 olacak şekilde 37 + BUILD_NUMBER yapıyoruz, böylece her build artar
-          BASE=37
           BUILD_NUM=${BUILD_NUMBER:-1}
-          FINAL_BUILD=$((BASE + BUILD_NUM))
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $FINAL_BUILD" "$PLIST"
-          echo "Codemagic BUILD_NUMBER: $BUILD_NUM"
-          echo "Base offset: $BASE"
-          echo "Final build number: $FINAL_BUILD"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUM" "$PLIST"
+          echo "Build number: $BUILD_NUM"
 
       - name: Build iOS archive
         script: |
@@ -176,24 +170,6 @@ workflows:
           fi
           echo "Archive olusturuldu"
 
-      - name: Verify Info.plist in archive
-        script: |
-          ARCHIVE_PLIST="build/App.xcarchive/Products/Applications/App.app/Info.plist"
-          if [ -f "$ARCHIVE_PLIST" ]; then
-            echo "═══════════════════════════════════════"
-            echo "Archive Info.plist doğrulama:"
-            echo "═══════════════════════════════════════"
-            echo "CFBundleVersion            = $(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$ARCHIVE_PLIST")"
-            echo "CFBundleShortVersionString = $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$ARCHIVE_PLIST")"
-            /usr/libexec/PlistBuddy -c 'Print :NSCameraUsageDescription' "$ARCHIVE_PLIST" || echo "⚠️ NSCameraUsageDescription YOK"
-            /usr/libexec/PlistBuddy -c 'Print :NSPhotoLibraryUsageDescription' "$ARCHIVE_PLIST" || echo "⚠️ NSPhotoLibraryUsageDescription YOK"
-            /usr/libexec/PlistBuddy -c 'Print :NSPhotoLibraryAddUsageDescription' "$ARCHIVE_PLIST" || echo "⚠️ NSPhotoLibraryAddUsageDescription YOK"
-            /usr/libexec/PlistBuddy -c 'Print :NSUserTrackingUsageDescription' "$ARCHIVE_PLIST" || echo "⚠️ NSUserTrackingUsageDescription YOK"
-            echo "═══════════════════════════════════════"
-          else
-            echo "⚠️ Archive plist bulunamadı"
-          fi
-
       - name: Export IPA
         script: |
           ARCHIVE_PATH="build/App.xcarchive"
@@ -214,9 +190,6 @@ workflows:
       - build/output/**/*.ipa
       - build/**/*.xcarchive
 
-    # ★ TestFlight'a otomatik yükleme
     publishing:
       app_store_connect:
         auth: integration
-        submit_to_testflight: true
-        submit_to_app_store: false

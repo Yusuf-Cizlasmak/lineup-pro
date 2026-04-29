@@ -761,22 +761,41 @@ const PlayerForm = ({ player, onSave, onCancel, accent, existingPlayers = [] }) 
   const inputErrorStyle = { borderColor: "#ef4444", boxShadow: "0 0 0 1px #ef4444" };
 
   // ★ Capacitor Camera: iOS/Android'de native kamera/galeri, web'de file input fallback
+  // İPAD DONMA FİX: presentationStyle parametresi geçersizdi, kaldırıldı.
+  // iPad'de CameraSource.Prompt action sheet düzgün açılmıyor → direkt galeri kullan.
+  // width/height/correctOrientation: büyük fotoğraflarda memory crash'ini önler.
   const handlePhotoClick = async () => {
     if (Capacitor.isNativePlatform()) {
       try {
+        // iPad detection: iPad'de Prompt sheet freeze yapıyor, direkt galeri aç
+        const ua = window.navigator.userAgent || "";
+        const isIPad =
+          Capacitor.getPlatform() === "ios" &&
+          (ua.includes("iPad") ||
+            (window.navigator.maxTouchPoints > 1 && /Mac/i.test(window.navigator.platform)));
+
         const image = await Camera.getPhoto({
           quality: 80,
           allowEditing: false,
           resultType: CameraResultType.DataUrl,
-          source: CameraSource.Prompt,      // "Kamera / Galeri" seçim sheet'i
-          presentationStyle: "popover",     // iPad crash'ini önler (zorunlu)
+          source: isIPad ? CameraSource.Photos : CameraSource.Prompt,
+          width: 800,
+          height: 800,
+          correctOrientation: true,
+          // Türkçe action sheet etiketleri
+          promptLabelHeader: "Fotoğraf",
+          promptLabelCancel: "İptal",
+          promptLabelPhoto: "Galeriden Seç",
+          promptLabelPicture: "Kameradan Çek",
         });
         if (image?.dataUrl) {
           sF((p) => ({ ...p, photo: image.dataUrl }));
         }
       } catch (e) {
-        if (!/cancel/i.test(e?.message || "")) {
-          console.error("Camera error:", e);
+        // Kullanıcı iptal ederse sessizce yut (User cancelled photos app)
+        const msg = e?.message || "";
+        if (!/cancel|cancelled|canceled/i.test(msg)) {
+          console.error("Camera error:", msg, e);
         }
       }
       return;
