@@ -107,7 +107,6 @@ workflows:
 
           echo "Project: $XCODE_PROJ"
 
-          # -allowProvisioningUpdates komutunu KILDIRDIK çünkü xcode-project use-profiles her şeyi halletti.
           xcodebuild \
             -project "$XCODE_PROJ" \
             -scheme App \
@@ -128,9 +127,36 @@ workflows:
         script: |
           ARCHIVE_PATH="build/App.xcarchive"
           
-          printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' '<plist version="1.0">' '<dict>' '  <key>method</key>' '  <string>app-store</string>' '  <key>teamID</key>' '  <string>Q3BH6457BX</string>' '  <key>signingStyle</key>' '  <string>manual</string>' '  <key>uploadBitcode</key>' '  <false/>' '  <key>uploadSymbols</key>' '  <true/>' '</dict>' '</plist>' > exportOptions.plist
+          # Codemagic'in indirdiği profili bul ve adını al
+          PROFILE_PATH=$(find "$HOME/Library/MobileDevice/Provisioning Profiles" -name "*.mobileprovision" 2>/dev/null | head -1)
+          PROFILE_NAME=$(security cms -D -i "$PROFILE_PATH" 2>/dev/null | grep -A1 'Name' | head -1 | grep '<string>' | sed 's/.*<string>\(.*\)<\/string>/\1/')
+          
+          echo "Kullanılacak Profil: $PROFILE_NAME"
+          
+          # Plist dosyasını oluştur (app-store-connect ve provisioningProfiles eklendi)
+          cat <<EOF > exportOptions.plist
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store-connect</string>
+            <key>teamID</key>
+            <string>Q3BH6457BX</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>$BUNDLE_ID</key>
+              <string>$PROFILE_NAME</string>
+            </dict>
+          </dict>
+          </plist>
+          EOF
 
+          echo "═══════════════════════════════════════"
           cat exportOptions.plist
+          echo "═══════════════════════════════════════"
 
           xcodebuild -exportArchive \
             -archivePath "$ARCHIVE_PATH" \
