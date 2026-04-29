@@ -18,8 +18,7 @@ workflows:
         DEVELOPMENT_TEAM: "Q3BH6457BX"
         BUNDLE_ID: "com.halisahakolik.app"
         GAD_APP_ID: "ca-app-pub-2886543552287006~5889085689"
-        APP_STORE_APPLE_ID: ""   # ← Aşağıdaki nota bak (opsiyonel ama şiddetle tavsiye)
-
+        
     scripts:
 
       - name: Install dependencies
