@@ -18,6 +18,7 @@ workflows:
         DEVELOPMENT_TEAM: "Q3BH6457BX"
         BUNDLE_ID: "com.halisahakolik.app"
         GAD_APP_ID: "ca-app-pub-2886543552287006~5889085689"
+        APP_STORE_APPLE_ID: ""   # ← Aşağıdaki nota bak (opsiyonel ama şiddetle tavsiye)
 
     scripts:
 
@@ -34,7 +35,6 @@ workflows:
             @capacitor-community/admob \
             --save
 
-          # xcodeproj Ruby gem — pbxproj'u programatik olarak düzenlemek için
           gem install xcodeproj --no-document
 
       - name: Build web
@@ -45,7 +45,34 @@ workflows:
           npx cap add ios || true
           npx cap sync ios
 
-      # ✅ Info.plist'e camera/photo usage description ekle
+      # ✅ Build numarasını App Store Connect'teki en son build'den +1 yap
+      # Bu olmazsa "build number already used" hatası alırsın.
+      - name: Set build number
+        script: |
+          cd ios/App
+
+          # App Store Connect'ten en son build numarasını al
+          # APP_STORE_APPLE_ID set edilmişse onu kullan, yoksa bundle ID ile bul
+          if [ -n "$APP_STORE_APPLE_ID" ]; then
+            LATEST_BUILD=$(app-store-connect get-latest-app-store-build-number "$APP_STORE_APPLE_ID" 2>/dev/null || echo "0")
+          else
+            LATEST_BUILD=$(app-store-connect get-latest-build-number --bundle-id "$BUNDLE_ID" 2>/dev/null || echo "0")
+          fi
+
+          # Sayı değilse 0'a düşür
+          if ! [[ "$LATEST_BUILD" =~ ^[0-9]+$ ]]; then
+            LATEST_BUILD=0
+          fi
+
+          NEW_BUILD=$((LATEST_BUILD + 1))
+          echo "📦 Latest build on App Store: $LATEST_BUILD"
+          echo "📦 New build number: $NEW_BUILD"
+
+          # Info.plist'e yaz
+          agvtool new-version -all "$NEW_BUILD"
+
+          cd ../..
+
       - name: Inject Info.plist usage descriptions
         script: |
           PLIST="ios/App/App/Info.plist"
@@ -77,7 +104,6 @@ workflows:
           echo "----- Info.plist Camera/Photo keys -----"
           /usr/libexec/PlistBuddy -c "Print" "$PLIST" | grep -E "Camera|Photo" || echo "⚠️ Eklenememiş!"
 
-      # ✅ Profile bul
       - name: Detect provisioning profile
         script: |
           PROFILE_PATH=$(find "$HOME/Library/MobileDevice/Provisioning Profiles" -name "*.mobileprovision" | head -1)
@@ -96,9 +122,6 @@ workflows:
           echo "$PROFILE_UUID" > /tmp/profile_uuid.txt
           echo "$PROFILE_NAME" > /tmp/profile_name.txt
 
-      # ✅ Sadece App target'ın signing ayarlarını Ruby ile yaz
-      # xcodeproj gem'i pbxproj'u parse edip TEKRAR yazıyor — sed gibi kırmaz.
-      # SADECE 'App' target'a dokunuyoruz, SPM target'ları otomatik signing'de kalıyor.
       - name: Patch App target signing (Ruby)
         script: |
           PROFILE_NAME=$(cat /tmp/profile_name.txt)
@@ -124,7 +147,6 @@ workflows:
             puts "✅ Patched config: #{config.name}"
           end
 
-          # Project-level TargetAttributes da güncellenmeli (manuel signing için)
           project.root_object.attributes['TargetAttributes'] ||= {}
           project.root_object.attributes['TargetAttributes'][target.uuid] ||= {}
           project.root_object.attributes['TargetAttributes'][target.uuid]['ProvisioningStyle'] = 'Manual'
@@ -139,7 +161,6 @@ workflows:
           XCODE_PROJ="ios/App/App.xcodeproj"
           ARCHIVE_PATH="build/App.xcarchive"
 
-          # Komut satırında signing override YOK — pbxproj'da yazılı, sadece App'e uygulanacak
           xcodebuild \
             -project "$XCODE_PROJ" \
             -scheme App \
@@ -161,12 +182,14 @@ workflows:
         script: |
           ARCHIVE_PLIST="build/App.xcarchive/Products/Applications/App.app/Info.plist"
           if [ -f "$ARCHIVE_PLIST" ]; then
-            echo "----- Archive Info.plist Camera/Photo keys -----"
+            echo "----- Archive Info.plist -----"
+            /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$ARCHIVE_PLIST" || true
+            /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$ARCHIVE_PLIST" || true
             /usr/libexec/PlistBuddy -c "Print :NSCameraUsageDescription" "$ARCHIVE_PLIST" || echo "⚠️ NSCameraUsageDescription YOK"
             /usr/libexec/PlistBuddy -c "Print :NSPhotoLibraryUsageDescription" "$ARCHIVE_PLIST" || echo "⚠️ NSPhotoLibraryUsageDescription YOK"
             /usr/libexec/PlistBuddy -c "Print :NSPhotoLibraryAddUsageDescription" "$ARCHIVE_PLIST" || echo "⚠️ NSPhotoLibraryAddUsageDescription YOK"
           else
-            echo "⚠️ Archive plist bulunamadı: $ARCHIVE_PLIST"
+            echo "⚠️ Archive plist bulunamadı"
           fi
 
       - name: Export IPA
@@ -200,3 +223,22 @@ workflows:
 
     artifacts:
       - build/output/**/*.ipa
+
+    # ✅ TestFlight'a otomatik yükleme
+    publishing:
+      app_store_connect:
+        # Codemagic, "Man" integration'ından API key bilgilerini otomatik alır
+        auth: integration
+
+        # IPA build edildikten sonra TestFlight'a yükle
+        submit_to_testflight: true
+
+        # İsteğe bağlı: belirli test gruplarına otomatik dağıt
+        # Bu grupları App Store Connect → TestFlight → Test gruplarından oluştur
+        # beta_groups:
+        #   - "Internal Testers"
+        #   - "External Beta"
+
+        # İsteğe bağlı: App Review'a otomatik gönderme (ÇOK DİKKATLİ KULLAN)
+        # Bunu açarsan her başarılı build otomatik review'a düşer
+        submit_to_app_store: false
