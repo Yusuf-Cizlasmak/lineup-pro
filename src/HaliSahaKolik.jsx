@@ -30,6 +30,8 @@ const captureAndShare = async (element, filename = "halisaha-kolik.png") => {
       scale: 2,
       useCORS: true,
       logging: false,
+      // ★ data-screenshot-hide="true" olan elementleri çıkart (× butonu vs.)
+      ignoreElements: (el) => el.getAttribute && el.getAttribute("data-screenshot-hide") === "true",
     });
     console.log('[SHARE] 4️⃣ Canvas hazır:', canvas.width, 'x', canvas.height);
 
@@ -163,6 +165,7 @@ const captureAndShare = async (element, filename = "halisaha-kolik.png") => {
         scale: 2,
         useCORS: true,
         logging: false,
+        ignoreElements: (el) => el.getAttribute && el.getAttribute("data-screenshot-hide") === "true",
       });
       const blob = await new Promise((r) => canvas2.toBlob(r, "image/png"));
       const file = new File([blob], filename, { type: "image/png" });
@@ -183,99 +186,109 @@ const captureAndShare = async (element, filename = "halisaha-kolik.png") => {
 };
 
 // ─── FORMATIONS (7-a-side: kaleci + 6 oyuncu)
+// ★ PROFESYONEL FORMASYON KOORDİNATLARI
+//   4 dikey bölge mantığı (FIFA Manager stili):
+//   • KALECİ:    y = 88        (en altta, sabit)
+//   • DEFANS:    y = 64-66     (kaleci ile arasında ~22% mesafe)
+//   • ORTA SAHA: y = 40-44     (defans ile arasında ~22% mesafe)
+//   • FORVET:    y = 14-18     (orta saha ile arasında ~24% mesafe)
+//   Her bölge içinde aynı pozisyondan oyuncular ±2% offset alır
+//   (3 stoper içinde merkez biraz daha geride durur — gerçek futbol pozisyonu)
 const FORMATIONS = {
   "4-2": {
     label: "4-2",
     positions: [
-      { x: 50, y: 95, role: "KALECİ" },
-      { x: 12, y: 70, role: "SOL BEK" },
-      { x: 37, y: 72, role: "STOPER" },
-      { x: 63, y: 72, role: "STOPER" },
-      { x: 88, y: 70, role: "SAĞ BEK" },
-      { x: 35, y: 42, role: "ORTA SAHA" },
-      { x: 65, y: 42, role: "ORTA SAHA" },
+      { x: 50, y: 88, role: "KALECİ" },
+      { x: 12, y: 64, role: "SOL BEK" },
+      { x: 36, y: 66, role: "STOPER" },
+      { x: 64, y: 66, role: "STOPER" },
+      { x: 88, y: 64, role: "SAĞ BEK" },
+      { x: 32, y: 38, role: "ORTA SAHA" },
+      { x: 68, y: 38, role: "ORTA SAHA" },
     ],
   },
   "3-2-1": {
     label: "3-2-1",
     positions: [
-      { x: 50, y: 95, role: "KALECİ" },
-      { x: 20, y: 72, role: "DEFANS" },
-      { x: 50, y: 74, role: "DEFANS" },
-      { x: 80, y: 72, role: "DEFANS" },
-      { x: 30, y: 44, role: "ORTA SAHA" },
-      { x: 70, y: 44, role: "ORTA SAHA" },
-      { x: 50, y: 18, role: "FORVET" },
+      { x: 50, y: 88, role: "KALECİ" },
+      { x: 18, y: 66, role: "DEFANS" },
+      { x: 50, y: 60, role: "DEFANS" },
+      { x: 82, y: 66, role: "DEFANS" },
+      { x: 30, y: 40, role: "ORTA SAHA" },
+      { x: 70, y: 40, role: "ORTA SAHA" },
+      { x: 50, y: 14, role: "FORVET" },
     ],
   },
   "2-3-1": {
     label: "2-3-1",
     positions: [
-      { x: 50, y: 95, role: "KALECİ" },
-      { x: 28, y: 72, role: "DEFANS" },
-      { x: 72, y: 72, role: "DEFANS" },
-      { x: 18, y: 44, role: "ORTA SAHA" },
-      { x: 50, y: 40, role: "ORTA SAHA" },
-      { x: 82, y: 44, role: "ORTA SAHA" },
-      { x: 50, y: 16, role: "FORVET" },
+      { x: 50, y: 88, role: "KALECİ" },
+      { x: 30, y: 64, role: "DEFANS" },
+      { x: 70, y: 64, role: "DEFANS" },
+      { x: 16, y: 42, role: "ORTA SAHA" },
+      { x: 50, y: 38, role: "ORTA SAHA" },
+      { x: 84, y: 42, role: "ORTA SAHA" },
+      { x: 50, y: 14, role: "FORVET" },
     ],
   },
   "3-1-2": {
     label: "3-1-2",
     positions: [
-      { x: 50, y: 95, role: "KALECİ" },
-      { x: 20, y: 72, role: "DEFANS" },
-      { x: 50, y: 74, role: "DEFANS" },
-      { x: 80, y: 72, role: "DEFANS" },
-      { x: 50, y: 44, role: "ORTA SAHA" },
-      { x: 30, y: 20, role: "FORVET" },
-      { x: 70, y: 20, role: "FORVET" },
+      { x: 50, y: 88, role: "KALECİ" },
+      { x: 18, y: 66, role: "DEFANS" },
+      { x: 50, y: 60, role: "DEFANS" },
+      { x: 82, y: 66, role: "DEFANS" },
+      { x: 50, y: 36, role: "ORTA SAHA" },
+      { x: 28, y: 14, role: "FORVET" },
+      { x: 72, y: 14, role: "FORVET" },
     ],
   },
   "1-4-1": {
     label: "1-4-1",
     positions: [
-      { x: 50, y: 95, role: "KALECİ" },
-      { x: 50, y: 72, role: "DEFANS" },
-      { x: 14, y: 44, role: "ORTA SAHA" },
-      { x: 38, y: 40, role: "ORTA SAHA" },
-      { x: 62, y: 40, role: "ORTA SAHA" },
-      { x: 86, y: 44, role: "ORTA SAHA" },
-      { x: 50, y: 16, role: "FORVET" },
+      { x: 50, y: 88, role: "KALECİ" },
+      { x: 50, y: 64, role: "DEFANS" },
+      { x: 12, y: 42, role: "ORTA SAHA" },
+      { x: 36, y: 38, role: "ORTA SAHA" },
+      { x: 64, y: 38, role: "ORTA SAHA" },
+      { x: 88, y: 42, role: "ORTA SAHA" },
+      { x: 50, y: 14, role: "FORVET" },
     ],
   },
   "2-2-2": {
     label: "2-2-2",
     positions: [
-      { x: 50, y: 95, role: "KALECİ" },
-      { x: 30, y: 72, role: "DEFANS" },
-      { x: 70, y: 72, role: "DEFANS" },
-      { x: 30, y: 46, role: "ORTA SAHA" },
-      { x: 70, y: 46, role: "ORTA SAHA" },
-      { x: 30, y: 20, role: "FORVET" },
-      { x: 70, y: 20, role: "FORVET" },
+      { x: 50, y: 88, role: "KALECİ" },
+      { x: 28, y: 64, role: "DEFANS" },
+      { x: 72, y: 64, role: "DEFANS" },
+      { x: 28, y: 42, role: "ORTA SAHA" },
+      { x: 72, y: 42, role: "ORTA SAHA" },
+      { x: 28, y: 16, role: "FORVET" },
+      { x: 72, y: 16, role: "FORVET" },
     ],
   },
   "1-3-2": {
     label: "1-3-2",
     positions: [
-      { x: 50, y: 95, role: "KALECİ" },
-      { x: 50, y: 72, role: "DEFANS" },
-      { x: 18, y: 46, role: "ORTA SAHA" },
-      { x: 50, y: 42, role: "ORTA SAHA" },
-      { x: 82, y: 46, role: "ORTA SAHA" },
-      { x: 30, y: 18, role: "FORVET" },
-      { x: 70, y: 18, role: "FORVET" },
+      { x: 50, y: 88, role: "KALECİ" },
+      { x: 50, y: 64, role: "DEFANS" },
+      { x: 16, y: 42, role: "ORTA SAHA" },
+      { x: 50, y: 38, role: "ORTA SAHA" },
+      { x: 84, y: 42, role: "ORTA SAHA" },
+      { x: 28, y: 16, role: "FORVET" },
+      { x: 72, y: 16, role: "FORVET" },
     ],
   },
 };
 
+// ★ Maç modu — yarı sahaya sıkıştırma. Eski formül kalecileri kenara çok itiyordu.
+//    Yeni: y_match = 53 + y_full * 0.43 → kaleci %91'de, forvet %59'da (orta sahaya yakın).
 const mapPos = (pos, side, isMatch) => {
   if (!isMatch) return pos;
   if (side === "A") {
-    return { ...pos, x: pos.x, y: 51 + (pos.y / 100) * 47 };
+    return { ...pos, x: pos.x, y: 53 + (pos.y / 100) * 43 };
   }
-  return { ...pos, x: 100 - pos.x, y: 49 - (pos.y / 100) * 47 };
+  return { ...pos, x: 100 - pos.x, y: 47 - (pos.y / 100) * 43 };
 };
 
 const POSITIONS_LIST = [
@@ -463,11 +476,12 @@ const FieldPlayer = ({ player, x, y, fieldRef, teamColor, isCaptain, onToggleCap
   useEffect(() => { setPos({ x, y }); }, [x, y]);
 
   const clampY = useCallback((raw) => {
-    if (!isMatch) return Math.max(1, Math.min(99, raw));
-    if (side === "A") return Math.max(51, Math.min(99, raw));
-    return Math.max(1, Math.min(49, raw));
+    // ★ Yeni saha boyutuna göre güvenli sınırlar (oyuncu+isim kenarda kesilmesin)
+    if (!isMatch) return Math.max(8, Math.min(91, raw));
+    if (side === "A") return Math.max(54, Math.min(93, raw));
+    return Math.max(7, Math.min(46, raw));
   }, [isMatch, side]);
-  const clampX = useCallback((raw) => Math.max(3, Math.min(97, raw)), []);
+  const clampX = useCallback((raw) => Math.max(7, Math.min(93, raw)), []);
 
   const begin = (cx, cy) => {
     if (isGoalkeeper) return; // ★ Kaleci sabit — taşınamaz
@@ -575,7 +589,7 @@ const FieldPlayer = ({ player, x, y, fieldRef, teamColor, isCaptain, onToggleCap
             minWidth: 22, textAlign: "center",
           }}>{player?.rating}</div>
           {/* ★ Çıkar (×) butonu — 16px → 22px (touch target için kritik) */}
-          <button onClick={(e) => { e.stopPropagation(); onRemove?.(); }} style={{
+          <button data-screenshot-hide="true" onClick={(e) => { e.stopPropagation(); onRemove?.(); }} style={{
             position: "absolute", top: -7, right: -9,
             width: 22, height: 22, borderRadius: "50%",
             background: "linear-gradient(135deg,#ef4444,#dc2626)",
@@ -1479,7 +1493,7 @@ const handleShareLineup = async () => {
 
             {/* PITCH */}
             <div style={{ padding: 0 }}>
-              <div ref={fieldRef} style={{ position: "relative", width: "100%", paddingTop: isMatch ? "170%" : "145%", borderRadius: "0 0 24px 24px", overflow: "hidden", background: "linear-gradient(180deg,#1a6b31 0%,#1e7a38 25%,#1a6b31 50%,#1e7a38 75%,#1a6b31 100%)", boxShadow: "0 12px 40px rgba(0,0,0,0.55), inset 0 0 80px rgba(0,0,0,0.3)", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+              <div ref={fieldRef} style={{ position: "relative", width: "100%", paddingTop: isMatch ? "180%" : "158%", borderRadius: "0 0 24px 24px", overflow: "hidden", background: "linear-gradient(180deg,#1a6b31 0%,#1e7a38 25%,#1a6b31 50%,#1e7a38 75%,#1a6b31 100%)", boxShadow: "0 12px 40px rgba(0,0,0,0.55), inset 0 0 80px rgba(0,0,0,0.3)", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
                 <div style={{ position: "absolute", inset: 0 }}>
                   <Pitch colA={teamA.color.secondary} colB={isMatch ? teamB.color.secondary : teamA.color.secondary} isMatch={isMatch} />
                   {isMatch && (<div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", display: "flex", alignItems: "center", gap: 6, zIndex: 2, pointerEvents: "none" }}><div style={{ background: "rgba(0,0,0,0.5)", padding: "2px 8px", borderRadius: 4, fontSize: 7, color: "rgba(255,255,255,0.3)", fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", fontFamily: "'Bebas Neue',sans-serif", backdropFilter: "blur(4px)" }}>{t("midfield")}</div></div>)}
