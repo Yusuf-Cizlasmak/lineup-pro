@@ -85,39 +85,7 @@ workflows:
             || /usr/libexec/PlistBuddy -c "Set :NSUserTrackingUsageDescription $ATT_MSG" "$PLIST"
 
           # ─── DOĞRULAMA ───
-          echo "═══════════════════════════════════════"
-          echo "Info.plist doğrulama:"
-          echo "═══════════════════════════════════════"
-          echo "GADApplicationIdentifier = $(/usr/libexec/PlistBuddy -c 'Print :GADApplicationIdentifier' "$PLIST")"
-          echo "GADIsAdManagerApp        = $(/usr/libexec/PlistBuddy -c 'Print :GADIsAdManagerApp' "$PLIST")"
-
-          ATT_VALUE=$(/usr/libexec/PlistBuddy -c 'Print :NSUserTrackingUsageDescription' "$PLIST" 2>/dev/null)
-          if [ -z "$ATT_VALUE" ]; then
-            echo "❌ KRİTİK HATA: NSUserTrackingUsageDescription eklenemedi!"
-            exit 1
-          fi
-          echo "NSUserTrackingUsageDescription = $ATT_VALUE"
-          echo "NSCameraUsageDescription       = $(/usr/libexec/PlistBuddy -c 'Print :NSCameraUsageDescription' "$PLIST" 2>/dev/null)"
-          echo "NSPhotoLibraryUsageDescription = $(/usr/libexec/PlistBuddy -c 'Print :NSPhotoLibraryUsageDescription' "$PLIST" 2>/dev/null)"
-          echo "═══════════════════════════════════════"
           echo "✅ Info.plist hazır"
-
-      - name: Setup signing
-        script: |
-          PROFILE_PATH=$(find "$HOME/Library/MobileDevice/Provisioning Profiles" -name "*.mobileprovision" 2>/dev/null | head -1)
-          if [ -n "$PROFILE_PATH" ]; then
-            PROFILE_UUID=$(security cms -D -i "$PROFILE_PATH" 2>/dev/null | grep -A1 'UUID' | grep '<string>' | sed 's/.*<string>\(.*\)<\/string>/\1/')
-            PROFILE_NAME=$(security cms -D -i "$PROFILE_PATH" 2>/dev/null | grep -A1 'Name' | head -1 | grep '<string>' | sed 's/.*<string>\(.*\)<\/string>/\1/')
-            echo "Profile: $PROFILE_NAME ($PROFILE_UUID)"
-          else
-            echo "WARNING: No provisioning profile found"
-            PROFILE_UUID=""
-            PROFILE_NAME=""
-          fi
-
-          echo "$PROFILE_UUID" > /tmp/profile_uuid.txt
-          echo "$PROFILE_NAME" > /tmp/profile_name.txt
-          echo "Signing setup done"
 
       - name: Increment build number
         script: |
@@ -126,15 +94,20 @@ workflows:
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUM" "$PLIST"
           echo "Build number: $BUILD_NUM"
 
+      - name: Setup signing (Codemagic Way)
+        script: |
+          # Codemagic'in indirdiği profilleri projeye enjekte eder. 
+          # Manuel imzalama çakışmalarını ve target hatalarını otomatik çözer.
+          xcode-project use-profiles
+
       - name: Build iOS archive
         script: |
           XCODE_PROJ="ios/App/App.xcodeproj"
           ARCHIVE_PATH="build/App.xcarchive"
-          PROFILE_UUID=$(cat /tmp/profile_uuid.txt 2>/dev/null || echo "")
 
           echo "Project: $XCODE_PROJ"
-          echo "Profile UUID: $PROFILE_UUID"
 
+          # -allowProvisioningUpdates komutunu KILDIRDIK çünkü xcode-project use-profiles her şeyi halletti.
           xcodebuild \
             -project "$XCODE_PROJ" \
             -scheme App \
@@ -142,23 +115,20 @@ workflows:
             -configuration Release \
             -archivePath "$ARCHIVE_PATH" \
             -destination "generic/platform=iOS" \
-            -allowProvisioningUpdates \
-            DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
             -skipPackageSignatureValidation \
             archive
 
           if [ ! -d "$ARCHIVE_PATH" ]; then
-            echo "Archive bulunamadi!"
-            find . -name "*.xcarchive" -type d 2>/dev/null
+            echo "❌ Archive bulunamadi!"
             exit 1
           fi
-          echo "Archive olusturuldu"
+          echo "✅ Archive olusturuldu"
 
       - name: Export IPA
         script: |
           ARCHIVE_PATH="build/App.xcarchive"
           
-          printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' '<plist version="1.0">' '<dict>' '  <key>method</key>' '  <string>app-store</string>' '  <key>teamID</key>' '  <string>Q3BH6457BX</string>' '  <key>signingStyle</key>' '  <string>automatic</string>' '  <key>uploadBitcode</key>' '  <false/>' '  <key>uploadSymbols</key>' '  <true/>' '</dict>' '</plist>' > exportOptions.plist
+          printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' '<plist version="1.0">' '<dict>' '  <key>method</key>' '  <string>app-store</string>' '  <key>teamID</key>' '  <string>Q3BH6457BX</string>' '  <key>signingStyle</key>' '  <string>manual</string>' '  <key>uploadBitcode</key>' '  <false/>' '  <key>uploadSymbols</key>' '  <true/>' '</dict>' '</plist>' > exportOptions.plist
 
           cat exportOptions.plist
 
