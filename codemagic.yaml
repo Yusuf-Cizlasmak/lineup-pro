@@ -24,7 +24,16 @@ workflows:
       - name: Install dependencies
         script: |
           npm install
-          npm install @capacitor/ios @capacitor/core @capacitor/cli @capacitor-community/admob --save
+          # Camera + diğer Capacitor plugin'leri
+          npm install \
+            @capacitor/ios \
+            @capacitor/core \
+            @capacitor/cli \
+            @capacitor/camera \
+            @capacitor/share \
+            @capacitor/filesystem \
+            @capacitor-community/admob \
+            --save
 
       - name: Build web
         script: CI=false npm run build
@@ -34,7 +43,40 @@ workflows:
           npx cap add ios || true
           npx cap sync ios
 
-      # ✅ Profile bul (ama global kullanma!)
+      # ✅ Info.plist'e camera/photo usage description ekle
+      # Bu olmazsa Camera.getPhoto çağrılır çağrılmaz iOS uygulamayı öldürür.
+      - name: Inject Info.plist usage descriptions
+        script: |
+          PLIST="ios/App/App/Info.plist"
+
+          if [ ! -f "$PLIST" ]; then
+            echo "❌ Info.plist bulunamadı: $PLIST"
+            exit 1
+          fi
+
+          add_or_set_string() {
+            local key="$1"
+            local value="$2"
+            if /usr/libexec/PlistBuddy -c "Print :$key" "$PLIST" >/dev/null 2>&1; then
+              /usr/libexec/PlistBuddy -c "Set :$key \"$value\"" "$PLIST"
+              echo "🔁 Updated $key"
+            else
+              /usr/libexec/PlistBuddy -c "Add :$key string \"$value\"" "$PLIST"
+              echo "➕ Added $key"
+            fi
+          }
+
+          add_or_set_string "NSCameraUsageDescription" \
+            "Oyuncu profili için fotoğraf çekmek üzere kameraya erişim gerekir."
+          add_or_set_string "NSPhotoLibraryUsageDescription" \
+            "Oyuncu profil fotoğrafı seçmek için galeriye erişim gerekir."
+          add_or_set_string "NSPhotoLibraryAddUsageDescription" \
+            "Oluşturulan kadro görselini galeriye kaydetmek için izin gerekir."
+
+          echo "----- Info.plist sonucu -----"
+          /usr/libexec/PlistBuddy -c "Print" "$PLIST" | grep -E "Camera|Photo" || true
+
+      # ✅ Profile bul
       - name: Detect provisioning profile
         script: |
           PROFILE_PATH=$(find "$HOME/Library/MobileDevice/Provisioning Profiles" -name "*.mobileprovision" | head -1)
@@ -44,8 +86,8 @@ workflows:
             exit 1
           fi
 
-          PROFILE_UUID=$(security cms -D -i "$PROFILE_PATH" | grep -A1 'UUID' | grep '<string>' | sed 's/.*<string>\(.*\)<\/string>/\1/')
-          PROFILE_NAME=$(security cms -D -i "$PROFILE_PATH" | grep -A1 'Name' | grep '<string>' | sed 's/.*<string>\(.*\)<\/string>/\1/')
+          PROFILE_UUID=$(security cms -D -i "$PROFILE_PATH" | plutil -extract UUID raw -)
+          PROFILE_NAME=$(security cms -D -i "$PROFILE_PATH" | plutil -extract Name raw -)
 
           echo "UUID: $PROFILE_UUID"
           echo "NAME: $PROFILE_NAME"
@@ -53,28 +95,26 @@ workflows:
           echo "$PROFILE_UUID" > /tmp/profile_uuid.txt
           echo "$PROFILE_NAME" > /tmp/profile_name.txt
 
-      # 🔥 SADECE APP TARGET'I PATCHLE
-      - name: Patch signing ONLY for App target
+      # ✅ Signing patch — pbxproj'u sed ile bozmak yerine xcconfig kullan
+      # Tek bir override.xcconfig dosyası yazıyoruz, xcodebuild'e -xcconfig ile
+      # geçeceğiz. Bu pbxproj'a hiç dokunmadığı için "damaged project" hatası olmaz.
+      - name: Create signing xcconfig
         script: |
-          PBXPROJ="ios/App/App.xcodeproj/project.pbxproj"
           PROFILE_UUID=$(cat /tmp/profile_uuid.txt)
+          PROFILE_NAME=$(cat /tmp/profile_name.txt)
 
-          # Sadece App target'a provisioning profile ekle
-          sed -i '' "/PRODUCT_BUNDLE_IDENTIFIER = $BUNDLE_ID;/a\\
-                  PROVISIONING_PROFILE = $PROFILE_UUID;
-          " "$PBXPROJ"
+          cat > /tmp/signing.xcconfig <<EOF
+          CODE_SIGN_STYLE = Manual
+          CODE_SIGN_IDENTITY = Apple Distribution
+          DEVELOPMENT_TEAM = $DEVELOPMENT_TEAM
+          PROVISIONING_PROFILE_SPECIFIER = $PROFILE_NAME
+          PRODUCT_BUNDLE_IDENTIFIER = $BUNDLE_ID
+          EOF
 
-          sed -i '' "/PRODUCT_BUNDLE_IDENTIFIER = $BUNDLE_ID;/a\\
-                  CODE_SIGN_IDENTITY = Apple Distribution;
-          " "$PBXPROJ"
+          echo "----- signing.xcconfig -----"
+          cat /tmp/signing.xcconfig
 
-          sed -i '' "/PRODUCT_BUNDLE_IDENTIFIER = $BUNDLE_ID;/a\\
-                  DEVELOPMENT_TEAM = $DEVELOPMENT_TEAM;
-          " "$PBXPROJ"
-
-          echo "✅ Only App target patched"
-
-      - name: Build archive (NO global signing override)
+      - name: Build archive
         script: |
           XCODE_PROJ="ios/App/App.xcodeproj"
           ARCHIVE_PATH="build/App.xcarchive"
@@ -86,6 +126,7 @@ workflows:
             -configuration Release \
             -archivePath "$ARCHIVE_PATH" \
             -destination "generic/platform=iOS" \
+            -xcconfig /tmp/signing.xcconfig \
             -allowProvisioningUpdates \
             archive
 
