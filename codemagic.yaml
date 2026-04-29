@@ -26,7 +26,7 @@ workflows:
           npm install @capacitor-community/in-app-review @capacitor/browser --save
           # ★ Haptic feedback (iOS Taptic Engine + Android Vibrator)
           npm install @capacitor/haptics --save
-          # ★ Native kamera/galeri (iOS crash fix — Apple Review Guideline 2.1a)
+          # ★ Native kamera/galeri — iOS crash fix (Apple Review 2.1a)
           npm install @capacitor/camera --save
 
       - name: Build web
@@ -66,18 +66,15 @@ workflows:
           # ─── Encryption ───
           /usr/libexec/PlistBuddy -c "Add :ITSAppManagesNonExemptEncryption bool false" "$PLIST" 2>/dev/null || true
 
-          # ─── KAMERA & FOTOĞRAF İZİNLERİ — ZORUNLU ───
-          CAM_MSG="Oyuncu profili icin fotograf cekmek uzere kameraya erisim gereklidir."
-          /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string $CAM_MSG" "$PLIST" 2>/dev/null \
-            || /usr/libexec/PlistBuddy -c "Set :NSCameraUsageDescription $CAM_MSG" "$PLIST"
+          # ─── KAMERA & FOTOĞRAF İZİNLERİ — ZORUNLU (olmadan iOS crash atar) ───
+          /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string 'Oyuncu profili icin fotograf cekmek uzere kameraya erisim gereklidir.'" "$PLIST" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Set :NSCameraUsageDescription 'Oyuncu profili icin fotograf cekmek uzere kameraya erisim gereklidir.'" "$PLIST"
 
-          PHOTO_MSG="Oyuncu profili icin fotograflariniza erisim gereklidir."
-          /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryUsageDescription string $PHOTO_MSG" "$PLIST" 2>/dev/null \
-            || /usr/libexec/PlistBuddy -c "Set :NSPhotoLibraryUsageDescription $PHOTO_MSG" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryUsageDescription string 'Oyuncu profili icin fotograflariniza erisim gereklidir.'" "$PLIST" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Set :NSPhotoLibraryUsageDescription 'Oyuncu profili icin fotograflariniza erisim gereklidir.'" "$PLIST"
 
-          PHOTO_ADD_MSG="Dizilim gorsellerini galeriye kaydetmek icin izin gereklidir."
-          /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryAddUsageDescription string $PHOTO_ADD_MSG" "$PLIST" 2>/dev/null \
-            || /usr/libexec/PlistBuddy -c "Set :NSPhotoLibraryAddUsageDescription $PHOTO_ADD_MSG" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryAddUsageDescription string 'Dizilim gorsellerini galeriye kaydetmek icin izin gereklidir.'" "$PLIST" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Set :NSPhotoLibraryAddUsageDescription 'Dizilim gorsellerini galeriye kaydetmek icin izin gereklidir.'" "$PLIST"
 
           # ─── ATT (App Tracking Transparency) — GARANTİ EKLEME ───
           ATT_MSG="Reklamları ilgi alanlarınıza göre kişiselleştirmek için izninizi rica ediyoruz."
@@ -85,7 +82,43 @@ workflows:
             || /usr/libexec/PlistBuddy -c "Set :NSUserTrackingUsageDescription $ATT_MSG" "$PLIST"
 
           # ─── DOĞRULAMA ───
+          echo "═══════════════════════════════════════"
+          echo "Info.plist doğrulama:"
+          echo "═══════════════════════════════════════"
+          echo "GADApplicationIdentifier = $(/usr/libexec/PlistBuddy -c 'Print :GADApplicationIdentifier' "$PLIST")"
+          echo "GADIsAdManagerApp        = $(/usr/libexec/PlistBuddy -c 'Print :GADIsAdManagerApp' "$PLIST")"
+
+          ATT_VALUE=$(/usr/libexec/PlistBuddy -c 'Print :NSUserTrackingUsageDescription' "$PLIST" 2>/dev/null)
+          if [ -z "$ATT_VALUE" ]; then
+            echo "❌ KRİTİK HATA: NSUserTrackingUsageDescription eklenemedi!"
+            exit 1
+          fi
+          echo "NSUserTrackingUsageDescription = $ATT_VALUE"
+          echo "═══════════════════════════════════════"
           echo "✅ Info.plist hazır"
+
+      - name: Setup signing
+        script: |
+          PBXPROJ="ios/App/App.xcodeproj/project.pbxproj"
+
+          PROFILE_PATH=$(find "$HOME/Library/MobileDevice/Provisioning Profiles" -name "*.mobileprovision" 2>/dev/null | head -1)
+          if [ -n "$PROFILE_PATH" ]; then
+            PROFILE_UUID=$(security cms -D -i "$PROFILE_PATH" 2>/dev/null | grep -A1 'UUID' | grep '<string>' | sed 's/.*<string>\(.*\)<\/string>/\1/')
+            PROFILE_NAME=$(security cms -D -i "$PROFILE_PATH" 2>/dev/null | grep -A1 'Name' | head -1 | grep '<string>' | sed 's/.*<string>\(.*\)<\/string>/\1/')
+            echo "Profile: $PROFILE_NAME ($PROFILE_UUID)"
+          else
+            echo "WARNING: No provisioning profile found"
+            PROFILE_UUID=""
+            PROFILE_NAME=""
+          fi
+
+          sed -i '' "s/CODE_SIGN_STYLE = Automatic/CODE_SIGN_STYLE = Manual/g" "$PBXPROJ"
+          sed -i '' "s/DEVELOPMENT_TEAM = \"\"/DEVELOPMENT_TEAM = \"$DEVELOPMENT_TEAM\"/g" "$PBXPROJ"
+          sed -i '' "s/DEVELOPMENT_TEAM = \"\";/DEVELOPMENT_TEAM = \"$DEVELOPMENT_TEAM\";/g" "$PBXPROJ"
+
+          echo "$PROFILE_UUID" > /tmp/profile_uuid.txt
+          echo "$PROFILE_NAME" > /tmp/profile_name.txt
+          echo "Signing setup done"
 
       - name: Increment build number
         script: |
@@ -94,18 +127,14 @@ workflows:
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUM" "$PLIST"
           echo "Build number: $BUILD_NUM"
 
-      - name: Setup signing (Codemagic Way)
-        script: |
-          # Codemagic'in indirdiği profilleri projeye enjekte eder. 
-          # Manuel imzalama çakışmalarını ve target hatalarını otomatik çözer.
-          xcode-project use-profiles
-
       - name: Build iOS archive
         script: |
           XCODE_PROJ="ios/App/App.xcodeproj"
           ARCHIVE_PATH="build/App.xcarchive"
+          PROFILE_UUID=$(cat /tmp/profile_uuid.txt 2>/dev/null || echo "")
 
           echo "Project: $XCODE_PROJ"
+          echo "Profile UUID: $PROFILE_UUID"
 
           xcodebuild \
             -project "$XCODE_PROJ" \
@@ -114,49 +143,30 @@ workflows:
             -configuration Release \
             -archivePath "$ARCHIVE_PATH" \
             -destination "generic/platform=iOS" \
-            -skipPackageSignatureValidation \
+            -allowProvisioningUpdates \
+            DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
+            CODE_SIGN_STYLE="Manual" \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            PROVISIONING_PROFILE="$PROFILE_UUID" \
             archive
 
           if [ ! -d "$ARCHIVE_PATH" ]; then
-            echo "❌ Archive bulunamadi!"
+            echo "Archive bulunamadi!"
+            find . -name "*.xcarchive" -type d 2>/dev/null
             exit 1
           fi
-          echo "✅ Archive olusturuldu"
+          echo "Archive olusturuldu"
 
       - name: Export IPA
         script: |
           ARCHIVE_PATH="build/App.xcarchive"
-          
-          # Codemagic'in indirdiği profili bul ve adını al
-          PROFILE_PATH=$(find "$HOME/Library/MobileDevice/Provisioning Profiles" -name "*.mobileprovision" 2>/dev/null | head -1)
-          PROFILE_NAME=$(security cms -D -i "$PROFILE_PATH" 2>/dev/null | grep -A1 'Name' | head -1 | grep '<string>' | sed 's/.*<string>\(.*\)<\/string>/\1/')
-          
-          echo "Kullanılacak Profil: $PROFILE_NAME"
-          
-          # Plist dosyasını oluştur (app-store-connect ve provisioningProfiles eklendi)
-          cat <<EOF > exportOptions.plist
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>method</key>
-            <string>app-store-connect</string>
-            <key>teamID</key>
-            <string>Q3BH6457BX</string>
-            <key>signingStyle</key>
-            <string>manual</string>
-            <key>provisioningProfiles</key>
-            <dict>
-              <key>$BUNDLE_ID</key>
-              <string>$PROFILE_NAME</string>
-            </dict>
-          </dict>
-          </plist>
-          EOF
+          PROFILE_NAME=$(cat /tmp/profile_name.txt 2>/dev/null || echo "")
+          PROFILE_UUID=$(cat /tmp/profile_uuid.txt 2>/dev/null || echo "")
+          PROFILE_REF="${PROFILE_NAME:-$PROFILE_UUID}"
 
-          echo "═══════════════════════════════════════"
+          printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' '<plist version="1.0">' '<dict>' '  <key>method</key>' '  <string>app-store-connect</string>' '  <key>teamID</key>' '  <string>Q3BH6457BX</string>' '  <key>signingStyle</key>' '  <string>manual</string>' '  <key>uploadBitcode</key>' '  <false/>' '  <key>uploadSymbols</key>' '  <true/>' '  <key>provisioningProfiles</key>' '  <dict>' "    <key>com.halisahakolik.app</key>" "    <string>${PROFILE_REF}</string>" '  </dict>' '</dict>' '</plist>' > exportOptions.plist
+
           cat exportOptions.plist
-          echo "═══════════════════════════════════════"
 
           xcodebuild -exportArchive \
             -archivePath "$ARCHIVE_PATH" \
