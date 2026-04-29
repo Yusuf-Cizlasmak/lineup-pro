@@ -8,6 +8,7 @@ import { isTourDone, resetTour } from "./Tour";
 import { Share } from "@capacitor/share";
 import { Filesystem, Directory } from "@capacitor/filesystem";
 import { Capacitor } from "@capacitor/core";
+import { Camera, CameraResultType, CameraSource } from "@capacitor/camera";
 
 // ─── SCREENSHOT & SHARE UTILITY ───
 const captureAndShare = async (element, filename = "halisaha-kolik.png") => {
@@ -758,12 +759,37 @@ const PlayerForm = ({ player, onSave, onCancel, accent, existingPlayers = [] }) 
 
   const inputErrorStyle = { borderColor: "#ef4444", boxShadow: "0 0 0 1px #ef4444" };
 
+  // ★ Capacitor Camera: iOS/Android'de native kamera/galeri, web'de file input fallback
+  const handlePhotoClick = async () => {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const image = await Camera.getPhoto({
+          quality: 80,
+          allowEditing: false,
+          resultType: CameraResultType.DataUrl,
+          source: CameraSource.Prompt,      // "Kamera / Galeri" seçim sheet'i
+          presentationStyle: "popover",     // iPad crash'ini önler (zorunlu)
+        });
+        if (image?.dataUrl) {
+          sF((p) => ({ ...p, photo: image.dataUrl }));
+        }
+      } catch (e) {
+        if (!/cancel/i.test(e?.message || "")) {
+          console.error("Camera error:", e);
+        }
+      }
+      return;
+    }
+    fr.current?.click();
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 15 }}>
       <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 14 }}>
-        <div onClick={() => fr.current?.click()} style={{ width: 70, height: 70, borderRadius: "50%", cursor: "pointer", background: f.photo ? `url(${f.photo}) center/cover` : "rgba(255,255,255,0.06)", border: "2px dashed rgba(255,255,255,0.18)", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(255,255,255,0.3)" }}>
+        <div onClick={handlePhotoClick} style={{ width: 70, height: 70, borderRadius: "50%", cursor: "pointer", background: f.photo ? `url(${f.photo}) center/cover` : "rgba(255,255,255,0.06)", border: "2px dashed rgba(255,255,255,0.18)", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(255,255,255,0.3)" }}>
           {!f.photo && <I.Camera />}
         </div>
+        {/* Web fallback — native'de kullanılmaz */}
         <input ref={fr} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => { const file = e.target.files?.[0]; if (!file) return; const r = new FileReader(); r.onload = (ev) => sF((p) => ({ ...p, photo: ev.target.result })); r.readAsDataURL(file); }} />
         {/* ★ FORMA NUMARASI — fotoğrafın yanında belirgin */}
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5 }}>

@@ -26,6 +26,8 @@ workflows:
           npm install @capacitor-community/in-app-review @capacitor/browser --save
           # ★ Haptic feedback (iOS Taptic Engine + Android Vibrator)
           npm install @capacitor/haptics --save
+          # ★ Native kamera/galeri (iOS crash fix)
+          npm install @capacitor/camera --save
 
       - name: Build web
         script: CI=false npm run build
@@ -64,6 +66,19 @@ workflows:
           # ─── Encryption ───
           /usr/libexec/PlistBuddy -c "Add :ITSAppManagesNonExemptEncryption bool false" "$PLIST" 2>/dev/null || true
 
+          # ─── KAMERA & FOTOĞRAF İZİNLERİ — ZORUNLU (olmadan iOS crash atar) ───
+          CAM_MSG="Oyuncu profili icin fotograf cekmek uzere kameraya erisim gereklidir."
+          /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string $CAM_MSG" "$PLIST" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Set :NSCameraUsageDescription $CAM_MSG" "$PLIST"
+
+          PHOTO_MSG="Oyuncu profili icin fotograflariniza erisim gereklidir."
+          /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryUsageDescription string $PHOTO_MSG" "$PLIST" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Set :NSPhotoLibraryUsageDescription $PHOTO_MSG" "$PLIST"
+
+          PHOTO_ADD_MSG="Dizilim gorsellerini galeriye kaydetmek icin izin gereklidir."
+          /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryAddUsageDescription string $PHOTO_ADD_MSG" "$PLIST" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Set :NSPhotoLibraryAddUsageDescription $PHOTO_ADD_MSG" "$PLIST"
+
           # ─── ATT (App Tracking Transparency) — GARANTİ EKLEME ───
           ATT_MSG="Reklamları ilgi alanlarınıza göre kişiselleştirmek için izninizi rica ediyoruz."
           /usr/libexec/PlistBuddy -c "Add :NSUserTrackingUsageDescription string $ATT_MSG" "$PLIST" 2>/dev/null \
@@ -82,6 +97,8 @@ workflows:
             exit 1
           fi
           echo "NSUserTrackingUsageDescription = $ATT_VALUE"
+          echo "NSCameraUsageDescription      = $(/usr/libexec/PlistBuddy -c 'Print :NSCameraUsageDescription' "$PLIST" 2>/dev/null)"
+          echo "NSPhotoLibraryUsageDescription= $(/usr/libexec/PlistBuddy -c 'Print :NSPhotoLibraryUsageDescription' "$PLIST" 2>/dev/null)"
           echo "═══════════════════════════════════════"
           echo "✅ Info.plist hazır"
 
