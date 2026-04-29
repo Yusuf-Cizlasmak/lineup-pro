@@ -34,6 +34,9 @@ workflows:
             @capacitor-community/admob \
             --save
 
+          # xcodeproj Ruby gem — pbxproj'u programatik olarak düzenlemek için
+          gem install xcodeproj --no-document
+
       - name: Build web
         script: CI=false npm run build
 
@@ -43,7 +46,6 @@ workflows:
           npx cap sync ios
 
       # ✅ Info.plist'e camera/photo usage description ekle
-      # Bu olmazsa Camera.getPhoto çağrılır çağrılmaz iOS uygulamayı öldürür.
       - name: Inject Info.plist usage descriptions
         script: |
           PLIST="ios/App/App/Info.plist"
@@ -94,17 +96,50 @@ workflows:
           echo "$PROFILE_UUID" > /tmp/profile_uuid.txt
           echo "$PROFILE_NAME" > /tmp/profile_name.txt
 
-      # ✅ Build archive — signing ayarlarını xcconfig yerine direkt xcodebuild
-      # parametresi olarak geçiyoruz. Bu sayede ayarlar SADECE App target'a
-      # uygulanır, SPM target'ları (IONCameraLib, Capacitor, vs.) kendi
-      # otomatik signing'lerinde kalır. xcconfig kullanırsak SPM target'ları
-      # da provisioning profile zorlamaya çalışıp patlıyor.
+      # ✅ Sadece App target'ın signing ayarlarını Ruby ile yaz
+      # xcodeproj gem'i pbxproj'u parse edip TEKRAR yazıyor — sed gibi kırmaz.
+      # SADECE 'App' target'a dokunuyoruz, SPM target'ları otomatik signing'de kalıyor.
+      - name: Patch App target signing (Ruby)
+        script: |
+          PROFILE_NAME=$(cat /tmp/profile_name.txt)
+
+          ruby <<RUBY
+          require 'xcodeproj'
+
+          project_path = 'ios/App/App.xcodeproj'
+          project = Xcodeproj::Project.open(project_path)
+
+          target = project.targets.find { |t| t.name == 'App' }
+          if target.nil?
+            abort "❌ 'App' target bulunamadı"
+          end
+
+          target.build_configurations.each do |config|
+            attrs = config.build_settings
+            attrs['CODE_SIGN_STYLE'] = 'Manual'
+            attrs['CODE_SIGN_IDENTITY'] = 'Apple Distribution'
+            attrs['DEVELOPMENT_TEAM'] = '${DEVELOPMENT_TEAM}'
+            attrs['PROVISIONING_PROFILE_SPECIFIER'] = '${PROFILE_NAME}'
+            attrs['PRODUCT_BUNDLE_IDENTIFIER'] = '${BUNDLE_ID}'
+            puts "✅ Patched config: #{config.name}"
+          end
+
+          # Project-level TargetAttributes da güncellenmeli (manuel signing için)
+          project.root_object.attributes['TargetAttributes'] ||= {}
+          project.root_object.attributes['TargetAttributes'][target.uuid] ||= {}
+          project.root_object.attributes['TargetAttributes'][target.uuid]['ProvisioningStyle'] = 'Manual'
+          project.root_object.attributes['TargetAttributes'][target.uuid]['DevelopmentTeam'] = '${DEVELOPMENT_TEAM}'
+
+          project.save
+          puts "✅ pbxproj saved"
+          RUBY
+
       - name: Build archive
         script: |
           XCODE_PROJ="ios/App/App.xcodeproj"
           ARCHIVE_PATH="build/App.xcarchive"
-          PROFILE_NAME=$(cat /tmp/profile_name.txt)
 
+          # Komut satırında signing override YOK — pbxproj'da yazılı, sadece App'e uygulanacak
           xcodebuild \
             -project "$XCODE_PROJ" \
             -scheme App \
@@ -113,11 +148,6 @@ workflows:
             -archivePath "$ARCHIVE_PATH" \
             -destination "generic/platform=iOS" \
             -allowProvisioningUpdates \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
-            DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
-            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
-            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
             archive
 
           if [ ! -d "$ARCHIVE_PATH" ]; then
