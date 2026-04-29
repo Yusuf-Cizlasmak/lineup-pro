@@ -22,11 +22,11 @@ workflows:
         script: |
           npm install
           npm install @capacitor/ios @capacitor/core @capacitor/cli @capacitor-community/admob --save
-          # ★ Native review dialog + browser fallback (RatePrompt)
+          # ★ Native review dialog + browser fallback
           npm install @capacitor-community/in-app-review @capacitor/browser --save
           # ★ Haptic feedback (iOS Taptic Engine + Android Vibrator)
           npm install @capacitor/haptics --save
-          # ★ Native kamera/galeri — iOS crash fix (Apple Review 2.1a)
+          # ★ Native kamera/galeri (Senin eklediğin yeni paket)
           npm install @capacitor/camera --save
 
       - name: Build web
@@ -66,17 +66,20 @@ workflows:
           # ─── Encryption ───
           /usr/libexec/PlistBuddy -c "Add :ITSAppManagesNonExemptEncryption bool false" "$PLIST" 2>/dev/null || true
 
-          # ─── KAMERA & FOTOĞRAF İZİNLERİ — ZORUNLU (olmadan iOS crash atar) ───
-          /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string 'Oyuncu profili icin fotograf cekmek uzere kameraya erisim gereklidir.'" "$PLIST" 2>/dev/null \
-            || /usr/libexec/PlistBuddy -c "Set :NSCameraUsageDescription 'Oyuncu profili icin fotograf cekmek uzere kameraya erisim gereklidir.'" "$PLIST"
+          # ─── KAMERA & FOTOĞRAF İZİNLERİ (YENİ EKLENTİ İÇİN ZORUNLU) ───
+          CAM_MSG="Oyuncu profili icin fotograf cekmek uzere kameraya erisim gereklidir."
+          /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string $CAM_MSG" "$PLIST" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Set :NSCameraUsageDescription $CAM_MSG" "$PLIST"
 
-          /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryUsageDescription string 'Oyuncu profili icin fotograflariniza erisim gereklidir.'" "$PLIST" 2>/dev/null \
-            || /usr/libexec/PlistBuddy -c "Set :NSPhotoLibraryUsageDescription 'Oyuncu profili icin fotograflariniza erisim gereklidir.'" "$PLIST"
+          PHOTO_MSG="Oyuncu profili icin fotograflariniza erisim gereklidir."
+          /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryUsageDescription string $PHOTO_MSG" "$PLIST" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Set :NSPhotoLibraryUsageDescription $PHOTO_MSG" "$PLIST"
 
-          /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryAddUsageDescription string 'Dizilim gorsellerini galeriye kaydetmek icin izin gereklidir.'" "$PLIST" 2>/dev/null \
-            || /usr/libexec/PlistBuddy -c "Set :NSPhotoLibraryAddUsageDescription 'Dizilim gorsellerini galeriye kaydetmek icin izin gereklidir.'" "$PLIST"
+          PHOTO_ADD_MSG="Dizilim gorsellerini galeriye kaydetmek icin izin gereklidir."
+          /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryAddUsageDescription string $PHOTO_ADD_MSG" "$PLIST" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Set :NSPhotoLibraryAddUsageDescription $PHOTO_ADD_MSG" "$PLIST"
 
-          # ─── ATT (App Tracking Transparency) — GARANTİ EKLEME ───
+          # ─── ATT (App Tracking Transparency) ───
           ATT_MSG="Reklamları ilgi alanlarınıza göre kişiselleştirmek için izninizi rica ediyoruz."
           /usr/libexec/PlistBuddy -c "Add :NSUserTrackingUsageDescription string $ATT_MSG" "$PLIST" 2>/dev/null \
             || /usr/libexec/PlistBuddy -c "Set :NSUserTrackingUsageDescription $ATT_MSG" "$PLIST"
@@ -99,6 +102,7 @@ workflows:
 
       - name: Setup signing
         script: |
+          # SENİN ÇALIŞAN İMZALAMA ALGORİTMAN
           PBXPROJ="ios/App/App.xcodeproj/project.pbxproj"
 
           PROFILE_PATH=$(find "$HOME/Library/MobileDevice/Provisioning Profiles" -name "*.mobileprovision" 2>/dev/null | head -1)
@@ -129,6 +133,7 @@ workflows:
 
       - name: Build iOS archive
         script: |
+          # SENİN ÇALIŞAN BUILD ALGORİTMAN
           XCODE_PROJ="ios/App/App.xcodeproj"
           ARCHIVE_PATH="build/App.xcarchive"
           PROFILE_UUID=$(cat /tmp/profile_uuid.txt 2>/dev/null || echo "")
@@ -159,6 +164,7 @@ workflows:
 
       - name: Export IPA
         script: |
+          # SENİN ÇALIŞAN EXPORT ALGORİTMAN (Yalnızca app-store hatası için app-store-connect yapıldı)
           ARCHIVE_PATH="build/App.xcarchive"
           PROFILE_NAME=$(cat /tmp/profile_name.txt 2>/dev/null || echo "")
           PROFILE_UUID=$(cat /tmp/profile_uuid.txt 2>/dev/null || echo "")
