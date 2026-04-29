@@ -1,6 +1,6 @@
 workflows:
   ios-build:
-    name: iOS Hybrid Build
+    name: iOS Build
     max_build_duration: 60
     instance_type: mac_mini_m2
 
@@ -11,179 +11,149 @@ workflows:
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.halisahakolik.app
-
       node: 22
-
       vars:
         DEVELOPMENT_TEAM: "Q3BH6457BX"
         BUNDLE_ID: "com.halisahakolik.app"
         GAD_APP_ID: "ca-app-pub-2886543552287006~5889085689"
-        # App Store Connect'te bilinen en yüksek build numarası.
-        # Yeni upload'larda otomatik tespit edersek bunu kullanmayız,
-        # tespit başarısız olursa bu sayı taban olur.
-        MIN_BUILD_NUMBER: "37"
 
     scripts:
-
       - name: Install dependencies
         script: |
           npm install
-          npm install \
-            @capacitor/ios \
-            @capacitor/core \
-            @capacitor/cli \
-            @capacitor/camera \
-            @capacitor/share \
-            @capacitor/filesystem \
-            @capacitor-community/admob \
-            --save
-
-          gem install xcodeproj --no-document
+          npm install @capacitor/ios @capacitor/core @capacitor/cli @capacitor-community/admob --save
+          # ★ Native review dialog + browser fallback (RatePrompt)
+          npm install @capacitor-community/in-app-review @capacitor/browser --save
+          # ★ Haptic feedback (iOS Taptic Engine + Android Vibrator)
+          npm install @capacitor/haptics --save
+          # ★ Camera + Filesystem + Share (Take Photo crash fix)
+          npm install @capacitor/camera @capacitor/filesystem @capacitor/share --save
 
       - name: Build web
         script: CI=false npm run build
 
-      - name: Sync Capacitor
+      - name: Add iOS platform
         script: |
           npx cap add ios || true
           npx cap sync ios
 
-      # ✅ Build numarasını ayarla — 3 kademeli güvenlik
-      # 1. App Store Connect'ten en yüksek numarayı çek
-      # 2. Başaramazsa Codemagic'in dahili BUILD_NUMBER'ını kullan
-      # 3. İkisi de MIN_BUILD_NUMBER'dan küçükse onu kullan
-      # Hangisi en yüksekse +1 yapıp Info.plist'e yaz
-      - name: Set build number
+      - name: Set app icon
         script: |
-          set -e
-          cd ios/App
-
-          echo "🔍 Codemagic build number: $BUILD_NUMBER"
-          echo "🔍 Min build number floor: $MIN_BUILD_NUMBER"
-
-          # 1) App Store Connect'ten dene — bu sefer hatayı GÖRELİM
-          echo "🔍 App Store Connect'ten en son build numarası çekiliyor..."
-          ASC_BUILD=$(app-store-connect get-latest-build-number --bundle-id "$BUNDLE_ID" 2>&1 || echo "FAIL")
-          echo "📦 ASC response: $ASC_BUILD"
-
-          # Sayı değilse 0'a düşür
-          if ! [[ "$ASC_BUILD" =~ ^[0-9]+$ ]]; then
-            echo "⚠️  ASC tespiti başarısız oldu, fallback'e geçiliyor"
-            ASC_BUILD=0
+          if [ ! -f "AppIcon.png" ]; then
+            echo "AppIcon.png not found, using default"
+            exit 0
           fi
+          ICON_DIR="ios/App/App/Assets.xcassets/AppIcon.appiconset"
+          sips -z 1024 1024 AppIcon.png --out "$ICON_DIR/AppIcon-1024@1x.png"
+          printf '{"images":[{"filename":"AppIcon-1024@1x.png","idiom":"universal","platform":"ios","size":"1024x1024"}],"info":{"author":"xcode","version":1}}' > "$ICON_DIR/Contents.json"
+          echo "App icon set"
 
-          # Codemagic'in BUILD_NUMBER değişkeni de sayı değilse 0
-          if ! [[ "$BUILD_NUMBER" =~ ^[0-9]+$ ]]; then
-            BUILD_NUMBER=0
-          fi
-
-          if ! [[ "$MIN_BUILD_NUMBER" =~ ^[0-9]+$ ]]; then
-            MIN_BUILD_NUMBER=0
-          fi
-
-          # En yükseğini al
-          MAX=$ASC_BUILD
-          if [ "$BUILD_NUMBER" -gt "$MAX" ]; then MAX=$BUILD_NUMBER; fi
-          if [ "$MIN_BUILD_NUMBER" -gt "$MAX" ]; then MAX=$MIN_BUILD_NUMBER; fi
-
-          NEW_BUILD=$((MAX + 1))
-          echo "📦 ASC latest:      $ASC_BUILD"
-          echo "📦 Codemagic build: $BUILD_NUMBER"
-          echo "📦 Min floor:       $MIN_BUILD_NUMBER"
-          echo "📦 Selected MAX:    $MAX"
-          echo "✅ NEW build number: $NEW_BUILD"
-
-          agvtool new-version -all "$NEW_BUILD"
-
-          cd ../..
-
-      - name: Inject Info.plist usage descriptions
+      - name: Configure Info.plist
         script: |
           PLIST="ios/App/App/Info.plist"
 
-          if [ ! -f "$PLIST" ]; then
-            echo "❌ Info.plist bulunamadı: $PLIST"
+          # ─── AdMob App ID ───
+          /usr/libexec/PlistBuddy -c "Add :GADApplicationIdentifier string $GAD_APP_ID" "$PLIST" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Set :GADApplicationIdentifier $GAD_APP_ID" "$PLIST"
+
+          /usr/libexec/PlistBuddy -c "Add :GADIsAdManagerApp bool true" "$PLIST" 2>/dev/null || true
+
+          # ─── SKAdNetwork ───
+          /usr/libexec/PlistBuddy -c "Add :SKAdNetworkItems array" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :SKAdNetworkItems:0 dict" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :SKAdNetworkItems:0:SKAdNetworkIdentifier string cstr6suwn9.skadnetwork" "$PLIST" 2>/dev/null || true
+
+          # ─── Encryption ───
+          /usr/libexec/PlistBuddy -c "Add :ITSAppManagesNonExemptEncryption bool false" "$PLIST" 2>/dev/null || true
+
+          # ─── ATT (App Tracking Transparency) — GARANTİ EKLEME ───
+          ATT_MSG="Reklamları ilgi alanlarınıza göre kişiselleştirmek için izninizi rica ediyoruz."
+          /usr/libexec/PlistBuddy -c "Add :NSUserTrackingUsageDescription string $ATT_MSG" "$PLIST" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Set :NSUserTrackingUsageDescription $ATT_MSG" "$PLIST"
+
+          # ─── ★ YENİ: Camera & Photo Library izinleri (Apple reddetme fix'i) ───
+          CAM_MSG="Oyuncu profili için fotoğraf çekmek üzere kameraya erişim gerekir."
+          /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string $CAM_MSG" "$PLIST" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Set :NSCameraUsageDescription $CAM_MSG" "$PLIST"
+
+          PHOTO_MSG="Oyuncu profil fotoğrafı seçmek için galeriye erişim gerekir."
+          /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryUsageDescription string $PHOTO_MSG" "$PLIST" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Set :NSPhotoLibraryUsageDescription $PHOTO_MSG" "$PLIST"
+
+          PHOTO_ADD_MSG="Oluşturulan kadro görselini galeriye kaydetmek için izin gerekir."
+          /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryAddUsageDescription string $PHOTO_ADD_MSG" "$PLIST" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Set :NSPhotoLibraryAddUsageDescription $PHOTO_ADD_MSG" "$PLIST"
+
+          # ─── DOĞRULAMA ───
+          echo "═══════════════════════════════════════"
+          echo "Info.plist doğrulama:"
+          echo "═══════════════════════════════════════"
+          echo "GADApplicationIdentifier = $(/usr/libexec/PlistBuddy -c 'Print :GADApplicationIdentifier' "$PLIST")"
+          echo "GADIsAdManagerApp        = $(/usr/libexec/PlistBuddy -c 'Print :GADIsAdManagerApp' "$PLIST")"
+
+          ATT_VALUE=$(/usr/libexec/PlistBuddy -c 'Print :NSUserTrackingUsageDescription' "$PLIST" 2>/dev/null)
+          if [ -z "$ATT_VALUE" ]; then
+            echo "❌ KRİTİK HATA: NSUserTrackingUsageDescription eklenemedi!"
             exit 1
           fi
+          echo "NSUserTrackingUsageDescription = $ATT_VALUE"
 
-          add_or_set_string() {
-            local key="$1"
-            local value="$2"
-            if /usr/libexec/PlistBuddy -c "Print :$key" "$PLIST" >/dev/null 2>&1; then
-              /usr/libexec/PlistBuddy -c "Set :$key \"$value\"" "$PLIST"
-              echo "🔁 Updated $key"
-            else
-              /usr/libexec/PlistBuddy -c "Add :$key string \"$value\"" "$PLIST"
-              echo "➕ Added $key"
-            fi
-          }
+          # ★ Camera/Photo doğrulaması
+          CAM_VALUE=$(/usr/libexec/PlistBuddy -c 'Print :NSCameraUsageDescription' "$PLIST" 2>/dev/null)
+          if [ -z "$CAM_VALUE" ]; then
+            echo "❌ KRİTİK HATA: NSCameraUsageDescription eklenemedi!"
+            exit 1
+          fi
+          echo "NSCameraUsageDescription          = $CAM_VALUE"
+          echo "NSPhotoLibraryUsageDescription    = $(/usr/libexec/PlistBuddy -c 'Print :NSPhotoLibraryUsageDescription' "$PLIST")"
+          echo "NSPhotoLibraryAddUsageDescription = $(/usr/libexec/PlistBuddy -c 'Print :NSPhotoLibraryAddUsageDescription' "$PLIST")"
+          echo "═══════════════════════════════════════"
+          echo "✅ Info.plist hazır"
 
-          add_or_set_string "NSCameraUsageDescription" \
-            "Oyuncu profili için fotoğraf çekmek üzere kameraya erişim gerekir."
-          add_or_set_string "NSPhotoLibraryUsageDescription" \
-            "Oyuncu profil fotoğrafı seçmek için galeriye erişim gerekir."
-          add_or_set_string "NSPhotoLibraryAddUsageDescription" \
-            "Oluşturulan kadro görselini galeriye kaydetmek için izin gerekir."
-
-          echo "----- Info.plist Camera/Photo keys -----"
-          /usr/libexec/PlistBuddy -c "Print" "$PLIST" | grep -E "Camera|Photo" || echo "⚠️ Eklenememiş!"
-
-      - name: Detect provisioning profile
+      - name: Setup signing
         script: |
-          PROFILE_PATH=$(find "$HOME/Library/MobileDevice/Provisioning Profiles" -name "*.mobileprovision" | head -1)
+          PBXPROJ="ios/App/App.xcodeproj/project.pbxproj"
 
-          if [ -z "$PROFILE_PATH" ]; then
-            echo "❌ Profile bulunamadı"
-            exit 1
+          PROFILE_PATH=$(find "$HOME/Library/MobileDevice/Provisioning Profiles" -name "*.mobileprovision" 2>/dev/null | head -1)
+          if [ -n "$PROFILE_PATH" ]; then
+            PROFILE_UUID=$(security cms -D -i "$PROFILE_PATH" 2>/dev/null | grep -A1 'UUID' | grep '<string>' | sed 's/.*<string>\(.*\)<\/string>/\1/')
+            PROFILE_NAME=$(security cms -D -i "$PROFILE_PATH" 2>/dev/null | grep -A1 'Name' | head -1 | grep '<string>' | sed 's/.*<string>\(.*\)<\/string>/\1/')
+            echo "Profile: $PROFILE_NAME ($PROFILE_UUID)"
+          else
+            echo "WARNING: No provisioning profile found"
+            PROFILE_UUID=""
+            PROFILE_NAME=""
           fi
 
-          PROFILE_UUID=$(security cms -D -i "$PROFILE_PATH" | plutil -extract UUID raw -)
-          PROFILE_NAME=$(security cms -D -i "$PROFILE_PATH" | plutil -extract Name raw -)
-
-          echo "UUID: $PROFILE_UUID"
-          echo "NAME: $PROFILE_NAME"
+          sed -i '' "s/CODE_SIGN_STYLE = Automatic/CODE_SIGN_STYLE = Manual/g" "$PBXPROJ"
+          sed -i '' "s/DEVELOPMENT_TEAM = \"\"/DEVELOPMENT_TEAM = \"$DEVELOPMENT_TEAM\"/g" "$PBXPROJ"
+          sed -i '' "s/DEVELOPMENT_TEAM = \"\";/DEVELOPMENT_TEAM = \"$DEVELOPMENT_TEAM\";/g" "$PBXPROJ"
 
           echo "$PROFILE_UUID" > /tmp/profile_uuid.txt
           echo "$PROFILE_NAME" > /tmp/profile_name.txt
+          echo "Signing setup done"
 
-      - name: Patch App target signing (Ruby)
+      - name: Increment build number
         script: |
-          PROFILE_NAME=$(cat /tmp/profile_name.txt)
+          PLIST="ios/App/App/Info.plist"
+          # ★ Codemagic BUILD_NUMBER'a güvenli taban ekle (App Store'da en yüksek 37'ydi)
+          # En az 38 olacak şekilde 37 + BUILD_NUMBER yapıyoruz, böylece her build artar
+          BASE=37
+          BUILD_NUM=${BUILD_NUMBER:-1}
+          FINAL_BUILD=$((BASE + BUILD_NUM))
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $FINAL_BUILD" "$PLIST"
+          echo "Codemagic BUILD_NUMBER: $BUILD_NUM"
+          echo "Base offset: $BASE"
+          echo "Final build number: $FINAL_BUILD"
 
-          ruby <<RUBY
-          require 'xcodeproj'
-
-          project_path = 'ios/App/App.xcodeproj'
-          project = Xcodeproj::Project.open(project_path)
-
-          target = project.targets.find { |t| t.name == 'App' }
-          if target.nil?
-            abort "❌ 'App' target bulunamadı"
-          end
-
-          target.build_configurations.each do |config|
-            attrs = config.build_settings
-            attrs['CODE_SIGN_STYLE'] = 'Manual'
-            attrs['CODE_SIGN_IDENTITY'] = 'Apple Distribution'
-            attrs['DEVELOPMENT_TEAM'] = '${DEVELOPMENT_TEAM}'
-            attrs['PROVISIONING_PROFILE_SPECIFIER'] = '${PROFILE_NAME}'
-            attrs['PRODUCT_BUNDLE_IDENTIFIER'] = '${BUNDLE_ID}'
-            puts "✅ Patched config: #{config.name}"
-          end
-
-          project.root_object.attributes['TargetAttributes'] ||= {}
-          project.root_object.attributes['TargetAttributes'][target.uuid] ||= {}
-          project.root_object.attributes['TargetAttributes'][target.uuid]['ProvisioningStyle'] = 'Manual'
-          project.root_object.attributes['TargetAttributes'][target.uuid]['DevelopmentTeam'] = '${DEVELOPMENT_TEAM}'
-
-          project.save
-          puts "✅ pbxproj saved"
-          RUBY
-
-      - name: Build archive
+      - name: Build iOS archive
         script: |
           XCODE_PROJ="ios/App/App.xcodeproj"
           ARCHIVE_PATH="build/App.xcarchive"
+          PROFILE_UUID=$(cat /tmp/profile_uuid.txt 2>/dev/null || echo "")
+
+          echo "Project: $XCODE_PROJ"
+          echo "Profile UUID: $PROFILE_UUID"
 
           xcodebuild \
             -project "$XCODE_PROJ" \
@@ -193,27 +163,33 @@ workflows:
             -archivePath "$ARCHIVE_PATH" \
             -destination "generic/platform=iOS" \
             -allowProvisioningUpdates \
+            DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
+            CODE_SIGN_STYLE="Manual" \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            PROVISIONING_PROFILE="$PROFILE_UUID" \
             archive
 
           if [ ! -d "$ARCHIVE_PATH" ]; then
-            echo "❌ Archive yok"
+            echo "Archive bulunamadi!"
+            find . -name "*.xcarchive" -type d 2>/dev/null
             exit 1
           fi
-
-          echo "✅ Archive OK"
+          echo "Archive olusturuldu"
 
       - name: Verify Info.plist in archive
         script: |
           ARCHIVE_PLIST="build/App.xcarchive/Products/Applications/App.app/Info.plist"
           if [ -f "$ARCHIVE_PLIST" ]; then
-            echo "----- Archive Info.plist -----"
-            echo -n "CFBundleVersion: "
-            /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$ARCHIVE_PLIST" || true
-            echo -n "CFBundleShortVersionString: "
-            /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$ARCHIVE_PLIST" || true
-            /usr/libexec/PlistBuddy -c "Print :NSCameraUsageDescription" "$ARCHIVE_PLIST" || echo "⚠️ NSCameraUsageDescription YOK"
-            /usr/libexec/PlistBuddy -c "Print :NSPhotoLibraryUsageDescription" "$ARCHIVE_PLIST" || echo "⚠️ NSPhotoLibraryUsageDescription YOK"
-            /usr/libexec/PlistBuddy -c "Print :NSPhotoLibraryAddUsageDescription" "$ARCHIVE_PLIST" || echo "⚠️ NSPhotoLibraryAddUsageDescription YOK"
+            echo "═══════════════════════════════════════"
+            echo "Archive Info.plist doğrulama:"
+            echo "═══════════════════════════════════════"
+            echo "CFBundleVersion            = $(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$ARCHIVE_PLIST")"
+            echo "CFBundleShortVersionString = $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$ARCHIVE_PLIST")"
+            /usr/libexec/PlistBuddy -c 'Print :NSCameraUsageDescription' "$ARCHIVE_PLIST" || echo "⚠️ NSCameraUsageDescription YOK"
+            /usr/libexec/PlistBuddy -c 'Print :NSPhotoLibraryUsageDescription' "$ARCHIVE_PLIST" || echo "⚠️ NSPhotoLibraryUsageDescription YOK"
+            /usr/libexec/PlistBuddy -c 'Print :NSPhotoLibraryAddUsageDescription' "$ARCHIVE_PLIST" || echo "⚠️ NSPhotoLibraryAddUsageDescription YOK"
+            /usr/libexec/PlistBuddy -c 'Print :NSUserTrackingUsageDescription' "$ARCHIVE_PLIST" || echo "⚠️ NSUserTrackingUsageDescription YOK"
+            echo "═══════════════════════════════════════"
           else
             echo "⚠️ Archive plist bulunamadı"
           fi
@@ -221,35 +197,24 @@ workflows:
       - name: Export IPA
         script: |
           ARCHIVE_PATH="build/App.xcarchive"
-          PROFILE_NAME=$(cat /tmp/profile_name.txt)
+          PROFILE_NAME=$(cat /tmp/profile_name.txt 2>/dev/null || echo "")
+          PROFILE_UUID=$(cat /tmp/profile_uuid.txt 2>/dev/null || echo "")
+          PROFILE_REF="${PROFILE_NAME:-$PROFILE_UUID}"
 
-          cat > exportOptions.plist <<EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <plist version="1.0">
-          <dict>
-            <key>method</key>
-            <string>app-store</string>
-            <key>signingStyle</key>
-            <string>manual</string>
-            <key>teamID</key>
-            <string>$DEVELOPMENT_TEAM</string>
-            <key>provisioningProfiles</key>
-            <dict>
-              <key>$BUNDLE_ID</key>
-              <string>$PROFILE_NAME</string>
-            </dict>
-          </dict>
-          </plist>
-          EOF
+          printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' '<plist version="1.0">' '<dict>' '  <key>method</key>' '  <string>app-store</string>' '  <key>teamID</key>' '  <string>Q3BH6457BX</string>' '  <key>signingStyle</key>' '  <string>manual</string>' '  <key>uploadBitcode</key>' '  <false/>' '  <key>uploadSymbols</key>' '  <true/>' '  <key>provisioningProfiles</key>' '  <dict>' "    <key>com.halisahakolik.app</key>" "    <string>${PROFILE_REF}</string>" '  </dict>' '</dict>' '</plist>' > exportOptions.plist
+
+          cat exportOptions.plist
 
           xcodebuild -exportArchive \
             -archivePath "$ARCHIVE_PATH" \
-            -exportPath build/output \
+            -exportPath "build/output" \
             -exportOptionsPlist exportOptions.plist
 
     artifacts:
       - build/output/**/*.ipa
+      - build/**/*.xcarchive
 
+    # ★ TestFlight'a otomatik yükleme
     publishing:
       app_store_connect:
         auth: integration
