@@ -1,6 +1,6 @@
 workflows:
   ios-build:
-    name: iOS Build
+    name: iOS Hybrid Build
     max_build_duration: 60
     instance_type: mac_mini_m2
 
@@ -27,58 +27,54 @@ workflows:
           npm install @capacitor/ios @capacitor/core @capacitor/cli @capacitor-community/admob --save
 
       - name: Build web
-        script: |
-          CI=false npm run build
+        script: CI=false npm run build
 
-      - name: Add iOS platform
+      - name: Sync Capacitor
         script: |
           npx cap add ios || true
           npx cap sync ios
 
-      - name: Set app icon
+      # ✅ Profile bul (ama global kullanma!)
+      - name: Detect provisioning profile
         script: |
-          if [ ! -f "AppIcon.png" ]; then
-            echo "AppIcon.png not found, using default"
-            exit 0
+          PROFILE_PATH=$(find "$HOME/Library/MobileDevice/Provisioning Profiles" -name "*.mobileprovision" | head -1)
+
+          if [ -z "$PROFILE_PATH" ]; then
+            echo "❌ Profile bulunamadı"
+            exit 1
           fi
 
-          ICON_DIR="ios/App/App/Assets.xcassets/AppIcon.appiconset"
+          PROFILE_UUID=$(security cms -D -i "$PROFILE_PATH" | grep -A1 'UUID' | grep '<string>' | sed 's/.*<string>\(.*\)<\/string>/\1/')
+          PROFILE_NAME=$(security cms -D -i "$PROFILE_PATH" | grep -A1 'Name' | grep '<string>' | sed 's/.*<string>\(.*\)<\/string>/\1/')
 
-          sips -z 1024 1024 AppIcon.png --out "$ICON_DIR/AppIcon-1024@1x.png"
+          echo "UUID: $PROFILE_UUID"
+          echo "NAME: $PROFILE_NAME"
 
-          printf '{"images":[{"filename":"AppIcon-1024@1x.png","idiom":"universal","platform":"ios","size":"1024x1024"}],"info":{"author":"xcode","version":1}}' > "$ICON_DIR/Contents.json"
+          echo "$PROFILE_UUID" > /tmp/profile_uuid.txt
+          echo "$PROFILE_NAME" > /tmp/profile_name.txt
 
-          echo "App icon set"
-
-      - name: Configure Info.plist
+      # 🔥 SADECE APP TARGET'I PATCHLE
+      - name: Patch signing ONLY for App target
         script: |
-          PLIST="ios/App/App/Info.plist"
+          PBXPROJ="ios/App/App.xcodeproj/project.pbxproj"
+          PROFILE_UUID=$(cat /tmp/profile_uuid.txt)
 
-          /usr/libexec/PlistBuddy -c "Add :GADApplicationIdentifier string $GAD_APP_ID" "$PLIST" 2>/dev/null \
-            || /usr/libexec/PlistBuddy -c "Set :GADApplicationIdentifier $GAD_APP_ID" "$PLIST"
+          # Sadece App target'a provisioning profile ekle
+          sed -i '' "/PRODUCT_BUNDLE_IDENTIFIER = $BUNDLE_ID;/a\\
+                  PROVISIONING_PROFILE = $PROFILE_UUID;
+          " "$PBXPROJ"
 
-          /usr/libexec/PlistBuddy -c "Add :GADIsAdManagerApp bool true" "$PLIST" 2>/dev/null || true
+          sed -i '' "/PRODUCT_BUNDLE_IDENTIFIER = $BUNDLE_ID;/a\\
+                  CODE_SIGN_IDENTITY = Apple Distribution;
+          " "$PBXPROJ"
 
-          /usr/libexec/PlistBuddy -c "Add :SKAdNetworkItems array" "$PLIST" 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Add :SKAdNetworkItems:0 dict" "$PLIST" 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Add :SKAdNetworkItems:0:SKAdNetworkIdentifier string cstr6suwn9.skadnetwork" "$PLIST" 2>/dev/null || true
+          sed -i '' "/PRODUCT_BUNDLE_IDENTIFIER = $BUNDLE_ID;/a\\
+                  DEVELOPMENT_TEAM = $DEVELOPMENT_TEAM;
+          " "$PBXPROJ"
 
-          /usr/libexec/PlistBuddy -c "Add :ITSAppManagesNonExemptEncryption bool false" "$PLIST" 2>/dev/null || true
+          echo "✅ Only App target patched"
 
-          ATT_MSG="Reklamları ilgi alanlarınıza göre kişiselleştirmek için izninizi rica ediyoruz."
-          /usr/libexec/PlistBuddy -c "Add :NSUserTrackingUsageDescription string $ATT_MSG" "$PLIST" 2>/dev/null \
-            || /usr/libexec/PlistBuddy -c "Set :NSUserTrackingUsageDescription $ATT_MSG" "$PLIST"
-
-          echo "✅ Info.plist hazır"
-
-      - name: Increment build number
-        script: |
-          PLIST="ios/App/App/Info.plist"
-          BUILD_NUM=${BUILD_NUMBER:-1}
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUM" "$PLIST"
-          echo "Build number: $BUILD_NUM"
-
-      - name: Build iOS archive (Automatic signing)
+      - name: Build archive (NO global signing override)
         script: |
           XCODE_PROJ="ios/App/App.xcodeproj"
           ARCHIVE_PATH="build/App.xcarchive"
@@ -91,49 +87,43 @@ workflows:
             -archivePath "$ARCHIVE_PATH" \
             -destination "generic/platform=iOS" \
             -allowProvisioningUpdates \
-            DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
-            CODE_SIGN_STYLE="Automatic" \
             archive
 
           if [ ! -d "$ARCHIVE_PATH" ]; then
-            echo "Archive bulunamadi!"
+            echo "❌ Archive yok"
             exit 1
           fi
 
-          echo "✅ Archive oluşturuldu"
+          echo "✅ Archive OK"
 
       - name: Export IPA
         script: |
           ARCHIVE_PATH="build/App.xcarchive"
+          PROFILE_NAME=$(cat /tmp/profile_name.txt)
 
           cat > exportOptions.plist <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
             <key>method</key>
             <string>app-store</string>
+            <key>signingStyle</key>
+            <string>manual</string>
             <key>teamID</key>
             <string>$DEVELOPMENT_TEAM</string>
-            <key>signingStyle</key>
-            <string>automatic</string>
-            <key>uploadBitcode</key>
-            <false/>
-            <key>uploadSymbols</key>
-            <true/>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>$BUNDLE_ID</key>
+              <string>$PROFILE_NAME</string>
+            </dict>
           </dict>
           </plist>
           EOF
 
           xcodebuild -exportArchive \
             -archivePath "$ARCHIVE_PATH" \
-            -exportPath "build/output" \
+            -exportPath build/output \
             -exportOptionsPlist exportOptions.plist
 
     artifacts:
       - build/output/**/*.ipa
-      - build/**/*.xcarchive
-
-    publishing:
-      app_store_connect:
-        auth: integration
