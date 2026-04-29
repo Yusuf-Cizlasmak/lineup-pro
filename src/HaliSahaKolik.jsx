@@ -195,11 +195,12 @@ const captureAndShare = async (element, filename = "halisaha-kolik.png") => {
 //   • FORVET:    y = 14-18     (orta saha ile arasında ~24% mesafe)
 //   Her bölge içinde aynı pozisyondan oyuncular ±2% offset alır
 //   (3 stoper içinde merkez biraz daha geride durur — gerçek futbol pozisyonu)
+// ★ FORMASYONLAR — kaleci y: 88 → 92 (7 formasyonda da)
 const FORMATIONS = {
   "4-2": {
     label: "4-2",
     positions: [
-      { x: 50, y: 88, role: "KALECİ" },
+      { x: 50, y: 92, role: "KALECİ" },  // 88 → 92
       { x: 12, y: 64, role: "SOL BEK" },
       { x: 36, y: 66, role: "STOPER" },
       { x: 64, y: 66, role: "STOPER" },
@@ -211,7 +212,7 @@ const FORMATIONS = {
   "3-2-1": {
     label: "3-2-1",
     positions: [
-      { x: 50, y: 88, role: "KALECİ" },
+      { x: 50, y: 92, role: "KALECİ" },  // 88 → 92
       { x: 18, y: 66, role: "DEFANS" },
       { x: 50, y: 60, role: "DEFANS" },
       { x: 82, y: 66, role: "DEFANS" },
@@ -223,7 +224,7 @@ const FORMATIONS = {
   "2-3-1": {
     label: "2-3-1",
     positions: [
-      { x: 50, y: 88, role: "KALECİ" },
+      { x: 50, y: 92, role: "KALECİ" },  // 88 → 92
       { x: 30, y: 64, role: "DEFANS" },
       { x: 70, y: 64, role: "DEFANS" },
       { x: 16, y: 42, role: "ORTA SAHA" },
@@ -235,7 +236,7 @@ const FORMATIONS = {
   "3-1-2": {
     label: "3-1-2",
     positions: [
-      { x: 50, y: 88, role: "KALECİ" },
+      { x: 50, y: 92, role: "KALECİ" },  // 88 → 92
       { x: 18, y: 66, role: "DEFANS" },
       { x: 50, y: 60, role: "DEFANS" },
       { x: 82, y: 66, role: "DEFANS" },
@@ -247,7 +248,7 @@ const FORMATIONS = {
   "1-4-1": {
     label: "1-4-1",
     positions: [
-      { x: 50, y: 88, role: "KALECİ" },
+      { x: 50, y: 92, role: "KALECİ" },  // 88 → 92
       { x: 50, y: 64, role: "DEFANS" },
       { x: 12, y: 42, role: "ORTA SAHA" },
       { x: 36, y: 38, role: "ORTA SAHA" },
@@ -259,7 +260,7 @@ const FORMATIONS = {
   "2-2-2": {
     label: "2-2-2",
     positions: [
-      { x: 50, y: 88, role: "KALECİ" },
+      { x: 50, y: 92, role: "KALECİ" },  // 88 → 92
       { x: 28, y: 64, role: "DEFANS" },
       { x: 72, y: 64, role: "DEFANS" },
       { x: 28, y: 42, role: "ORTA SAHA" },
@@ -271,7 +272,7 @@ const FORMATIONS = {
   "1-3-2": {
     label: "1-3-2",
     positions: [
-      { x: 50, y: 88, role: "KALECİ" },
+      { x: 50, y: 92, role: "KALECİ" },  // 88 → 92
       { x: 50, y: 64, role: "DEFANS" },
       { x: 16, y: 42, role: "ORTA SAHA" },
       { x: 50, y: 38, role: "ORTA SAHA" },
@@ -477,10 +478,10 @@ const FieldPlayer = ({ player, x, y, fieldRef, teamColor, isCaptain, onToggleCap
   useEffect(() => { setPos({ x, y }); }, [x, y]);
 
   const clampY = useCallback((raw) => {
-    // ★ Yeni saha boyutuna göre güvenli sınırlar (oyuncu+isim kenarda kesilmesin)
-    if (!isMatch) return Math.max(8, Math.min(91, raw));
-    if (side === "A") return Math.max(54, Math.min(93, raw));
-    return Math.max(7, Math.min(46, raw));
+    // ★ Kaleci y:92 ile uyumlu sınırlar — isim etiketi kesilmesin diye 94 max
+    if (!isMatch) return Math.max(8, Math.min(94, raw));
+    if (side === "A") return Math.max(54, Math.min(95, raw));
+    return Math.max(5, Math.min(46, raw));
   }, [isMatch, side]);
   const clampX = useCallback((raw) => Math.max(7, Math.min(93, raw)), []);
 
