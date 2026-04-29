@@ -12,8 +12,10 @@ import { Capacitor } from "@capacitor/core";
 // ─── SCREENSHOT & SHARE UTILITY ───
 const captureAndShare = async (element, filename = "halisaha-kolik.png") => {
   if (!element) return;
+  console.log('[SHARE] 1️⃣ captureAndShare başladı, platform:', Capacitor.getPlatform());
   try {
     if (!window.html2canvas) {
+      console.log('[SHARE] 2️⃣ html2canvas yükleniyor...');
       await new Promise((resolve, reject) => {
         const s = document.createElement("script");
         s.src = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
@@ -22,12 +24,14 @@ const captureAndShare = async (element, filename = "halisaha-kolik.png") => {
         document.head.appendChild(s);
       });
     }
+    console.log('[SHARE] 3️⃣ Canvas oluşturuluyor...');
     const canvas = await window.html2canvas(element, {
       backgroundColor: "#0a1628",
       scale: 2,
       useCORS: true,
       logging: false,
     });
+    console.log('[SHARE] 4️⃣ Canvas hazır:', canvas.width, 'x', canvas.height);
 
     // ★ FİLİGRAN EKLE
     const ctx = canvas.getContext("2d");
@@ -80,27 +84,52 @@ const captureAndShare = async (element, filename = "halisaha-kolik.png") => {
 
     // ★ NATIVE (iOS + Android) — dosyayı önce cache'e yaz, sonra file:// URI paylaş
     if (Capacitor.isNativePlatform()) {
-      // dataUrl → base64 (data:image/png;base64,XXX → XXX)
+      console.log('[SHARE] 5️⃣ Native akış başladı');
       const base64 = dataUrl.split(",")[1];
-      // Her seferinde unique isim — cache'te eski dosya kalmasın
       const safeName = `halisaha_${Date.now()}.png`;
+      console.log('[SHARE] 6️⃣ Dosya yazılıyor:', safeName, 'base64 boyut:', base64.length);
 
       const written = await Filesystem.writeFile({
         path: safeName,
         data: base64,
         directory: Directory.Cache,
+        recursive: true,
       });
+      console.log('[SHARE] 7️⃣ writeFile sonucu:', JSON.stringify(written));
 
-      // Capacitor 5+ : .uri ; 4 ve öncesi: writeFile bazen path döner — ikisini de tolere et
-      const fileUri = written?.uri || written?.path;
+      let fileUri = written?.uri || written?.path;
       if (!fileUri) throw new Error("Filesystem.writeFile uri vermedi");
 
-      await Share.share({
+      if (Capacitor.getPlatform() === 'android') {
+        try {
+          const uriResult = await Filesystem.getUri({
+            path: safeName,
+            directory: Directory.Cache,
+          });
+          console.log('[SHARE] 8️⃣ getUri sonucu:', JSON.stringify(uriResult));
+          if (uriResult?.uri) fileUri = uriResult.uri;
+        } catch (e) {
+          console.warn('[SHARE] ⚠️ getUri hatası:', e?.message || e);
+        }
+      }
+
+      console.log('[SHARE] 9️⃣ Share.share çağrılıyor, URI:', fileUri);
+
+      // ★ canShare ile önce destekleniyor mu kontrol et (Android'de bazı OEM'lerde sorun çıkar)
+      try {
+        const canShareResult = await Share.canShare();
+        console.log('[SHARE] 🔟 Share.canShare:', JSON.stringify(canShareResult));
+      } catch (e) {
+        console.warn('[SHARE] canShare check failed:', e?.message);
+      }
+
+      const shareResult = await Share.share({
         title: "HalıSaha-Kolik",
         text: "⚽ HalıSaha-Kolik",
-        url: fileUri,            // ← Android için ŞART: gerçek file:// URI
+        url: fileUri,
         dialogTitle: "Paylaş",
       });
+      console.log('[SHARE] ✅ Share.share TAMAM, sonuç:', JSON.stringify(shareResult));
       return true;
     }
 
@@ -120,9 +149,11 @@ const captureAndShare = async (element, filename = "halisaha-kolik.png") => {
     URL.revokeObjectURL(url);
     return true;
   } catch (e) {
-    console.error("Share error:", e);
+    console.error("[SHARE] ❌ HATA:", e?.message || e);
+    console.error("[SHARE] ❌ Hata detay:", JSON.stringify(e, Object.getOwnPropertyNames(e || {})));
     // Native'de iptal etme (UserCancelled) hatası gelirse sessizce yut
     if (typeof e?.message === "string" && /cancel|cancelled|canceled/i.test(e.message)) {
+      console.log('[SHARE] Kullanıcı iptal etti');
       return false;
     }
     // Web fallback bir kez daha denensin
@@ -263,7 +294,55 @@ const TEAM_COLORS = [
 ];
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
-const getInitials = (n, s) => `${(n || "?")[0]}${(s || "?")[0]}`.toUpperCase();
+// ★ Akıllı initials: Hem ad+soyad varsa "AB", sadece ad/soyad varsa tek harf,
+//   hiçbiri yoksa futbol topu emojisi. Soru işareti GÖSTERMEZ — profesyonel görünüm.
+const getInitials = (n, s) => {
+  const name = (n || "").trim();
+  const surname = (s || "").trim();
+  if (name && surname) return `${name[0]}${surname[0]}`.toUpperCase();
+  if (name) return name[0].toUpperCase();
+  if (surname) return surname[0].toUpperCase();
+  return "⚽"; // ad-soyad yoksa fallback
+};
+
+// ★ FORMA NUMARASI SİSTEMİ — gerçek futbol gelenekleri
+//   Her pozisyon için öncelik sırasına göre tipik numaralar.
+//   Listenin başındaki en "kanonik" — örn forvet için 9, kaleci için 1.
+const JERSEY_NUMBERS_BY_POSITION = {
+  "KALECİ":   [1, 12, 22, 25, 30],
+  "STOPER":   [4, 5, 6, 15, 16, 21],
+  "DEFANS":   [4, 5, 6, 15, 16, 21],
+  "SOL BEK":  [3, 13, 23, 33],
+  "SAĞ BEK":  [2, 14, 24, 34],
+  "ORTA SAHA":[8, 10, 6, 14, 17, 18, 20, 26],
+  "FORVET":   [9, 11, 7, 19, 27, 29, 99],
+};
+
+// Pozisyona göre kullanılmamış en uygun forma numarasını döner.
+// Tüm öncelikli numaralar doluysa, 1-99 arasında ilk boş numarayı bulur.
+const getDefaultJerseyNumber = (position, existingPlayers, excludePlayerId = null) => {
+  const usedNumbers = new Set(
+    existingPlayers
+      .filter((p) => p.id !== excludePlayerId && p.jerseyNumber)
+      .map((p) => p.jerseyNumber)
+  );
+  // 1) Pozisyonun öncelikli havuzundan dene
+  const preferred = JERSEY_NUMBERS_BY_POSITION[position] || [];
+  for (const n of preferred) {
+    if (!usedNumbers.has(n)) return n;
+  }
+  // 2) Havuz tükendiyse 2-99 arasında ilk boş numarayı al (1 kalecide kalsın)
+  for (let n = 2; n <= 99; n++) {
+    if (!usedNumbers.has(n)) return n;
+  }
+  return null; // 99 oyuncu varsa bile null gelir (gerçekçi değil)
+};
+
+// Forma numarası geçerli mi? (1-99 arası, takımda başka biri kullanmıyor)
+const isJerseyNumberAvailable = (num, existingPlayers, excludePlayerId = null) => {
+  if (!num || num < 1 || num > 99) return false;
+  return !existingPlayers.some((p) => p.id !== excludePlayerId && p.jerseyNumber === num);
+};
 const ratingColor = (r) => r >= 80 ? "#22c55e" : r >= 65 ? "#eab308" : "#ef4444";
 const avatarPalette = [
   "#6366f1", "#8b5cf6", "#a855f7", "#d946ef", "#ec4899",
@@ -432,30 +511,98 @@ const FieldPlayer = ({ player, x, y, fieldRef, teamColor, isCaptain, onToggleCap
       style={{ position: "absolute", left: `${pos.x}%`, top: `${pos.y}%`, transform: "translate(-50%,-50%)", zIndex: drag || hover ? 100 : 10, cursor: isGoalkeeper ? "default" : (drag ? "grabbing" : "grab"), userSelect: "none", touchAction: "none", transition: drag ? "none" : "left 0.4s cubic-bezier(.4,0,.2,1), top 0.4s cubic-bezier(.4,0,.2,1)" }}
     >
       {hover && !drag && (
-        <div style={{ position: "absolute", [isBottom ? "bottom" : "top"]: "100%", left: "50%", transform: `translate(-50%, ${isBottom ? "-8px" : "8px"})`, background: "rgba(8,12,20,0.96)", border: `1px solid ${teamColor}55`, backdropFilter: "blur(12px)", padding: "6px 12px", borderRadius: 10, display: "flex", flexDirection: "column", alignItems: "center", gap: 2, boxShadow: `0 10px 28px rgba(0,0,0,0.7), 0 0 14px ${teamColor}22`, zIndex: 110, whiteSpace: "nowrap", animation: "tooltipIn 0.18s ease-out" }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: "#fff" }}>{player?.name} {player?.surname}</div>
+        <div style={{ position: "absolute", [isBottom ? "bottom" : "top"]: "100%", left: "50%", transform: `translate(-50%, ${isBottom ? "-10px" : "10px"})`, background: "rgba(8,12,20,0.96)", border: `1px solid ${teamColor}55`, backdropFilter: "blur(12px)", padding: "7px 14px", borderRadius: 10, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, boxShadow: `0 10px 28px rgba(0,0,0,0.7), 0 0 14px ${teamColor}22`, zIndex: 110, whiteSpace: "nowrap", animation: "tooltipIn 0.18s ease-out" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#fff", display: "flex", alignItems: "center", gap: 6 }}>
+            {player?.jerseyNumber && (
+              <span style={{ background: teamColor, color: "#0a1628", fontSize: 10, fontWeight: 900, padding: "1px 5px", borderRadius: 4, fontFamily: "'Bebas Neue',monospace" }}>#{player.jerseyNumber}</span>
+            )}
+            {player?.name} {player?.surname}
+          </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 9, color: "rgba(255,255,255,0.4)", fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase" }}>{tPos(player?.position)}</span>
-            <span style={{ color: rc, fontSize: 12, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace" }}>{player?.rating}</span>
+            <span style={{ fontSize: 9.5, color: "rgba(255,255,255,0.4)", fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase" }}>{tPos(player?.position)}</span>
+            <span style={{ color: rc, fontSize: 13, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace" }}>{player?.rating}</span>
           </div>
           <div style={{ position: "absolute", [isBottom ? "top" : "bottom"]: "100%", left: "50%", transform: "translateX(-50%)", border: "5px solid transparent", [isBottom ? "borderTopColor" : "borderBottomColor"]: "rgba(8,12,20,0.96)" }} />
         </div>
       )}
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1, filter: drag ? "drop-shadow(0 10px 24px rgba(0,0,0,0.75))" : "drop-shadow(0 3px 8px rgba(0,0,0,0.5))", transform: drag ? "scale(1.18)" : "scale(1)", transition: "transform 0.15s, filter 0.15s" }}>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, filter: drag ? "drop-shadow(0 12px 28px rgba(0,0,0,0.8))" : "drop-shadow(0 4px 10px rgba(0,0,0,0.55))", transform: drag ? "scale(1.18)" : "scale(1)", transition: "transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.15s" }}>
         <div style={{ position: "relative" }}>
           {isCaptain && (
-            <div style={{ position: "absolute", top: -12, left: "50%", transform: "translateX(-50%)", zIndex: 5, background: "linear-gradient(135deg,#fbbf24,#f59e0b)", borderRadius: 4, padding: "1px 4px", display: "flex", alignItems: "center", gap: 2, boxShadow: "0 2px 8px rgba(251,191,36,0.45)", border: "1px solid rgba(251,191,36,0.6)" }}>
-              <I.Crown /><span style={{ fontSize: 7, fontWeight: 800, color: "#78350f", letterSpacing: 0.5 }}>C</span>
+            <div style={{ position: "absolute", top: -14, left: "50%", transform: "translateX(-50%)", zIndex: 5, background: "linear-gradient(135deg,#fbbf24,#f59e0b)", borderRadius: 5, padding: "2px 6px", display: "flex", alignItems: "center", gap: 3, boxShadow: "0 3px 10px rgba(251,191,36,0.55), 0 0 0 1.5px rgba(120,53,15,0.3)", border: "1px solid rgba(251,191,36,0.7)" }}>
+              <I.Crown /><span style={{ fontSize: 8.5, fontWeight: 900, color: "#78350f", letterSpacing: 0.6 }}>C</span>
             </div>
           )}
-          <div onClick={(e) => { e.stopPropagation(); onToggleCaptain?.(); }} style={{ width: 40, height: 40, borderRadius: "50%", background: player?.photo ? `url(${player.photo}) center/cover` : avatarColor(player?.id || "x"), border: `2.5px solid ${teamColor}`, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: 14, fontFamily: "'Bebas Neue','Oswald',sans-serif", boxShadow: drag ? `0 0 0 3px rgba(255,255,255,0.35), 0 0 18px ${teamColor}88` : `0 0 0 2px rgba(0,0,0,0.35), 0 0 8px ${teamColor}33`, transition: "box-shadow 0.2s" }}>
-            {!player?.photo && getInitials(player?.name, player?.surname)}
+          {/* ★ ANA YUVARLAK — 40px → 54px, daha kalın çerçeve, çift gölge */}
+          <div onClick={(e) => { e.stopPropagation(); onToggleCaptain?.(); }} style={{
+            width: 54, height: 54, borderRadius: "50%",
+            background: player?.photo ? `url(${player.photo}) center/cover` : avatarColor(player?.id || "x"),
+            border: `3px solid ${teamColor}`,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            color: "#fff", fontWeight: 700, fontSize: 19,
+            fontFamily: "'Bebas Neue','Oswald',sans-serif",
+            letterSpacing: 0.5,
+            boxShadow: drag
+              ? `0 0 0 4px rgba(255,255,255,0.4), 0 0 24px ${teamColor}aa, inset 0 -4px 8px rgba(0,0,0,0.25)`
+              : `0 0 0 2.5px rgba(0,0,0,0.4), 0 4px 12px rgba(0,0,0,0.45), 0 0 14px ${teamColor}44, inset 0 -3px 6px rgba(0,0,0,0.2)`,
+            transition: "box-shadow 0.2s, border-color 0.2s",
+            position: "relative",
+            overflow: "hidden",
+          }}>
+            {/* ★ Forma üstüne hafif highlight (top-light) — 3D hissi */}
+            {!player?.photo && (
+              <div style={{ position: "absolute", inset: 0, borderRadius: "50%", background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, transparent 45%, transparent 60%, rgba(0,0,0,0.15) 100%)", pointerEvents: "none" }} />
+            )}
+            <span style={{ position: "relative", zIndex: 2, textShadow: "0 1px 3px rgba(0,0,0,0.5)", fontSize: (() => {
+              // ★ Önce forma numarası, yoksa initials fallback
+              const display = player?.jerseyNumber ? String(player.jerseyNumber) : getInitials(player?.name, player?.surname);
+              if (display === "⚽") return 22;
+              if (display.length === 1) return 23;
+              if (display.length === 2) return 21;     // "10", "23" gibi 2 haneli numaralar
+              return 19;
+            })() }}>
+              {!player?.photo && (player?.jerseyNumber || getInitials(player?.name, player?.surname))}
+            </span>
           </div>
-          <div style={{ position: "absolute", bottom: -3, right: -6, background: rc, color: "#fff", fontSize: 9, fontWeight: 800, borderRadius: 5, padding: "1px 4px", lineHeight: "13px", border: "1.5px solid rgba(0,0,0,0.35)", fontFamily: "'JetBrains Mono',monospace", boxShadow: "0 2px 5px rgba(0,0,0,0.35)" }}>{player?.rating}</div>
-          <button onClick={(e) => { e.stopPropagation(); onRemove?.(); }} style={{ position: "absolute", top: -5, right: -7, width: 16, height: 16, borderRadius: "50%", background: "#ef4444", border: "1.5px solid rgba(0,0,0,0.35)", color: "#fff", fontSize: 10, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0, boxShadow: "0 2px 5px rgba(0,0,0,0.35)", lineHeight: 1 }}>×</button>
+          {/* ★ Rating badge — 13px line → 18px, daha okunaklı */}
+          <div style={{
+            position: "absolute", bottom: -4, right: -8,
+            background: `linear-gradient(135deg, ${rc}, ${rc}dd)`,
+            color: "#fff", fontSize: 11, fontWeight: 900,
+            borderRadius: 7, padding: "2px 6px", lineHeight: "16px",
+            border: "2px solid rgba(0,0,0,0.5)",
+            fontFamily: "'JetBrains Mono','SF Mono',monospace",
+            boxShadow: "0 3px 8px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.25)",
+            minWidth: 22, textAlign: "center",
+          }}>{player?.rating}</div>
+          {/* ★ Çıkar (×) butonu — 16px → 22px (touch target için kritik) */}
+          <button onClick={(e) => { e.stopPropagation(); onRemove?.(); }} style={{
+            position: "absolute", top: -7, right: -9,
+            width: 22, height: 22, borderRadius: "50%",
+            background: "linear-gradient(135deg,#ef4444,#dc2626)",
+            border: "2px solid rgba(0,0,0,0.5)",
+            color: "#fff", fontSize: 13, fontWeight: 700,
+            cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: 0, lineHeight: 1,
+            boxShadow: "0 3px 8px rgba(220,38,38,0.55), inset 0 1px 0 rgba(255,255,255,0.2)",
+          }}>×</button>
         </div>
         {!hover && (
-          <div style={{ background: "rgba(0,0,0,0.8)", color: "#fff", fontSize: 8.5, fontWeight: 700, padding: "2px 5px", borderRadius: 3, whiteSpace: "nowrap", textTransform: "uppercase", letterSpacing: 0.4, fontFamily: "'Bebas Neue','Oswald',sans-serif", backdropFilter: "blur(4px)", maxWidth: 72, overflow: "hidden", textOverflow: "ellipsis", borderBottom: `2px solid ${teamColor}` }}>
+          // ★ İsim etiketi — 8.5px → 11px, daha geniş, daha premium
+          <div style={{
+            background: "linear-gradient(180deg, rgba(0,0,0,0.85), rgba(0,0,0,0.75))",
+            color: "#fff", fontSize: 11, fontWeight: 700,
+            padding: "3px 8px", borderRadius: 5,
+            whiteSpace: "nowrap", textTransform: "uppercase",
+            letterSpacing: 0.6,
+            fontFamily: "'Bebas Neue','Oswald',sans-serif",
+            backdropFilter: "blur(6px)",
+            WebkitBackdropFilter: "blur(6px)",
+            maxWidth: 90, overflow: "hidden", textOverflow: "ellipsis",
+            borderBottom: `2.5px solid ${teamColor}`,
+            boxShadow: "0 3px 8px rgba(0,0,0,0.4)",
+            marginTop: 2,
+          }}>
             {player?.name} {player?.surname?.[0]}.
           </div>
         )}
@@ -466,9 +613,32 @@ const FieldPlayer = ({ player, x, y, fieldRef, teamColor, isCaptain, onToggleCap
 
 // ─── EMPTY SLOT ───
 const EmptySlot = ({ x, y, role, teamColor, onDrop, onClickPlus, tourTarget }) => (
-  <div data-tour={tourTarget} onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }} onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData("playerId"); if (id) onDrop(id); }} style={{ position: "absolute", left: `${x}%`, top: `${y}%`, transform: "translate(-50%,-50%)", zIndex: 5, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-    <button onClick={() => { hapticLight(); onClickPlus(); }} style={{ width: 40, height: 40, borderRadius: "50%", border: `2px dashed ${teamColor}66`, background: `${teamColor}12`, display: "flex", alignItems: "center", justifyContent: "center", color: teamColor, fontSize: 20, cursor: "pointer", padding: 0, transition: "transform 0.12s, background 0.12s" }} onMouseEnter={(e) => { e.currentTarget.style.transform = "scale(1.12)"; e.currentTarget.style.background = `${teamColor}25`; }} onMouseLeave={(e) => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.background = `${teamColor}12`; }}>+</button>
-    <div style={{ fontSize: 7, color: "rgba(255,255,255,0.35)", fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.4, fontFamily: "'Bebas Neue',sans-serif", background: "rgba(0,0,0,0.35)", padding: "1px 4px", borderRadius: 3 }}>{tPos(role)}</div>
+  <div data-tour={tourTarget} onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }} onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData("playerId"); if (id) onDrop(id); }} style={{ position: "absolute", left: `${x}%`, top: `${y}%`, transform: "translate(-50%,-50%)", zIndex: 5, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+    {/* ★ 40px → 54px (FieldPlayer ile aynı), daha kalın dashed border, glow */}
+    <button onClick={() => { hapticLight(); onClickPlus(); }} style={{
+      width: 54, height: 54, borderRadius: "50%",
+      border: `2.5px dashed ${teamColor}77`,
+      background: `radial-gradient(circle at 50% 50%, ${teamColor}1f 0%, ${teamColor}08 70%, transparent 100%)`,
+      display: "flex", alignItems: "center", justifyContent: "center",
+      color: teamColor, fontSize: 26, fontWeight: 300,
+      cursor: "pointer", padding: 0,
+      transition: "transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.15s, border-color 0.15s",
+      boxShadow: `inset 0 0 12px ${teamColor}15`,
+    }}
+      onMouseEnter={(e) => { e.currentTarget.style.transform = "scale(1.1)"; e.currentTarget.style.background = `radial-gradient(circle at 50% 50%, ${teamColor}33 0%, ${teamColor}12 70%, transparent 100%)`; e.currentTarget.style.borderColor = `${teamColor}aa`; }}
+      onMouseLeave={(e) => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.background = `radial-gradient(circle at 50% 50%, ${teamColor}1f 0%, ${teamColor}08 70%, transparent 100%)`; e.currentTarget.style.borderColor = `${teamColor}77`; }}
+    >+</button>
+    {/* ★ Pozisyon etiketi — 7px → 9px, daha okunaklı */}
+    <div style={{
+      fontSize: 9, color: "rgba(255,255,255,0.5)",
+      fontWeight: 800, textTransform: "uppercase",
+      letterSpacing: 0.6,
+      fontFamily: "'Bebas Neue','Oswald',sans-serif",
+      background: "rgba(0,0,0,0.5)",
+      padding: "2px 6px", borderRadius: 4,
+      backdropFilter: "blur(4px)",
+      WebkitBackdropFilter: "blur(4px)",
+    }}>{tPos(role)}</div>
   </div>
 );
 
@@ -527,25 +697,116 @@ const PlayerCard = ({ player, onEdit, onDelete, isOnField, teamColor, compact, i
 };
 
 // ─── PLAYER FORM ───
-const PlayerForm = ({ player, onSave, onCancel, accent }) => {
-  const [f, sF] = useState({ name: player?.name || "", surname: player?.surname || "", position: player?.position || "ORTA SAHA", rating: player?.rating || 70, photo: player?.photo || null });
+const PlayerForm = ({ player, onSave, onCancel, accent, existingPlayers = [] }) => {
+  // ★ İlk açılışta default forma numarasını otomatik öner (yeni oyuncu için)
+  const initialJersey = player?.jerseyNumber
+    || (player?.id ? null : getDefaultJerseyNumber(player?.position || "ORTA SAHA", existingPlayers));
+
+  const [f, sF] = useState({
+    name: player?.name || "",
+    surname: player?.surname || "",
+    position: player?.position || "ORTA SAHA",
+    rating: player?.rating || 70,
+    photo: player?.photo || null,
+    jerseyNumber: initialJersey,
+  });
+  const [error, setError] = useState({ name: false, surname: false, jersey: false });
   const fr = useRef();
+
+  // ★ Pozisyon değişirse, kullanıcı manuel numara girmediyse default'u güncelle
+  const handlePositionChange = (newPos) => {
+    sF((p) => {
+      // Eğer mevcut numara, eski pozisyonun default'larından biriyse → yenile
+      const oldDefaults = JERSEY_NUMBERS_BY_POSITION[p.position] || [];
+      const isDefaultBased = oldDefaults.includes(p.jerseyNumber);
+      if (isDefaultBased && !player?.id) {
+        return { ...p, position: newPos, jerseyNumber: getDefaultJerseyNumber(newPos, existingPlayers, player?.id) };
+      }
+      return { ...p, position: newPos };
+    });
+  };
+
+  const handleSave = () => {
+    const nameOk = f.name.trim().length > 0;
+    const surnameOk = f.surname.trim().length > 0;
+    const jerseyOk = !f.jerseyNumber || isJerseyNumberAvailable(f.jerseyNumber, existingPlayers, player?.id);
+
+    setError({ name: !nameOk, surname: !surnameOk, jersey: !jerseyOk });
+
+    if (!nameOk || !surnameOk || !jerseyOk) {
+      hapticWarning();
+      return;
+    }
+    // ★ Numara boşsa otomatik ata (gerçi initial'da zaten atadık ama güvenli)
+    const finalJersey = f.jerseyNumber || getDefaultJerseyNumber(f.position, existingPlayers, player?.id);
+    onSave({ ...player, ...f, jerseyNumber: finalJersey, id: player?.id || generateId() });
+  };
+
+  const inputErrorStyle = { borderColor: "#ef4444", boxShadow: "0 0 0 1px #ef4444" };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 15 }}>
-      <div style={{ display: "flex", justifyContent: "center" }}>
+      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 14 }}>
         <div onClick={() => fr.current?.click()} style={{ width: 70, height: 70, borderRadius: "50%", cursor: "pointer", background: f.photo ? `url(${f.photo}) center/cover` : "rgba(255,255,255,0.06)", border: "2px dashed rgba(255,255,255,0.18)", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(255,255,255,0.3)" }}>
           {!f.photo && <I.Camera />}
         </div>
         <input ref={fr} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => { const file = e.target.files?.[0]; if (!file) return; const r = new FileReader(); r.onload = (ev) => sF((p) => ({ ...p, photo: ev.target.result })); r.readAsDataURL(file); }} />
+        {/* ★ FORMA NUMARASI — fotoğrafın yanında belirgin */}
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5 }}>
+          <label style={{ ...S.label, marginBottom: 0, fontSize: 9.5 }}>{t("jersey_number")}</label>
+          <input
+            type="number"
+            min="1"
+            max="99"
+            value={f.jerseyNumber || ""}
+            onChange={(e) => {
+              const v = e.target.value;
+              sF((p) => ({ ...p, jerseyNumber: v === "" ? null : Math.min(99, Math.max(1, parseInt(v, 10) || 1)) }));
+              if (error.jersey) setError((er) => ({ ...er, jersey: false }));
+            }}
+            placeholder="—"
+            style={{
+              width: 70, height: 56,
+              borderRadius: 12,
+              border: error.jersey ? "2px solid #ef4444" : `2px solid ${accent}55`,
+              background: error.jersey ? "rgba(239,68,68,0.08)" : `${accent}15`,
+              color: "#fff",
+              fontSize: 28, fontWeight: 800,
+              textAlign: "center",
+              fontFamily: "'Bebas Neue','Oswald',sans-serif",
+              outline: "none",
+              padding: 0,
+              boxShadow: error.jersey ? "0 0 0 1px #ef4444" : `0 4px 12px ${accent}22, inset 0 -2px 4px rgba(0,0,0,0.15)`,
+              transition: "all 0.15s",
+            }}
+          />
+          {error.jersey && <div style={{ fontSize: 9.5, color: "#ef4444", fontWeight: 600 }}>{t("jersey_taken")}</div>}
+        </div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        <div><label style={S.label}>{t("name")}</label><input style={S.input} value={f.name} onChange={(e) => sF((p) => ({ ...p, name: e.target.value }))} placeholder={t("name")} /></div>
-        <div><label style={S.label}>{t("surname")}</label><input style={S.input} value={f.surname} onChange={(e) => sF((p) => ({ ...p, surname: e.target.value }))} placeholder={t("surname")} /></div>
+        <div>
+          <label style={S.label}>{t("name")} <span style={{ color: "#ef4444" }}>*</span></label>
+          <input
+            style={{ ...S.input, ...(error.name ? inputErrorStyle : {}) }}
+            value={f.name}
+            onChange={(e) => { sF((p) => ({ ...p, name: e.target.value })); if (error.name) setError((er) => ({ ...er, name: false })); }}
+            placeholder={t("name")}
+          />
+        </div>
+        <div>
+          <label style={S.label}>{t("surname")} <span style={{ color: "#ef4444" }}>*</span></label>
+          <input
+            style={{ ...S.input, ...(error.surname ? inputErrorStyle : {}) }}
+            value={f.surname}
+            onChange={(e) => { sF((p) => ({ ...p, surname: e.target.value })); if (error.surname) setError((er) => ({ ...er, surname: false })); }}
+            placeholder={t("surname")}
+          />
+        </div>
       </div>
       <div>
         <label style={S.label}>{t("position")}</label>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-          {POSITIONS_LIST.map((p) => (<button key={p} onClick={() => sF((x) => ({ ...x, position: p }))} style={{ padding: "5px 11px", borderRadius: 6, fontSize: 10, fontWeight: 600, cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.4, border: f.position === p ? `1px solid ${accent}` : "1px solid rgba(255,255,255,0.08)", background: f.position === p ? `${accent}22` : "rgba(255,255,255,0.03)", color: f.position === p ? accent : "rgba(255,255,255,0.45)" }}>{tPos(p)}</button>))}
+          {POSITIONS_LIST.map((p) => (<button key={p} onClick={() => handlePositionChange(p)} style={{ padding: "5px 11px", borderRadius: 6, fontSize: 10, fontWeight: 600, cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.4, border: f.position === p ? `1px solid ${accent}` : "1px solid rgba(255,255,255,0.08)", background: f.position === p ? `${accent}22` : "rgba(255,255,255,0.03)", color: f.position === p ? accent : "rgba(255,255,255,0.45)" }}>{tPos(p)}</button>))}
         </div>
       </div>
       <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, padding: "14px", marginTop: 4 }}>
@@ -558,7 +819,7 @@ const PlayerForm = ({ player, onSave, onCancel, accent }) => {
       </div>
       <div style={{ display: "flex", gap: 9 }}>
         <button onClick={onCancel} style={{ ...S.btn, background: "rgba(255,255,255,0.06)", flex: 1 }}>{t("cancel")}</button>
-        <button onClick={() => { if (!f.name.trim()) return; onSave({ ...player, ...f, id: player?.id || generateId() }); }} style={{ ...S.btn, flex: 1, background: `linear-gradient(135deg,${accent},${accent}bb)` }}><I.Check /> {player?.id ? t("update") : t("save")}</button>
+        <button onClick={handleSave} style={{ ...S.btn, flex: 1, background: `linear-gradient(135deg,${accent},${accent}bb)` }}><I.Check /> {player?.id ? t("update") : t("save")}</button>
       </div>
     </div>
   );
@@ -897,6 +1158,28 @@ export default function LineupPro() {
   useEffect(() => {
     startAds();
   }, []);
+
+  // ★ MIGRATION: Eski kayıtlı oyunculara forma numarası ata (jerseyNumber yoksa)
+  useEffect(() => {
+    const migrateTeam = (setter) => {
+      setter((tt) => {
+        const needsMigration = tt.players.some((p) => !p.jerseyNumber);
+        if (!needsMigration) return tt;
+        const updatedPlayers = [];
+        for (const p of tt.players) {
+          if (p.jerseyNumber) {
+            updatedPlayers.push(p);
+          } else {
+            const num = getDefaultJerseyNumber(p.position, updatedPlayers);
+            updatedPlayers.push({ ...p, jerseyNumber: num });
+          }
+        }
+        return { ...tt, players: updatedPlayers };
+      });
+    };
+    migrateTeam(setTeamA);
+    migrateTeam(setTeamB);
+  }, []); // sadece ilk mount
 
 
   useEffect(() => {
@@ -1270,7 +1553,7 @@ const handleShareLineup = async () => {
       </div>
 
       {/* MODALS */}
-      <Modal open={showPlayer} onClose={() => { setSP(false); setEP(null); }} title={editPlayer ? t("edit_player") : t("new_player")}><PlayerForm player={editPlayer} onSave={savePlayer} onCancel={() => { setSP(false); setEP(null); }} accent={tc} /></Modal>
+      <Modal open={showPlayer} onClose={() => { setSP(false); setEP(null); }} title={editPlayer ? t("edit_player") : t("new_player")}><PlayerForm player={editPlayer} onSave={savePlayer} onCancel={() => { setSP(false); setEP(null); }} accent={tc} existingPlayers={team.players} /></Modal>
       <Modal open={showCaptain} onClose={() => setSC(false)} title={t("captain_select")}><CaptainSelector team={team} accent={tc} onSelect={(id) => { toggleCaptain(activeTeam, id); if (id) { setSC(false); toast_(t("t_captain_set")); } else { toast_(t("t_captain_removed")); } }} /></Modal>
       <Modal open={!!quickSelect} onClose={() => setQS(null)} title={t("select")}>{quickSelect && (<QuickSelect role={quickSelect.role} players={(quickSelect.side === "A" ? teamA : teamB).players} teamColor={(quickSelect.side === "A" ? teamA : teamB).color.secondary} onFieldIds={new Set((quickSelect.side === "A" ? teamA : teamB).fieldPlayers.filter(Boolean))} onSelect={(id) => { placePlayer(quickSelect.side, quickSelect.idx, id); setQS(null); }} />)}</Modal>
       <Modal open={!!showSettings} onClose={() => setSS(null)} title={t("team_settings")}>

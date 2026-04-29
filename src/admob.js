@@ -1,7 +1,7 @@
 import { AdMob, BannerAdSize, BannerAdPosition, MaxAdContentRating, AdmobConsentStatus } from '@capacitor-community/admob';
 import { Capacitor } from '@capacitor/core';
 
-const IS_TESTING = true;
+const IS_TESTING = false;
 
 // ═══ PLATFORM-SPECIFIC AD IDs ═══
 const PLATFORM = Capacitor.getPlatform(); // 'ios' | 'android' | 'web'
@@ -36,8 +36,11 @@ let rewardedCount = 0;
 let isInitialized = false;
 let isBannerShowing = false;
 let isInterstitialReady = false;
+let isInterstitialLoading = false;     // ★ Android: prepareInterstitial çağrıldı mı?
 let isRewardedReady = false;
+let isRewardedLoading = false;         // ★ Android: prepareRewarded çağrıldı mı?
 let canShowAds = false;
+let listenersAttached = false;         // ★ Listener'lar bir kez eklensin
 
 const isNative = () => Capacitor.isNativePlatform();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -62,6 +65,60 @@ async function requestATT() {
   }
 }
 
+// ═══ EVENT LISTENERS ═══
+// ★ KRİTİK: Listener'lar initialize()'dan ÖNCE eklenmeli — Android'de aksi
+//    halde plugin'in ilk emit ettiği yükleme event'leri kaçırılabiliyor.
+function attachAdListeners() {
+  if (listenersAttached) return;
+  listenersAttached = true;
+
+  // ─── Banner ───
+  AdMob.addListener('onBannerAdLoaded', () => console.log('✅ Banner yüklendi'));
+  AdMob.addListener('onBannerAdFailedToLoad', (e) => {
+    console.error('❌ Banner fail:', JSON.stringify(e));
+    isBannerShowing = false;
+  });
+
+  // ─── Interstitial ───
+  AdMob.addListener('onInterstitialAdLoaded', () => {
+    console.log('✅ Interstitial yüklendi');
+    isInterstitialReady = true;
+    isInterstitialLoading = false;
+  });
+  AdMob.addListener('onInterstitialAdFailedToLoad', (e) => {
+    console.error('❌ Interstitial fail:', JSON.stringify(e));
+    isInterstitialReady = false;
+    isInterstitialLoading = false;
+    // ★ Yükleme başarısız: 3sn sonra tekrar dene (network blip / no fill)
+    setTimeout(() => prepareInterstitial(), 3000);
+  });
+  AdMob.addListener('onInterstitialAdDismissed', () => {
+    console.log('ℹ️ Interstitial kapatıldı — yenisi hazırlanıyor');
+    isInterstitialReady = false;
+    isInterstitialLoading = false;
+    setTimeout(() => prepareInterstitial(), 1000);
+  });
+
+  // ─── Rewarded ───
+  AdMob.addListener('onRewardedVideoAdLoaded', () => {
+    console.log('✅ Rewarded yüklendi');
+    isRewardedReady = true;
+    isRewardedLoading = false;
+  });
+  AdMob.addListener('onRewardedVideoAdFailedToLoad', (e) => {
+    console.error('❌ Rewarded fail:', JSON.stringify(e));
+    isRewardedReady = false;
+    isRewardedLoading = false;
+    setTimeout(() => prepareRewarded(), 3000);
+  });
+  AdMob.addListener('onRewardedVideoAdDismissed', () => {
+    console.log('ℹ️ Rewarded kapatıldı — yenisi hazırlanıyor');
+    isRewardedReady = false;
+    isRewardedLoading = false;
+    setTimeout(() => prepareRewarded(), 1000);
+  });
+}
+
 // ═══ INITIALIZATION ═══
 export async function initializeAdMob() {
   if (!isNative()) {
@@ -74,10 +131,13 @@ export async function initializeAdMob() {
   console.log(`ℹ️ AdMob banner ID: ${AD_CONFIG.banner}`);
 
   try {
-    // ═══ 1) ÖNCE ATT iste (sadece iOS) ═══
+    // ═══ 0) ÖNCE listener'ları ekle (init'ten önce — Android için kritik) ═══
+    attachAdListeners();
+
+    // ═══ 1) ATT iste (sadece iOS) ═══
     await requestATT();
 
-    // ═══ 2) SONRA AdMob SDK'yı başlat ═══
+    // ═══ 2) AdMob SDK'yı başlat ═══
     await AdMob.initialize({
       initializeForTesting: IS_TESTING,
       tagForChildDirectedTreatment: false,
@@ -99,46 +159,16 @@ export async function initializeAdMob() {
       canShowAds = true;
     }
 
-    // ─── Banner event listener'ları ───
-    AdMob.addListener('onBannerAdLoaded', () => console.log('✅ Banner yüklendi'));
-    AdMob.addListener('onBannerAdFailedToLoad', (e) => {
-      console.error('❌ Banner fail:', JSON.stringify(e));
-      isBannerShowing = false;
-    });
-
-    // ─── Interstitial event listener'ları ───
-    AdMob.addListener('onInterstitialAdLoaded', () => {
-      console.log('✅ Interstitial yüklendi');
-      isInterstitialReady = true;
-    });
-    AdMob.addListener('onInterstitialAdFailedToLoad', (e) => {
-      console.error('❌ Interstitial fail:', JSON.stringify(e));
-      isInterstitialReady = false;
-    });
-    AdMob.addListener('onInterstitialAdDismissed', () => {
-      console.log('ℹ️ Interstitial kapatıldı — yenisi hazırlanıyor');
-      isInterstitialReady = false;
-      setTimeout(() => prepareInterstitial(), 1000);
-    });
-
-    // ─── Rewarded event listener'ları ───
-    AdMob.addListener('onRewardedVideoAdLoaded', () => {
-      console.log('✅ Rewarded yüklendi');
-      isRewardedReady = true;
-    });
-    AdMob.addListener('onRewardedVideoAdFailedToLoad', (e) => {
-      console.error('❌ Rewarded fail:', JSON.stringify(e));
-      isRewardedReady = false;
-    });
-    AdMob.addListener('onRewardedVideoAdDismissed', () => {
-      console.log('ℹ️ Rewarded kapatıldı — yenisi hazırlanıyor');
-      isRewardedReady = false;
-      setTimeout(() => prepareRewarded(), 1000);
-    });
-
     isInitialized = true;
-    prepareInterstitial();
-    prepareRewarded();
+
+    // ★ Android: SDK init Promise resolve etse de internal mediation
+    //    adapter'ları tam hazır olmuyor. Kısa gecikme ile reklam preload
+    //    çağrılarının başarı oranını ciddi şekilde artırıyoruz.
+    setTimeout(() => {
+      prepareInterstitial();
+      prepareRewarded();
+    }, PLATFORM === 'android' ? 800 : 0);
+
     return true;
   } catch (e) {
     console.error('❌ AdMob init:', e);
@@ -193,16 +223,34 @@ export async function removeBanner() {
 
 // ═══ INTERSTITIAL ═══
 export async function prepareInterstitial() {
-  if (!isNative() || !isInitialized || isInterstitialReady) return;
+  if (!isNative() || !isInitialized) return;
+  if (isInterstitialReady || isInterstitialLoading) return; // ★ Çift yükleme önleme
+
+  isInterstitialLoading = true;
+  console.log('ℹ️ Interstitial hazırlanıyor...');
   try {
     await AdMob.prepareInterstitial({
       adId: AD_CONFIG.interstitial,
       isTesting: IS_TESTING,
       npa: !canShowAds,
     });
+    // ★ NOT: Bazı plugin versiyonlarında prepareInterstitial Promise resolve
+    //    ettiğinde reklam zaten hazırdır ama event tetiklenmez. Bu yüzden
+    //    fallback olarak isReady'i de set ediyoruz.
+    if (PLATFORM === 'android') {
+      // Event birazdan zaten gelecek; gelmezse 4sn sonra hazır kabul et
+      setTimeout(() => {
+        if (isInterstitialLoading && !isInterstitialReady) {
+          console.log('⚠️ Interstitial event gelmedi — fallback ready');
+          isInterstitialReady = true;
+          isInterstitialLoading = false;
+        }
+      }, 4000);
+    }
   } catch (e) {
     console.error('❌ Interstitial prep:', e);
     isInterstitialReady = false;
+    isInterstitialLoading = false;
   }
 }
 
@@ -216,10 +264,22 @@ export async function showInterstitial() {
   }
   if (interstitialCount >= MAX_INTERSTITIALS_PER_SESSION) return false;
 
+  // ★ Hazır değilse: prepare'ı tetikle ve kısa bir süre bekle (Android için kritik)
   if (!isInterstitialReady) {
-    console.log('ℹ️ Interstitial hazır değil — atlanıyor');
+    console.log('ℹ️ Interstitial hazır değil — yükleme tetikleniyor, kısa bekleme...');
     prepareInterstitial();
-    return false;
+    // Android: maksimum 2sn bekle, her 200ms'de bir kontrol et
+    const maxWaitMs = PLATFORM === 'android' ? 2000 : 1200;
+    const stepMs = 200;
+    let waited = 0;
+    while (!isInterstitialReady && waited < maxWaitMs) {
+      await sleep(stepMs);
+      waited += stepMs;
+    }
+    if (!isInterstitialReady) {
+      console.log('ℹ️ Interstitial yine hazır değil — atlanıyor');
+      return false;
+    }
   }
 
   try {
@@ -238,16 +298,30 @@ export async function showInterstitial() {
 
 // ═══ REWARDED ═══
 export async function prepareRewarded() {
-  if (!isNative() || !isInitialized || isRewardedReady) return;
+  if (!isNative() || !isInitialized) return;
+  if (isRewardedReady || isRewardedLoading) return; // ★ Çift yükleme önleme
+
+  isRewardedLoading = true;
+  console.log('ℹ️ Rewarded hazırlanıyor...');
   try {
     await AdMob.prepareRewardVideoAd({
       adId: AD_CONFIG.rewarded,
       isTesting: IS_TESTING,
       npa: !canShowAds,
     });
+    if (PLATFORM === 'android') {
+      setTimeout(() => {
+        if (isRewardedLoading && !isRewardedReady) {
+          console.log('⚠️ Rewarded event gelmedi — fallback ready');
+          isRewardedReady = true;
+          isRewardedLoading = false;
+        }
+      }, 4000);
+    }
   } catch (e) {
     console.error('❌ Rewarded prep:', e);
     isRewardedReady = false;
+    isRewardedLoading = false;
   }
 }
 
