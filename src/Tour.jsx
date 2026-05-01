@@ -26,14 +26,29 @@ export const markMatchEndTourDone = () => {
   try { localStorage.setItem(STORAGE_KEY_MATCH, "1"); } catch {}
 };
 
-// Ana tur — takım kurma akışı
+// Ana tur — takım kurma akışı + özellik tanıtımı
+//
+// İlk 6 adım: kullanıcı uygulamayı kullanmayı öğrenir (interaktif, hedef-bazlı)
+// Son 4 adım: özellik tanıtımı (merkezi popup, "Anladım" ile ilerler)
+//
+// waitFor seçenekleri:
+//   "click"          → hedefe tıklayınca ilerler
+//   "event:NAME"     → window event'i dinler (custom event)
+//   "next"           → kullanıcı "İleri/Anladım" butonuna basınca ilerler (hedefsiz info-step)
 const STEPS_MAIN = [
+  // ─── İLK 6: İnteraktif rehber (kullanım) ───
   { target: "mode-myteam",    title: "tour_0_title", desc: "tour_0_desc", placement: "bottom", waitFor: "event:mode-selected" },
   { target: "tab-squad",      title: "tour_1_title", desc: "tour_1_desc", placement: "top",    waitFor: "click" },
   { target: "btn-add-player", title: "tour_2_title", desc: "tour_2_desc", placement: "bottom", waitFor: "click" },
   { target: null,             title: "tour_3_title", desc: "tour_3_desc", placement: "center", waitFor: "event:player-saved" },
   { target: "tab-field",      title: "tour_4_title", desc: "tour_4_desc", placement: "top",    waitFor: "click" },
   { target: "empty-slot",     title: "tour_5_title", desc: "tour_5_desc", placement: "bottom", waitFor: "click" },
+  // ─── YENİ 4: Bilgilendirici özellik turu (info-step, merkezi popup) ───
+  { target: null,             title: "tour_6_title",  desc: "tour_6_desc",  placement: "center", waitFor: "next" },
+  { target: null,             title: "tour_7_title",  desc: "tour_7_desc",  placement: "center", waitFor: "next" },
+  { target: null,             title: "tour_8_title",  desc: "tour_8_desc",  placement: "center", waitFor: "next" },
+  { target: null,             title: "tour_9_title",  desc: "tour_9_desc",  placement: "center", waitFor: "next" },
+  { target: null,             title: "tour_10_title", desc: "tour_10_desc", placement: "center", waitFor: "next" },
 ];
 
 // Mini tour — maçı bitir vurgu
@@ -131,7 +146,11 @@ export default function Tour({ active, onFinish, mode = "main" }) {
   };
 
   const finish = () => {
-    markTourDone();
+    if (mode === "matchEnd") {
+      markMatchEndTourDone();
+    } else {
+      markTourDone();
+    }
     setStepIdx(0);
     onFinish?.();
   };
@@ -148,8 +167,11 @@ export default function Tour({ active, onFinish, mode = "main" }) {
     h: Math.min(vh, rect.h + PAD * 2),
   } : null;
 
-  // ★ Center step (form modal'ı zaten açık) — karartma YOK, sadece üstte yardımcı ipucu
+  // ★ Center step'ler iki farklı tipte:
+  //   - Form modal'ı açık olan (waitFor: "event:player-saved") → banner görünümü, modal'ı kapatma
+  //   - Bilgilendirici info step (waitFor: "next") → büyük kart, karartılmış arkaplan, "Anladım" butonu
   const isCenterStep = !hole && step.placement === "center";
+  const isInfoStep   = isCenterStep && step.waitFor === "next";
 
   // 4-panel cutout — hole çevresini karart, içi dokunulmaz
   const panels = hole ? [
@@ -163,8 +185,14 @@ export default function Tour({ active, onFinish, mode = "main" }) {
   // Tooltip pozisyonu
   const TIP_W = Math.min(280, vw - 32);
   let tipStyle = {};
-  if (isCenterStep) {
-    // Modal zaten açık — tooltip'i ekranın üstünde, modal'ı kapatmayacak şekilde göster
+  if (isInfoStep) {
+    // Bilgilendirici merkezi info step — büyük kart, ekran ortası
+    tipStyle = {
+      top: "50%", left: "50%", transform: "translate(-50%, -50%)",
+      width: Math.min(340, vw - 32),
+    };
+  } else if (isCenterStep) {
+    // Modal zaten açık (örn. form) — tooltip'i ekranın üstünde, modal'ı kapatmayacak şekilde göster
     tipStyle = {
       top: "calc(env(safe-area-inset-top, 0px) + 14px)",
       left: "50%",
@@ -215,6 +243,21 @@ export default function Tour({ active, onFinish, mode = "main" }) {
         />
       ))}
 
+      {/* ★ Info step için tam ekran karartma (modal davranışı — pointer events açık) */}
+      {isInfoStep && (
+        <div
+          style={{
+            position: "fixed", inset: 0,
+            background: "rgba(0,0,0,0.85)",
+            backdropFilter: "blur(6px)",
+            WebkitBackdropFilter: "blur(6px)",
+            zIndex: 4500,
+            pointerEvents: "auto",
+            animation: "tourFadeIn 0.25s ease-out",
+          }}
+        />
+      )}
+
       {/* Pulsing ring around target */}
       {hole && (
         <div
@@ -237,16 +280,20 @@ export default function Tour({ active, onFinish, mode = "main" }) {
         style={{
           position: "fixed",
           ...tipStyle,
-          background: isCenterStep
+          background: isInfoStep
+            ? "linear-gradient(165deg, #0f1722 0%, #0c1117 60%, #0a0d13 100%)"
+            : isCenterStep
             ? "linear-gradient(160deg,rgba(14,17,23,0.96),rgba(17,19,24,0.96))"
             : "linear-gradient(160deg,#0e1117,#111318)",
-          backdropFilter: isCenterStep ? "blur(16px)" : "none",
-          WebkitBackdropFilter: isCenterStep ? "blur(16px)" : "none",
+          backdropFilter: isCenterStep && !isInfoStep ? "blur(16px)" : "none",
+          WebkitBackdropFilter: isCenterStep && !isInfoStep ? "blur(16px)" : "none",
           color: "#e2e8f0",
-          padding: isCenterStep ? "12px 14px" : "14px 16px",
-          borderRadius: isCenterStep ? 12 : 14,
-          border: "1px solid rgba(52,211,153,0.35)",
-          boxShadow: isCenterStep
+          padding: isInfoStep ? "20px 22px" : isCenterStep ? "12px 14px" : "14px 16px",
+          borderRadius: isInfoStep ? 18 : isCenterStep ? 12 : 14,
+          border: isInfoStep ? "1px solid rgba(52,211,153,0.45)" : "1px solid rgba(52,211,153,0.35)",
+          boxShadow: isInfoStep
+            ? "0 24px 60px rgba(0,0,0,0.65), 0 0 50px rgba(52,211,153,0.25)"
+            : isCenterStep
             ? "0 12px 32px rgba(0,0,0,0.55), 0 0 20px rgba(52,211,153,0.18)"
             : "0 16px 40px rgba(0,0,0,0.5), 0 0 24px rgba(52,211,153,0.15)",
           fontFamily: "'DM Sans','Segoe UI',sans-serif",
@@ -255,8 +302,90 @@ export default function Tour({ active, onFinish, mode = "main" }) {
           animation: "tourFadeIn 0.25s ease-out",
         }}
       >
-        {isCenterStep ? (
-          // Banner görünümü — modal'ın üstünde sade ipucu
+        {isInfoStep ? (
+          // ★ INFO STEP — bilgilendirici büyük kart (özellik tanıtımı)
+          <>
+            {/* Step counter + skip */}
+            <div style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              marginBottom: 14,
+            }}>
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                {STEPS.map((_, i) => (
+                  <div key={i} style={{
+                    width: i === stepIdx ? 18 : 5, height: 5,
+                    borderRadius: 3,
+                    background: i <= stepIdx ? "#34d399" : "rgba(255,255,255,0.18)",
+                    transition: "all 0.25s",
+                  }} />
+                ))}
+              </div>
+              <button
+                onClick={finish}
+                style={{
+                  border: "none", background: "rgba(255,255,255,0.05)",
+                  color: "rgba(255,255,255,0.55)",
+                  fontSize: 11, fontWeight: 600,
+                  cursor: "pointer", padding: "4px 10px",
+                  borderRadius: 6, fontFamily: "inherit",
+                }}
+              >
+                {t("tour_skip")}
+              </button>
+            </div>
+
+            {/* Adım numarası */}
+            <div style={{
+              fontSize: 10, fontWeight: 700,
+              color: "rgba(52,211,153,0.7)",
+              textTransform: "uppercase", letterSpacing: 1,
+              marginBottom: 6,
+              fontFamily: "'JetBrains Mono', monospace",
+            }}>
+              {t("tour_step_label", { current: stepIdx + 1, total: STEPS.length })}
+            </div>
+
+            {/* Başlık */}
+            <div style={{
+              fontSize: 16, fontWeight: 800, color: "#fff",
+              marginBottom: 10, letterSpacing: -0.2,
+              lineHeight: 1.25,
+            }}>
+              {t(step.title)}
+            </div>
+
+            {/* Açıklama */}
+            <div style={{
+              fontSize: 13, lineHeight: 1.55,
+              color: "rgba(255,255,255,0.72)",
+              marginBottom: 16,
+            }}>
+              {t(step.desc)}
+            </div>
+
+            {/* CTA — İleri / Anladım */}
+            <button
+              onClick={() => advance()}
+              style={{
+                width: "100%", padding: "12px",
+                borderRadius: 11, border: "none",
+                background: "linear-gradient(135deg, #10b981, #34d399)",
+                color: "#0a1628",
+                fontSize: 13, fontWeight: 800,
+                cursor: "pointer", fontFamily: "inherit",
+                letterSpacing: 0.3,
+                boxShadow: "0 6px 18px rgba(52,211,153,0.35)",
+                transition: "transform 0.12s",
+              }}
+              onMouseDown={(e) => { e.currentTarget.style.transform = "scale(0.98)"; }}
+              onMouseUp={(e) => { e.currentTarget.style.transform = "scale(1)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.transform = "scale(1)"; }}
+            >
+              {stepIdx >= STEPS.length - 1 ? t("tour_finish") : t("tour_got_it")} →
+            </button>
+          </>
+        ) : isCenterStep ? (
+          // Banner görünümü — modal'ın üstünde sade ipucu (form modal açıkken)
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{ fontSize: 20, flexShrink: 0 }}>💡</div>
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -286,7 +415,7 @@ export default function Tour({ active, onFinish, mode = "main" }) {
               display: "flex", justifyContent: "space-between", alignItems: "center",
               marginBottom: 8,
             }}>
-              <div style={{ display: "flex", gap: 4 }}>
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                 {STEPS.map((_, i) => (
                   <div key={i} style={{
                     width: i === stepIdx ? 18 : 5, height: 5,

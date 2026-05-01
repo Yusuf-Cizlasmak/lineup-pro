@@ -1,5 +1,6 @@
 // ─────────────────────────────────────────────────────────────
-// 5-step Onboarding (TR/EN, swipe + skip)
+// 8-step Onboarding (TR/EN, swipe + skip)
+// Detaylı özellik tanıtımı — kullanıcı uygulamada neler yapabileceğini öğrenir.
 // ─────────────────────────────────────────────────────────────
 import React, { useState, useRef, useEffect } from "react";
 import logo from "./ssssss.png";
@@ -7,11 +8,14 @@ import { t, useLang, setLang } from "./i18n";
 import { hideBanner } from "./admob";
 
 const STEPS = [
-  { key: 1, icon: "⚽", color: "#34d399", bg: "rgba(5,150,105,0.18)" },
-  { key: 2, icon: "👥", color: "#60a5fa", bg: "rgba(29,78,216,0.18)" },
-  { key: 3, icon: "🎯", color: "#fbbf24", bg: "rgba(245,158,11,0.18)" },
-  { key: 4, icon: "🏆", color: "#f87171", bg: "rgba(220,38,38,0.18)" },
-  { key: 5, icon: "📸", color: "#a78bfa", bg: "rgba(124,58,237,0.18)" },
+  { key: 1, icon: "⚽", color: "#34d399", bg: "rgba(5,150,105,0.18)" },     // Hoş geldin (logo)
+  { key: 2, icon: "🎮", color: "#60a5fa", bg: "rgba(29,78,216,0.18)" },     // İki mod
+  { key: 3, icon: "👤", color: "#a78bfa", bg: "rgba(124,58,237,0.18)" },    // Oyuncu profili (spider)
+  { key: 4, icon: "📋", color: "#fbbf24", bg: "rgba(245,158,11,0.18)" },    // 7 formasyon, sürükle
+  { key: 5, icon: "⚽", color: "#f87171", bg: "rgba(220,38,38,0.18)" },     // Maç yönet
+  { key: 6, icon: "📊", color: "#22c55e", bg: "rgba(22,163,74,0.18)" },     // Form & istatistik
+  { key: 7, icon: "🏆", color: "#f97316", bg: "rgba(249,115,22,0.18)" },    // Krallık & geçmiş
+  { key: 8, icon: "📸", color: "#ec4899", bg: "rgba(236,72,153,0.18)" },    // Paylaş + başla
 ];
 
 export default function Onboarding({ onFinish }) {
