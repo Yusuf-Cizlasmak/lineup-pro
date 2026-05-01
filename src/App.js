@@ -3,7 +3,7 @@ import { PremiumProvider } from "./monetization";
 import HalisahaKolik from "./HaliSahaKolik";
 import Onboarding from "./Onboarding";
 import RatePrompt from "./RatePrompt";
-import Tour, { resetTour } from "./Tour";
+import Tour from "./Tour";
 
 const ONBOARDING_KEY = "halisaha_onboarded";
 const LAUNCH_COUNT_KEY = "halisaha_launch_count";

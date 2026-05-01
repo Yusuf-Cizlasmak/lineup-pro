@@ -5,10 +5,10 @@
 // ─────────────────────────────────────────────────────────────
 import React, { useState, useMemo, useEffect } from "react";
 import { t, tPos } from "./i18n";
-import { hapticLight, hapticMedium, hapticWarning, hapticSelection } from "./haptics";
+import { hapticLight, hapticWarning, hapticSelection } from "./haptics";
 import {
-  getAllMatches, deleteMatch, clearAllMatches,
-  computeLeaderboards, getPlayerStats, summarizeMatch,
+  getAllMatches, deleteMatch,
+  computeLeaderboards, summarizeMatch,
 } from "./matchHistory";
 
 // ─── Tarih formatla — detaylı ───

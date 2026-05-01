@@ -3,7 +3,7 @@
 // FIFA-tarzı tap-to-score, kupa animasyonu, skor flip, dakika slider,
 // +1 floating animation, hat-trick fullscreen efekt.
 // ─────────────────────────────────────────────────────────────
-import React, { useState, useRef, useMemo, useEffect, useCallback } from "react";
+import React, { useState, useRef, useMemo, useEffect } from "react";
 import { t, tPos } from "./i18n";
 import { hapticLight, hapticMedium, hapticHeavy, hapticSuccess, hapticSelection } from "./haptics";
 import { saveMatch, buildMatch, newEvent } from "./matchHistory";

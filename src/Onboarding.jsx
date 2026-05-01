@@ -4,7 +4,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import logo from "./ssssss.png";
 import { t, useLang, setLang } from "./i18n";
-import { hideBanner, showBanner } from "./admob";
+import { hideBanner } from "./admob";
 
 const STEPS = [
   { key: 1, icon: "⚽", color: "#34d399", bg: "rgba(5,150,105,0.18)" },
