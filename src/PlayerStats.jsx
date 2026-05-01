@@ -1,11 +1,19 @@
 // ─────────────────────────────────────────────────────────────
 // HalıSaha-Kolik · Oyuncu Profil & İstatistik (FIFA Kart Tarzı)
 // + Form chart (son 10 maç) — saf SVG ile çizdik (recharts dependency yok)
+// + Spider Chart (yetenekler) + Form Gücü rozeti
 // ─────────────────────────────────────────────────────────────
 import React, { useMemo } from "react";
 import { t, tPos } from "./i18n";
 import { hapticLight } from "./haptics";
 import { getAllMatches, getPlayerStats } from "./matchHistoryStore";
+import {
+  ensurePlayerAttributes,
+  getAttrKeys,
+  computeForm,
+} from "./playerAttributes";
+import SpiderChart from "./SpiderChart";
+import FormBadge from "./FormBadge";
 
 const getInitials = (n, s) => {
   const name = (n || "").trim();
@@ -266,6 +274,16 @@ export default function PlayerStatsView({ player, accent = "#34d399", onBack }) 
   const matches = useMemo(() => getAllMatches(), []);
   const { stat } = useMemo(() => getPlayerStats(player.id, matches), [player.id, matches]);
 
+  // ★ Player'a attributes garantisi (eski oyuncularda yoksa auto-fill)
+  const enrichedPlayer = useMemo(() => ensurePlayerAttributes(player), [player]);
+
+  // ★ Form gücü — son 5 maçtan
+  const formScore = useMemo(() => computeForm(stat), [stat]);
+  const recentResults = useMemo(
+    () => (stat?.lastMatches || []).slice(0, 5).map((m) => m.result),
+    [stat]
+  );
+
   const goalTypeData = stat ? [
     { id: "normal",   label: "⚽", value: stat.goalsByType.normal,   color: "#fbbf24" },
     { id: "penalty",  label: "🎯", value: stat.goalsByType.penalty,  color: "#f87171" },
@@ -425,6 +443,40 @@ export default function PlayerStatsView({ player, accent = "#34d399", onBack }) 
                     </div>
                   </>
                 )}
+              </div>
+            </div>
+
+            {/* ★ FORM + SPIDER CHART — Goal Breakdown'dan önce */}
+            <div style={{ marginBottom: 14, animation: "cascadeInPS 0.35s 0.28s both" }}>
+              <div style={{ display: "flex", justifyContent: "center", marginBottom: 10 }}>
+                <FormBadge form={formScore} size="md" recentResults={recentResults} />
+              </div>
+              <div style={{
+                padding: 12,
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.05)",
+                borderRadius: 12,
+              }}>
+                <div style={{
+                  fontSize: 10, color: "rgba(255,255,255,0.4)", fontWeight: 700,
+                  textTransform: "uppercase", letterSpacing: 1, marginBottom: 4, textAlign: "center",
+                }}>
+                  {t("attributes_title")}
+                </div>
+                <div style={{
+                  fontSize: 10, color: "rgba(255,255,255,0.3)", fontWeight: 500,
+                  textAlign: "center", marginBottom: 6, lineHeight: 1.4,
+                }}>
+                  {t("form_explainer")}
+                </div>
+                <div style={{ display: "flex", justifyContent: "center" }}>
+                  <SpiderChart
+                    attributes={enrichedPlayer.attributes}
+                    keys={getAttrKeys(enrichedPlayer.position)}
+                    accent={accent}
+                    size={260}
+                  />
+                </div>
               </div>
             </div>
 

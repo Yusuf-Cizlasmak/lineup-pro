@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import logo from "./ssssss.png";
 import { startAds, showInterstitial, showRewarded, showBanner, hideBanner } from "./admob";
 import { t, useLang, setLang, tPos } from "./i18n";
@@ -12,6 +12,17 @@ import { Camera, CameraResultType, CameraSource } from "@capacitor/camera";
 import MatchResultModalNew from "./MatchResultModal";
 import MatchHistoryView from "./MatchHistory";
 import PlayerStatsView from "./PlayerStats";
+import {
+  generateDefaultAttributes,
+  ensurePlayerAttributes,
+  computeOverallFromAttributes,
+  scaleAttributesToRating,
+  getAttrKeys,
+  isGoalkeeper,
+  computeForm,
+} from "./playerAttributes";
+import SpiderChart from "./SpiderChart";
+import { getAllMatches, computePlayerStats } from "./matchHistoryStore";
 
 // ─── SCREENSHOT & SHARE UTILITY ───
 const captureAndShare = async (element, filename = "halisaha-kolik.png") => {
@@ -686,7 +697,65 @@ const Modal = ({ open, onClose, title, children }) => {
 };
 
 // ─── PLAYER CARD ───
-const PlayerCard = ({ player, onEdit, onDelete, isOnField, teamColor, compact, isCaptain, onToggleCaptain, onShowStats }) => {
+// ─── PLAYER CARD ACTION BUTTON (hover efektli) ───
+const MiniActionBtn = ({ icon, label, onClick, color = "rgba(255,255,255,0.5)", bg, border, hoverBg, hoverColor, isActive }) => {
+  const [hover, setHover] = useState(false);
+  const baseBg = bg || "rgba(255,255,255,0.06)";
+  const baseBorder = border || "1px solid rgba(255,255,255,0.08)";
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onClick?.(); }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onMouseDown={(e) => { e.currentTarget.style.transform = "scale(0.92)"; }}
+      onMouseUp={(e) => { e.currentTarget.style.transform = hover ? "scale(1.05)" : "scale(1)"; }}
+      title={label}
+      aria-label={label}
+      style={{
+        position: "relative",
+        background: hover ? (hoverBg || `${color}22`) : baseBg,
+        border: hover ? `1px solid ${color}66` : baseBorder,
+        borderRadius: 6,
+        padding: 5,
+        cursor: "pointer",
+        color: hover ? (hoverColor || color) : color,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        transition: "all 0.18s cubic-bezier(.4,0,.2,1)",
+        transform: hover ? "scale(1.05)" : "scale(1)",
+        boxShadow: hover ? `0 4px 12px ${color}33, 0 0 0 1px ${color}22` : "none",
+      }}
+    >
+      {icon}
+      {/* Hover'da çıkan custom tooltip — title attr'a ek olarak (mobilde de görünür değil ama desktop'ta UX bonus) */}
+      {hover && (
+        <span style={{
+          position: "absolute",
+          bottom: "calc(100% + 6px)",
+          left: "50%",
+          transform: "translateX(-50%)",
+          background: "rgba(0,0,0,0.92)",
+          color: "#e2e8f0",
+          fontSize: 10,
+          fontWeight: 600,
+          padding: "3px 7px",
+          borderRadius: 4,
+          whiteSpace: "nowrap",
+          pointerEvents: "none",
+          zIndex: 100,
+          letterSpacing: 0.2,
+          fontFamily: "'DM Sans',sans-serif",
+          boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+        }}>
+          {label}
+        </span>
+      )}
+    </button>
+  );
+};
+
+const PlayerCard = ({ player, onEdit, onDelete, isOnField, teamColor, compact, isCaptain, onToggleCaptain, onShowStats, onTransfer, formDelta }) => {
   const rc = ratingColor(player.rating);
   return (
     <div draggable={!isOnField} onDragStart={(e) => { if (!isOnField) e.dataTransfer.setData("playerId", player.id); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: compact ? "7px 10px" : "10px 12px", background: isOnField ? `${teamColor}11` : "rgba(255,255,255,0.03)", borderRadius: 10, border: isOnField ? `1px solid ${teamColor}33` : "1px solid rgba(255,255,255,0.06)", cursor: isOnField ? "default" : "grab", opacity: isOnField ? 0.5 : 1, transition: "opacity 0.2s" }}>
@@ -698,20 +767,537 @@ const PlayerCard = ({ player, onEdit, onDelete, isOnField, teamColor, compact, i
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ color: "#e2e8f0", fontSize: compact ? 12 : 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{player.name} {player.surname}</div>
-        <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 1 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 1, flexWrap: "wrap" }}>
           <span style={{ fontSize: compact ? 9 : 10, color: "rgba(255,255,255,0.38)", fontWeight: 500, textTransform: "uppercase", letterSpacing: 0.4 }}>{tPos(player.position)}</span>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 2, color: rc, fontSize: 10, fontWeight: 700, fontFamily: "'JetBrains Mono',monospace" }}><I.Star /> {player.rating}</span>
+          {/* ★ Form rozeti — kompakt, sadece formDelta varsa göster */}
+          {formDelta != null && (
+            <CompactFormPill formDelta={formDelta} />
+          )}
         </div>
       </div>
       {!compact && (
-        <div style={{ display: "flex", gap: 3 }}>
-          {onToggleCaptain && (<button onClick={() => onToggleCaptain(player.id)} title="Kaptan yap" style={{ ...S.mini, color: isCaptain ? "#fbbf24" : "rgba(255,255,255,0.3)", background: isCaptain ? "rgba(251,191,36,0.12)" : "rgba(255,255,255,0.06)", border: isCaptain ? "1px solid rgba(251,191,36,0.3)" : "1px solid rgba(255,255,255,0.08)" }}><I.Armband /></button>)}
-          {onShowStats && (<button onClick={() => onShowStats(player)} title={t("ps_view_stats")} style={{ ...S.mini, color: "#a78bfa" }}><I.Stats /></button>)}
-          <button onClick={() => onEdit?.(player)} style={S.mini}><I.Edit /></button>
-          <button onClick={() => onDelete?.(player.id)} style={{ ...S.mini, color: "#f87171" }}><I.Trash /></button>
+        <div style={{ display: "flex", gap: 4 }}>
+          {onToggleCaptain && (
+            <MiniActionBtn
+              icon={<I.Armband />}
+              label={isCaptain ? t("pc_btn_captain_remove") : t("pc_btn_captain")}
+              onClick={() => onToggleCaptain(player.id)}
+              color={isCaptain ? "#fbbf24" : "rgba(255,255,255,0.45)"}
+              bg={isCaptain ? "rgba(251,191,36,0.12)" : undefined}
+              border={isCaptain ? "1px solid rgba(251,191,36,0.3)" : undefined}
+              isActive={isCaptain}
+            />
+          )}
+          {onShowStats && (
+            <MiniActionBtn
+              icon={<I.Stats />}
+              label={t("pc_btn_stats")}
+              onClick={() => onShowStats(player)}
+              color="#a78bfa"
+            />
+          )}
+          {onTransfer && (
+            <MiniActionBtn
+              icon={<span style={{ fontSize: 14, fontWeight: 700, lineHeight: 1 }}>⇄</span>}
+              label={t("pc_btn_transfer")}
+              onClick={() => onTransfer(player)}
+              color="#60a5fa"
+            />
+          )}
+          <MiniActionBtn
+            icon={<I.Edit />}
+            label={t("pc_btn_edit")}
+            onClick={() => onEdit?.(player)}
+            color="rgba(255,255,255,0.55)"
+          />
+          <MiniActionBtn
+            icon={<I.Trash />}
+            label={t("pc_btn_delete")}
+            onClick={() => onDelete?.(player.id)}
+            color="#f87171"
+          />
         </div>
       )}
       {isOnField && (<div style={{ fontSize: 8, color: teamColor, fontWeight: 700 }}>✓</div>)}
+    </div>
+  );
+};
+
+// ─── KOMPAKT FORM PILL — kadro listesi için ufak rozet ───
+const CompactFormPill = ({ formDelta }) => {
+  // playerAttributes.getFormLabel ile aynı eşikler
+  let icon, color, bg;
+  if (formDelta >= 4)      { icon = "🔥"; color = "#f97316"; bg = "rgba(249,115,22,0.14)"; }
+  else if (formDelta >= 2) { icon = "📈"; color = "#22c55e"; bg = "rgba(34,197,94,0.14)"; }
+  else if (formDelta >= -1){ icon = "➖"; color = "#94a3b8"; bg = "rgba(148,163,184,0.14)"; }
+  else if (formDelta >= -2){ icon = "📉"; color = "#fb923c"; bg = "rgba(251,146,60,0.14)"; }
+  else                     { icon = "❄️"; color = "#60a5fa"; bg = "rgba(96,165,250,0.14)"; }
+  const txt = formDelta > 0 ? `+${formDelta}` : formDelta < 0 ? `${formDelta}` : "±0";
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 3,
+      padding: "1px 5px",
+      borderRadius: 4,
+      background: bg,
+      border: `1px solid ${color}44`,
+      color,
+      fontSize: 9,
+      fontWeight: 800,
+      fontFamily: "'JetBrains Mono',monospace",
+      lineHeight: 1.3,
+      letterSpacing: 0.2,
+    }}>
+      <span style={{ fontSize: 9 }}>{icon}</span>
+      <span>{txt}</span>
+    </span>
+  );
+};
+
+// ─── TRANSFER KAP POPUP — Profesyonel Resmi Bildirim Tarzı ───
+// Stil ilhamı: BIST/KAP (Kamuyu Aydınlatma Platformu) duyuruları + MatchResultModal success popup
+const TransferKapPopup = ({ announcement, onClose, onViewSquad }) => {
+  const { player, fromTeam, toTeam, timestamp } = announcement;
+
+  // Hafif sahne efekti — popup açılışında kısa bir pulse
+  useEffect(() => {
+    hapticHeavy();
+  }, []);
+
+  const dt = new Date(timestamp);
+  const dateStr = `${String(dt.getDate()).padStart(2, "0")}.${String(dt.getMonth() + 1).padStart(2, "0")}.${dt.getFullYear()}`;
+  const timeStr = `${String(dt.getHours()).padStart(2, "0")}:${String(dt.getMinutes()).padStart(2, "0")}`;
+  const refNo = `TR-${dt.getFullYear()}${String(dt.getMonth() + 1).padStart(2, "0")}${String(dt.getDate()).padStart(2, "0")}-${String(timestamp).slice(-5)}`;
+
+  const playerName = `${player.name || ""} ${player.surname || ""}`.trim() || "Oyuncu";
+  const ratingCol = ratingColor(player.rating || 70);
+  const fromAccent = fromTeam.color?.secondary || "#94a3b8";
+  const toAccent = toTeam.color?.secondary || "#34d399";
+
+  return (
+    <div
+      style={{
+        position: "fixed", inset: 0, zIndex: 1500,
+        background: "rgba(0,0,0,0.88)",
+        backdropFilter: "blur(16px)",
+        WebkitBackdropFilter: "blur(16px)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: 20,
+        animation: "kapFadeIn 0.28s ease-out",
+        fontFamily: "'DM Sans','Segoe UI',sans-serif",
+      }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <style>{`
+        @keyframes kapFadeIn { from { opacity: 0 } to { opacity: 1 } }
+        @keyframes kapPopIn {
+          0% { transform: translateY(20px) scale(0.94); opacity: 0; }
+          60% { transform: translateY(-2px) scale(1.01); opacity: 1; }
+          100% { transform: translateY(0) scale(1); opacity: 1; }
+        }
+        @keyframes kapStampIn {
+          0% { transform: rotate(-25deg) scale(0); opacity: 0; }
+          70% { transform: rotate(-12deg) scale(1.15); opacity: 1; }
+          100% { transform: rotate(-12deg) scale(1); opacity: 1; }
+        }
+        @keyframes kapStripeIn {
+          from { transform: scaleX(0); opacity: 0; }
+          to { transform: scaleX(1); opacity: 1; }
+        }
+        @keyframes kapArrowSlide {
+          0% { transform: translateX(-8px); opacity: 0; }
+          50% { transform: translateX(0); opacity: 1; }
+          100% { transform: translateX(0); opacity: 1; }
+        }
+      `}</style>
+
+      <div
+        style={{
+          background: "linear-gradient(165deg, #0f1722 0%, #0c1117 60%, #0a0d13 100%)",
+          borderRadius: 18,
+          border: "1px solid rgba(255,255,255,0.08)",
+          maxWidth: 420, width: "100%",
+          maxHeight: "90vh",
+          overflow: "auto",
+          animation: "kapPopIn 0.5s cubic-bezier(.34,1.56,.64,1)",
+          boxShadow: "0 24px 80px rgba(0,0,0,0.7), 0 0 60px rgba(96,165,250,0.12)",
+          position: "relative",
+        }}
+      >
+        {/* Üstteki resmi şerit — iki takımın renkleri */}
+        <div style={{
+          display: "flex",
+          height: 4,
+          transformOrigin: "left",
+          animation: "kapStripeIn 0.5s 0.2s both",
+        }}>
+          <div style={{ flex: 1, background: `linear-gradient(90deg, ${fromAccent}, ${fromAccent}77)` }} />
+          <div style={{ flex: 1, background: `linear-gradient(90deg, ${toAccent}77, ${toAccent})` }} />
+        </div>
+
+        {/* HEADER — Resmi başlık */}
+        <div style={{
+          padding: "18px 22px 14px",
+          borderBottom: "1px solid rgba(255,255,255,0.06)",
+          position: "relative",
+        }}>
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            marginBottom: 6,
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{
+                width: 28, height: 28,
+                borderRadius: 7,
+                background: "linear-gradient(135deg, #1e293b, #0f172a)",
+                border: "1px solid rgba(96,165,250,0.35)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 14,
+                boxShadow: "0 0 12px rgba(96,165,250,0.2)",
+              }}>📋</div>
+              <div>
+                <div style={{
+                  fontSize: 13, fontWeight: 800, color: "#e2e8f0",
+                  letterSpacing: 0.3, lineHeight: 1.1,
+                }}>
+                  {t("transfer_kap_title")}
+                </div>
+                <div style={{
+                  fontSize: 9.5, fontWeight: 600,
+                  color: "rgba(255,255,255,0.42)",
+                  textTransform: "uppercase", letterSpacing: 0.7,
+                  marginTop: 2,
+                }}>
+                  {t("transfer_kap_subtitle")}
+                </div>
+              </div>
+            </div>
+            <div style={{
+              fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.35)",
+              fontFamily: "'JetBrains Mono', monospace",
+              padding: "3px 7px",
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.06)",
+              borderRadius: 4,
+              letterSpacing: 0.5,
+            }}>
+              {refNo}
+            </div>
+          </div>
+          <div style={{
+            display: "flex", gap: 14,
+            fontSize: 9.5, color: "rgba(255,255,255,0.4)",
+            fontFamily: "'JetBrains Mono', monospace",
+            paddingLeft: 36,
+            letterSpacing: 0.3,
+          }}>
+            <span>📅 {dateStr}</span>
+            <span>🕐 {timeStr}</span>
+          </div>
+        </div>
+
+        {/* GÖVDE */}
+        <div style={{ padding: "18px 22px" }}>
+          {/* Oyuncu kartı — büyük gösterim */}
+          <div style={{
+            display: "flex", alignItems: "center", gap: 14,
+            padding: "14px",
+            background: "rgba(255,255,255,0.025)",
+            border: "1px solid rgba(255,255,255,0.06)",
+            borderRadius: 12,
+            marginBottom: 14,
+            position: "relative",
+            overflow: "hidden",
+          }}>
+            {/* Kart arka glow */}
+            <div style={{
+              position: "absolute",
+              top: -20, right: -20,
+              width: 100, height: 100,
+              borderRadius: "50%",
+              background: `radial-gradient(circle, ${ratingCol}22, transparent 70%)`,
+              pointerEvents: "none",
+            }} />
+
+            {/* Avatar */}
+            <div style={{
+              width: 58, height: 58,
+              borderRadius: "50%",
+              flexShrink: 0,
+              background: player.photo
+                ? `url(${player.photo}) center/cover`
+                : avatarColor(player.id),
+              border: `2.5px solid ${ratingCol}`,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: "#fff", fontWeight: 800,
+              fontSize: 18,
+              fontFamily: "'Bebas Neue',sans-serif",
+              boxShadow: `0 4px 16px ${ratingCol}44`,
+              position: "relative",
+            }}>
+              {!player.photo && getInitials(player.name, player.surname)}
+              {/* Köşedeki forma numarası */}
+              {player.jerseyNumber && (
+                <div style={{
+                  position: "absolute",
+                  bottom: -3, right: -3,
+                  width: 22, height: 22,
+                  borderRadius: "50%",
+                  background: "#0c1117",
+                  border: `2px solid ${ratingCol}`,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 10, fontWeight: 800,
+                  color: ratingCol,
+                  fontFamily: "'JetBrains Mono', monospace",
+                }}>
+                  {player.jerseyNumber}
+                </div>
+              )}
+            </div>
+
+            {/* Bilgiler */}
+            <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
+              <div style={{
+                fontSize: 16, fontWeight: 800, color: "#fff",
+                letterSpacing: -0.2,
+                lineHeight: 1.2,
+                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+              }}>
+                {playerName}
+              </div>
+              <div style={{
+                display: "flex", gap: 10, marginTop: 4,
+                fontSize: 10, fontWeight: 600,
+              }}>
+                <span style={{
+                  color: "rgba(255,255,255,0.5)",
+                  textTransform: "uppercase", letterSpacing: 0.4,
+                }}>
+                  {tPos(player.position)}
+                </span>
+                <span style={{
+                  color: ratingCol, fontWeight: 800,
+                  fontFamily: "'JetBrains Mono', monospace",
+                }}>
+                  ⭐ {player.rating}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Transfer akışı — From → To */}
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "1fr auto 1fr",
+            gap: 8,
+            alignItems: "stretch",
+            marginBottom: 14,
+          }}>
+            {/* From */}
+            <div style={{
+              padding: "11px 10px",
+              background: `${fromAccent}10`,
+              border: `1px solid ${fromAccent}33`,
+              borderRadius: 10,
+              textAlign: "center",
+              position: "relative",
+              opacity: 0.7,
+            }}>
+              <div style={{
+                fontSize: 8.5, fontWeight: 700,
+                color: "rgba(255,255,255,0.4)",
+                textTransform: "uppercase", letterSpacing: 0.8,
+                marginBottom: 5,
+              }}>
+                ESKİ TAKIM
+              </div>
+              <div style={{
+                width: 7, height: 7, borderRadius: "50%",
+                background: fromAccent,
+                margin: "0 auto 5px",
+              }} />
+              <div style={{
+                fontSize: 12, fontWeight: 700,
+                color: fromAccent,
+                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                maxWidth: "100%",
+              }}>
+                {fromTeam.name}
+              </div>
+            </div>
+
+            {/* Ok */}
+            <div style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              padding: "0 4px",
+              animation: "kapArrowSlide 0.7s 0.4s both",
+            }}>
+              <div style={{
+                width: 30, height: 30,
+                borderRadius: "50%",
+                background: "linear-gradient(135deg, #1e293b, #0f172a)",
+                border: "1px solid rgba(96,165,250,0.4)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 14, fontWeight: 800,
+                color: "#60a5fa",
+                boxShadow: "0 0 16px rgba(96,165,250,0.3)",
+              }}>
+                →
+              </div>
+            </div>
+
+            {/* To */}
+            <div style={{
+              padding: "11px 10px",
+              background: `${toAccent}18`,
+              border: `1.5px solid ${toAccent}66`,
+              borderRadius: 10,
+              textAlign: "center",
+              position: "relative",
+              boxShadow: `0 4px 16px ${toAccent}22`,
+            }}>
+              <div style={{
+                fontSize: 8.5, fontWeight: 800,
+                color: toAccent,
+                textTransform: "uppercase", letterSpacing: 0.8,
+                marginBottom: 5,
+              }}>
+                YENİ TAKIM
+              </div>
+              <div style={{
+                width: 7, height: 7, borderRadius: "50%",
+                background: toAccent,
+                margin: "0 auto 5px",
+                boxShadow: `0 0 10px ${toAccent}`,
+              }} />
+              <div style={{
+                fontSize: 12, fontWeight: 800,
+                color: toAccent,
+                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                maxWidth: "100%",
+              }}>
+                {toTeam.name}
+              </div>
+            </div>
+          </div>
+
+          {/* Resmi duyuru metni */}
+          <div style={{
+            position: "relative",
+            padding: "14px 14px",
+            background: "rgba(255,255,255,0.025)",
+            border: "1px solid rgba(255,255,255,0.06)",
+            borderLeft: `3px solid ${toAccent}`,
+            borderRadius: "8px",
+            marginBottom: 14,
+          }}>
+            <div style={{
+              fontSize: 9, fontWeight: 700,
+              color: "rgba(255,255,255,0.35)",
+              textTransform: "uppercase", letterSpacing: 0.8,
+              marginBottom: 6,
+            }}>
+              📢 DUYURU METNİ
+            </div>
+            <div style={{
+              fontSize: 12.5, lineHeight: 1.55,
+              color: "rgba(255,255,255,0.78)",
+              fontFamily: "'DM Sans','Georgia',serif",
+            }}>
+              {/* Vurgulu inline parçalar — playerName ve takımlar boldlanır */}
+              <span style={{ fontWeight: 800, color: "#fff" }}>"{playerName}"</span>
+              {" oyuncusu, "}
+              <span style={{ fontWeight: 700, color: fromAccent }}>"{fromTeam.name}"</span>
+              {" takımından "}
+              <span style={{ fontWeight: 800, color: toAccent }}>"{toTeam.name}"</span>
+              {" takımına transfer olmuştur."}
+            </div>
+            <div style={{
+              fontSize: 10.5, lineHeight: 1.5,
+              color: "rgba(255,255,255,0.42)",
+              marginTop: 8,
+              fontStyle: "italic",
+            }}>
+              Tüm geçmiş istatistikler ve kariyer verileri korunmuştur. İşbu bildirim tarafımızca kamuoyunun bilgisine sunulur.
+            </div>
+          </div>
+
+          {/* Alt imza */}
+          <div style={{
+            display: "flex", justifyContent: "space-between", alignItems: "center",
+            padding: "8px 4px 0",
+            borderTop: "1px dashed rgba(255,255,255,0.08)",
+            marginBottom: 14,
+          }}>
+            <div style={{
+              fontSize: 9, fontWeight: 600,
+              color: "rgba(255,255,255,0.32)",
+              letterSpacing: 0.4,
+              fontFamily: "'JetBrains Mono', monospace",
+            }}>
+              ⚽ {t("transfer_kap_signature")}
+            </div>
+            <div style={{
+              fontSize: 9, fontWeight: 700,
+              color: "rgba(34,197,94,0.7)",
+              padding: "2px 6px",
+              background: "rgba(34,197,94,0.08)",
+              border: "1px solid rgba(34,197,94,0.2)",
+              borderRadius: 3,
+              textTransform: "uppercase", letterSpacing: 0.5,
+            }}>
+              ✓ ONAYLANDI
+            </div>
+          </div>
+
+          {/* Aksiyonlar */}
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              onClick={() => { hapticLight(); onClose(); }}
+              style={{
+                flex: 1, padding: "12px",
+                borderRadius: 11,
+                border: "1px solid rgba(255,255,255,0.1)",
+                background: "rgba(255,255,255,0.04)",
+                color: "rgba(255,255,255,0.65)",
+                fontSize: 12, fontWeight: 700,
+                cursor: "pointer", fontFamily: "inherit",
+                transition: "all 0.15s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "rgba(255,255,255,0.08)";
+                e.currentTarget.style.color = "rgba(255,255,255,0.85)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "rgba(255,255,255,0.04)";
+                e.currentTarget.style.color = "rgba(255,255,255,0.65)";
+              }}
+            >
+              {t("transfer_kap_close")}
+            </button>
+            <button
+              onClick={() => { hapticMedium(); onViewSquad(); }}
+              style={{
+                flex: 1.4, padding: "12px",
+                borderRadius: 11, border: "none",
+                background: `linear-gradient(135deg, ${toAccent}, ${toAccent}cc)`,
+                color: "#0a1628",
+                fontSize: 12, fontWeight: 800,
+                cursor: "pointer", fontFamily: "inherit",
+                letterSpacing: 0.3,
+                boxShadow: `0 8px 22px ${toAccent}55`,
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                transition: "transform 0.12s",
+              }}
+              onMouseDown={(e) => { e.currentTarget.style.transform = "scale(0.97)"; }}
+              onMouseUp={(e) => { e.currentTarget.style.transform = "scale(1)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.transform = "scale(1)"; }}
+            >
+              👥 {t("transfer_kap_view")}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
@@ -722,29 +1308,91 @@ const PlayerForm = ({ player, onSave, onCancel, accent, existingPlayers = [] }) 
   const initialJersey = player?.jerseyNumber
     || (player?.id ? null : getDefaultJerseyNumber(player?.position || "ORTA SAHA", existingPlayers));
 
+  // ★ Attribute'lar — eski oyuncuda yoksa otomatik üret (geriye uyumlu)
+  const initialPosition = player?.position || "ORTA SAHA";
+  const initialRating = player?.rating || 70;
+  const initialAttributes = (player?.attributes && Object.keys(player.attributes).length > 0)
+    ? player.attributes
+    : generateDefaultAttributes(initialPosition, initialRating, player?.id || "new");
+
   const [f, sF] = useState({
     name: player?.name || "",
     surname: player?.surname || "",
-    position: player?.position || "ORTA SAHA",
-    rating: player?.rating || 70,
+    position: initialPosition,
+    rating: initialRating,
     photo: player?.photo || null,
     jerseyNumber: initialJersey,
+    attributes: initialAttributes,
+    // ★ Kullanıcı attribute'ları manuel düzenlediyse pozisyon değişince üzerine yazma
+    attributesEdited: !!player?.attributes,
   });
   const [error, setError] = useState({ name: false, surname: false, jersey: false });
+  const [showAttrPanel, setShowAttrPanel] = useState(false);
   const fr = useRef();
 
   // ★ Pozisyon değişirse, kullanıcı manuel numara girmediyse default'u güncelle
+  //   ★ Ayrıca: attribute'lar manuel düzenlenmemişse pozisyona göre yenile
   const handlePositionChange = (newPos) => {
     sF((p) => {
-      // Eğer mevcut numara, eski pozisyonun default'larından biriyse → yenile
       const oldDefaults = JERSEY_NUMBERS_BY_POSITION[p.position] || [];
       const isDefaultBased = oldDefaults.includes(p.jerseyNumber);
+
+      // Pozisyon değişti ve kullanıcı attribute'ları henüz manuel düzenlemediyse → regen
+      const newAttrs = !p.attributesEdited
+        ? generateDefaultAttributes(newPos, p.rating, player?.id || "new")
+        : p.attributes;
+
       if (isDefaultBased && !player?.id) {
-        return { ...p, position: newPos, jerseyNumber: getDefaultJerseyNumber(newPos, existingPlayers, player?.id) };
+        return { ...p, position: newPos, attributes: newAttrs, jerseyNumber: getDefaultJerseyNumber(newPos, existingPlayers, player?.id) };
       }
-      return { ...p, position: newPos };
+      return { ...p, position: newPos, attributes: newAttrs };
     });
   };
+
+  // ★ Tek attribute değiştir (spider chart üzerindeki + / − ile veya sürükleme)
+  // Aynı anda yeni overall'ı hesaplayıp rating slider'ını da senkron tut
+  // — böylece spider'ı oynatınca yukardaki bar canlı hareket eder.
+  const handleAttrChange = (key, val) => {
+    sF((p) => {
+      const newAttrs = { ...p.attributes, [key]: val };
+      const newRating = computeOverallFromAttributes(newAttrs, p.position);
+      return {
+        ...p,
+        attributes: newAttrs,
+        rating: newRating != null ? newRating : p.rating,
+        attributesEdited: true,
+      };
+    });
+    hapticSelection();
+  };
+
+  // ★ Rating slider değişince attribute'ları orantılı kaydır
+  // (FIFA/FM tarzı — kullanıcının elle düzenlediği profili korur, sadece translate eder)
+  const handleRatingChange = (newRating) => {
+    sF((p) => {
+      if (newRating === p.rating) return p;
+      const scaled = scaleAttributesToRating(p.attributes, p.position, p.rating, newRating);
+      return { ...p, rating: newRating, attributes: scaled };
+    });
+  };
+
+  // ★ Attribute'ları pozisyon defaultuna sıfırla (rating'i de hesaplanan overall'a hizala)
+  const resetAttrs = () => {
+    sF((p) => {
+      const fresh = generateDefaultAttributes(p.position, p.rating, player?.id || "new");
+      const newRating = computeOverallFromAttributes(fresh, p.position);
+      return {
+        ...p,
+        attributes: fresh,
+        rating: newRating != null ? newRating : p.rating,
+        attributesEdited: false,
+      };
+    });
+    hapticLight();
+  };
+
+  // ★ Spider'dan hesaplanan overall — kullanıcıya feedback için
+  const overallFromAttrs = computeOverallFromAttributes(f.attributes, f.position);
 
   const handleSave = () => {
     const nameOk = f.name.trim().length > 0;
@@ -759,7 +1407,9 @@ const PlayerForm = ({ player, onSave, onCancel, accent, existingPlayers = [] }) 
     }
     // ★ Numara boşsa otomatik ata (gerçi initial'da zaten atadık ama güvenli)
     const finalJersey = f.jerseyNumber || getDefaultJerseyNumber(f.position, existingPlayers, player?.id);
-    onSave({ ...player, ...f, jerseyNumber: finalJersey, id: player?.id || generateId() });
+    // ★ attributesEdited UI flag'i — kayıt ederken oyuncu objesine yazma
+    const { attributesEdited, ...formData } = f;
+    onSave({ ...player, ...formData, jerseyNumber: finalJersey, id: player?.id || generateId() });
   };
 
   const inputErrorStyle = { borderColor: "#ef4444", boxShadow: "0 0 0 1px #ef4444" };
@@ -878,9 +1528,74 @@ const PlayerForm = ({ player, onSave, onCancel, accent, existingPlayers = [] }) 
           <label style={{ ...S.label, marginBottom: 0 }}>{t("rating")}</label>
           <div style={{ background: `${ratingColor(f.rating)}22`, color: ratingColor(f.rating), padding: "2px 8px", borderRadius: 6, fontSize: 16, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", border: `1px solid ${ratingColor(f.rating)}55` }}>{f.rating}</div>
         </div>
-        <input type="range" min="40" max="99" value={f.rating} style={{ width: "100%", height: 6, borderRadius: 6, appearance: "none", outline: "none", background: `linear-gradient(to right, ${ratingColor(f.rating)} ${((f.rating - 40) / (99 - 40)) * 100}%, rgba(255,255,255,0.08) ${((f.rating - 40) / (99 - 40)) * 100}%)` }} onChange={(e) => sF((p) => ({ ...p, rating: +e.target.value }))} />
+        <input type="range" min="40" max="99" value={f.rating} style={{ width: "100%", height: 6, borderRadius: 6, appearance: "none", outline: "none", background: `linear-gradient(to right, ${ratingColor(f.rating)} ${((f.rating - 40) / (99 - 40)) * 100}%, rgba(255,255,255,0.08) ${((f.rating - 40) / (99 - 40)) * 100}%)` }} onChange={(e) => handleRatingChange(+e.target.value)} />
         <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 10, color: "rgba(255,255,255,0.25)", fontWeight: 600 }}><span>40</span><span>99</span></div>
       </div>
+
+      {/* ★ ATTRIBUTE PANELİ — açılır kapanır */}
+      <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, overflow: "hidden", marginTop: 4 }}>
+        <button
+          onClick={() => { setShowAttrPanel((v) => !v); hapticLight(); }}
+          style={{
+            width: "100%",
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            padding: "12px 14px",
+            background: "transparent", border: "none", cursor: "pointer",
+            color: "#e2e8f0", fontFamily: "inherit",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 14 }}>📊</span>
+            <div style={{ textAlign: "left" }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#e2e8f0" }}>{t("attributes_title")}</div>
+              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.45)", marginTop: 1 }}>
+                {f.attributesEdited ? t("attributes_overall") : t("attributes_auto_filled")} · {overallFromAttrs}
+              </div>
+            </div>
+          </div>
+          <span style={{
+            transform: showAttrPanel ? "rotate(180deg)" : "rotate(0deg)",
+            transition: "transform 0.2s",
+            color: "rgba(255,255,255,0.5)",
+            fontSize: 14,
+          }}>▾</span>
+        </button>
+        {showAttrPanel && (
+          <div style={{ padding: "10px 14px 16px", borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+            <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.45)", marginBottom: 12, lineHeight: 1.45 }}>
+              {t("attributes_subtitle")}
+            </div>
+            <div style={{ display: "flex", justifyContent: "center" }}>
+              <SpiderChart
+                attributes={f.attributes}
+                keys={getAttrKeys(f.position)}
+                accent={accent}
+                size={280}
+                editable={true}
+                onChange={handleAttrChange}
+              />
+            </div>
+            <div style={{ display: "flex", justifyContent: "center", marginTop: 10 }}>
+              <button
+                onClick={resetAttrs}
+                style={{
+                  padding: "5px 12px",
+                  fontSize: 10.5, fontWeight: 600,
+                  borderRadius: 6,
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  color: "rgba(255,255,255,0.5)",
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                ↺ {t("attributes_reset")}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
       <div style={{ display: "flex", gap: 9 }}>
         <button onClick={onCancel} style={{ ...S.btn, background: "rgba(255,255,255,0.06)", flex: 1 }}>{t("cancel")}</button>
         <button onClick={handleSave} style={{ ...S.btn, flex: 1, background: `linear-gradient(135deg,${accent},${accent}bb)` }}><I.Check /> {player?.id ? t("update") : t("save")}</button>
@@ -1119,6 +1834,31 @@ export default function LineupPro() {
   const [search, setSearch] = useState("");
   const [toast, setToast] = useState({ show: false, msg: "" });
   const [historyPlayer, setHistoryPlayer] = useState(null); // null | player obj — Geçmiş ekranında oyuncu profili
+  // ★ Transfer modal — { player, fromSide: "A"|"B" } ya da null
+  const [transferRequest, setTransferRequest] = useState(null);
+  // ★ Transfer sonrası KAP-tarzı bilgilendirme popup'ı için state
+  const [transferAnnouncement, setTransferAnnouncement] = useState(null);
+  // ★ Form delta map: tüm oyuncular için son maçlardan hesaplanmış form (PlayerCard rozeti için)
+  // Match history değişince yeniden hesaplansın diye history-version state ile tetikleniyor
+  const [historyVersion, setHistoryVersion] = useState(0);
+  const formDeltaMap = useMemo(() => {
+    const matches = getAllMatches();
+    if (!matches || matches.length === 0) return {};
+    const { stats } = computePlayerStats(matches);
+    const map = {};
+    Object.values(stats).forEach((s) => {
+      const d = computeForm(s);
+      if (d != null) map[s.playerId] = d;
+    });
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [historyVersion]);
+  // Match history değişince formDeltaMap'i yenile
+  useEffect(() => {
+    const fn = () => setHistoryVersion((v) => v + 1);
+    window.addEventListener("halisaha:history-updated", fn);
+    return () => window.removeEventListener("halisaha:history-updated", fn);
+  }, []);
   const milestones = useRef({ first: false, complete: false });
   const fieldRef = useRef(null);
 
@@ -1132,20 +1872,26 @@ export default function LineupPro() {
     startAds();
   }, []);
 
-  // ★ MIGRATION: Eski kayıtlı oyunculara forma numarası ata (jerseyNumber yoksa)
+  // ★ MIGRATION: Eski kayıtlı oyunculara forma numarası + attribute ata
   useEffect(() => {
     const migrateTeam = (setter) => {
       setter((tt) => {
-        const needsMigration = tt.players.some((p) => !p.jerseyNumber);
-        if (!needsMigration) return tt;
+        // Migration gereksinimi: jersey YA DA attributes eksikse
+        const needsJersey = tt.players.some((p) => !p.jerseyNumber);
+        const needsAttrs = tt.players.some((p) => !p.attributes);
+        if (!needsJersey && !needsAttrs) return tt;
+
         const updatedPlayers = [];
         for (const p of tt.players) {
-          if (p.jerseyNumber) {
-            updatedPlayers.push(p);
-          } else {
-            const num = getDefaultJerseyNumber(p.position, updatedPlayers);
-            updatedPlayers.push({ ...p, jerseyNumber: num });
+          let nextP = p;
+          // Jersey
+          if (!nextP.jerseyNumber) {
+            const num = getDefaultJerseyNumber(nextP.position, updatedPlayers);
+            nextP = { ...nextP, jerseyNumber: num };
           }
+          // Attributes — pozisyon+rating'den auto-generate
+          nextP = ensurePlayerAttributes(nextP);
+          updatedPlayers.push(nextP);
         }
         return { ...tt, players: updatedPlayers };
       });
@@ -1248,6 +1994,60 @@ export default function LineupPro() {
     hapticWarning();
     setTeam((tt) => ({ ...tt, players: tt.players.filter((x) => x.id !== id), fieldPlayers: tt.fieldPlayers.map((x) => (x === id ? null : x)), captain: tt.captain === id ? null : tt.captain }));
     toast_(t("t_deleted"));
+  };
+
+  // ★ TRANSFER — oyuncuyu diğer takıma taşı.
+  //   playerId değişmez → matchHistory'deki tüm istatistikleri korunur.
+  //   Eski takımdan tamamen çıkar (kaptan/saha pozisyonu temizlenir),
+  //   yeni takıma eklenir. Hedef takımda jersey çakışırsa otomatik yeni numara atanır.
+  const transferPlayer = (player, toSide) => {
+    const fromSide = (teamA.players.some((p) => p.id === player.id)) ? "A" : "B";
+    if (fromSide === toSide) return; // aynı takım — bir şey yapma
+
+    const fromTeamObj = fromSide === "A" ? teamA : teamB;
+    const toTeamObj = toSide === "A" ? teamA : teamB;
+
+    const fromSetter = fromSide === "A" ? setTeamA : setTeamB;
+    const toSetter = toSide === "A" ? setTeamA : setTeamB;
+    const toCurrent = toSide === "A" ? teamA : teamB;
+
+    // Hedef takımdaki oyuncularla forma çakışıyor mu?
+    let finalPlayer = player;
+    if (player.jerseyNumber && !isJerseyNumberAvailable(player.jerseyNumber, toCurrent.players, player.id)) {
+      const newNum = getDefaultJerseyNumber(player.position, toCurrent.players, player.id);
+      finalPlayer = { ...player, jerseyNumber: newNum };
+    }
+
+    // Eski takımdan çıkar
+    fromSetter((tt) => ({
+      ...tt,
+      players: tt.players.filter((x) => x.id !== player.id),
+      fieldPlayers: tt.fieldPlayers.map((x) => (x === player.id ? null : x)),
+      captain: tt.captain === player.id ? null : tt.captain,
+    }));
+
+    // Yeni takıma ekle
+    toSetter((tt) => ({
+      ...tt,
+      players: [...tt.players.filter((x) => x.id !== player.id), finalPlayer],
+    }));
+
+    hapticSuccess();
+    setTransferRequest(null);
+
+    // ★ KAP-tarzı bilgilendirme popup'ı için snapshot bilgi
+    setTransferAnnouncement({
+      player: finalPlayer,
+      fromTeam: {
+        name: fromTeamObj.name,
+        color: fromTeamObj.color,
+      },
+      toTeam: {
+        name: toTeamObj.name,
+        color: toTeamObj.color,
+      },
+      timestamp: Date.now(),
+    });
   };
 
   const autoFill = async (side) => {
@@ -1648,7 +2448,7 @@ const handleShareLineup = async () => {
               {isMatch && (<div style={{ display: "flex", gap: 4, marginBottom: 7 }}>{["A", "B"].map((s) => (<button key={s} onClick={() => setAT(s)} style={{ flex: 1, padding: "5px", borderRadius: 6, border: "none", cursor: "pointer", background: activeTeam === s ? `${(s === "A" ? teamA : teamB).color.secondary}20` : "rgba(255,255,255,0.03)", color: activeTeam === s ? (s === "A" ? teamA : teamB).color.secondary : "rgba(255,255,255,0.28)", fontSize: 11, fontWeight: 700 }}>{(s === "A" ? teamA : teamB).name}</button>))}</div>)}
               <div style={{ fontSize: 8.5, color: "rgba(255,255,255,0.22)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.9, marginBottom: 5 }}>{team.players.length ? t("drag_hint") : t("no_squad_hint")}</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                {team.players.map((p) => (<PlayerCard key={p.id} player={p} compact isOnField={onFieldIds.has(p.id)} teamColor={tc} isCaptain={team.captain === p.id} onEdit={(pl) => { setEP(pl); setSP(true); }} onDelete={deletePlayer} />))}
+                {team.players.map((p) => (<PlayerCard key={p.id} player={p} compact isOnField={onFieldIds.has(p.id)} teamColor={tc} isCaptain={team.captain === p.id} onEdit={(pl) => { setEP(pl); setSP(true); }} onDelete={deletePlayer} formDelta={formDeltaMap[p.id]} />))}
               </div>
             </div>
           </div>
@@ -1666,7 +2466,7 @@ const handleShareLineup = async () => {
             </button>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 9 }}><span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontWeight: 600 }}>{t("players_count", {n: filtered.length})}</span><span style={{ fontSize: 10, color: "rgba(255,255,255,0.22)" }}>{t("on_field", {n: onFieldIds.size})}</span></div>
             <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-              {filtered.map((p) => (<PlayerCard key={p.id} player={p} isOnField={onFieldIds.has(p.id)} teamColor={tc} isCaptain={team.captain === p.id} onToggleCaptain={(id) => toggleCaptain(activeTeam, id)} onEdit={(pl) => { setEP(pl); setSP(true); }} onDelete={deletePlayer} onShowStats={(pl) => { setHistoryPlayer(pl); setMode("history"); }} />))}
+              {filtered.map((p) => (<PlayerCard key={p.id} player={p} isOnField={onFieldIds.has(p.id)} teamColor={tc} isCaptain={team.captain === p.id} onToggleCaptain={(id) => toggleCaptain(activeTeam, id)} onEdit={(pl) => { setEP(pl); setSP(true); }} onDelete={deletePlayer} onShowStats={(pl) => { setHistoryPlayer(pl); setMode("history"); }} onTransfer={isMatch ? (pl) => setTransferRequest({ player: pl, fromSide: activeTeam }) : undefined} formDelta={formDeltaMap[p.id]} />))}
               {filtered.length === 0 && (<div style={{ textAlign: "center", padding: 38, color: "rgba(255,255,255,0.18)" }}><div style={{ fontSize: 30, marginBottom: 7 }}>⚽</div><div style={{ fontSize: 13, marginBottom: 11 }}>{t("no_player_found")}</div><button onClick={() => { setSearch(""); setEP(null); setSP(true); }} style={{ ...S.btn, width: "auto", padding: "7px 18px", fontSize: 12, display: "inline-flex", background: `linear-gradient(135deg,${team.color.primary},${team.color.secondary})` }}><I.Plus /> {t("add_player")}</button></div>)}
             </div>
             <div style={{ marginTop: 14 }}><TeamStatsCard team={team} accent={tc} /></div>
@@ -1683,6 +2483,107 @@ const handleShareLineup = async () => {
 
       {/* MODALS */}
       <Modal open={showPlayer} onClose={() => { setSP(false); setEP(null); }} title={editPlayer ? t("edit_player") : t("new_player")}><PlayerForm player={editPlayer} onSave={savePlayer} onCancel={() => { setSP(false); setEP(null); }} accent={tc} existingPlayers={team.players} /></Modal>
+
+      {/* ★ TRANSFER MODAL — basit, iki takım arasında oyuncu taşıma */}
+      <Modal open={!!transferRequest} onClose={() => setTransferRequest(null)} title={t("transfer_title")}>
+        {transferRequest && (() => {
+          const p = transferRequest.player;
+          const fromSide = transferRequest.fromSide;
+          const toSide = fromSide === "A" ? "B" : "A";
+          const toTeam = toSide === "A" ? teamA : teamB;
+          const fromTeam = fromSide === "A" ? teamA : teamB;
+          return (
+            <div style={{ display: "flex", flexDirection: "column", gap: 15 }}>
+              <div style={{
+                display: "flex", alignItems: "center", gap: 12,
+                padding: "12px",
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.06)",
+                borderRadius: 10,
+              }}>
+                <div style={{
+                  width: 44, height: 44, borderRadius: "50%",
+                  background: p.photo ? `url(${p.photo}) center/cover` : avatarColor(p.id),
+                  border: `2px solid ${ratingColor(p.rating)}`,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  color: "#fff", fontSize: 13, fontWeight: 700,
+                  fontFamily: "'Bebas Neue',sans-serif",
+                  flexShrink: 0,
+                }}>
+                  {!p.photo && getInitials(p.name, p.surname)}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ color: "#e2e8f0", fontSize: 14, fontWeight: 700 }}>
+                    {p.name} {p.surname}
+                  </div>
+                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", marginTop: 2 }}>
+                    {tPos(p.position)} · {fromTeam.name}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{
+                fontSize: 12, lineHeight: 1.5,
+                color: "rgba(255,255,255,0.55)",
+                padding: "0 4px",
+              }}>
+                {t("transfer_desc")}
+              </div>
+
+              <div style={{
+                background: `${toTeam.color.primary}15`,
+                border: `1px solid ${toTeam.color.secondary}44`,
+                borderRadius: 10,
+                padding: "10px 12px",
+                fontSize: 12,
+                color: "rgba(255,255,255,0.7)",
+                lineHeight: 1.5,
+              }}>
+                {t("transfer_confirm_desc", {
+                  name: `${p.name} ${p.surname}`,
+                  from: fromTeam.name,
+                  to: toTeam.name,
+                })}
+              </div>
+
+              <div style={{ display: "flex", gap: 9 }}>
+                <button
+                  onClick={() => setTransferRequest(null)}
+                  style={{ ...S.btn, background: "rgba(255,255,255,0.06)", flex: 1 }}
+                >
+                  {t("transfer_cancel")}
+                </button>
+                <button
+                  onClick={() => transferPlayer(p, toSide)}
+                  style={{
+                    ...S.btn,
+                    flex: 1.5,
+                    background: `linear-gradient(135deg,${toTeam.color.primary},${toTeam.color.secondary})`,
+                  }}
+                >
+                  ⇄ {t("transfer_to", { team: toTeam.name })}
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+      </Modal>
+
+      {/* ★ KAP-TARZI TRANSFER BİLGİLENDİRMESİ — transfer tamamlanınca çıkar */}
+      {transferAnnouncement && (
+        <TransferKapPopup
+          announcement={transferAnnouncement}
+          onClose={() => setTransferAnnouncement(null)}
+          onViewSquad={() => {
+            // Hedef takıma geç + kadro sekmesini aç
+            const targetSide = teamA.players.some((x) => x.id === transferAnnouncement.player.id) ? "A" : "B";
+            setAT(targetSide);
+            setTab("squad");
+            setTransferAnnouncement(null);
+          }}
+        />
+      )}
+
       <Modal open={showCaptain} onClose={() => setSC(false)} title={t("captain_select")}><CaptainSelector team={team} accent={tc} onSelect={(id) => { toggleCaptain(activeTeam, id); if (id) { setSC(false); toast_(t("t_captain_set")); } else { toast_(t("t_captain_removed")); } }} /></Modal>
       <Modal open={!!quickSelect} onClose={() => setQS(null)} title={t("select")}>{quickSelect && (<QuickSelect role={quickSelect.role} players={(quickSelect.side === "A" ? teamA : teamB).players} teamColor={(quickSelect.side === "A" ? teamA : teamB).color.secondary} onFieldIds={new Set((quickSelect.side === "A" ? teamA : teamB).fieldPlayers.filter(Boolean))} onSelect={(id) => { placePlayer(quickSelect.side, quickSelect.idx, id); setQS(null); }} />)}</Modal>
       <Modal open={!!showSettings} onClose={() => setSS(null)} title={t("team_settings")}>

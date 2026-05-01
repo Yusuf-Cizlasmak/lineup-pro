@@ -312,6 +312,67 @@ const DICT = {
     score_auto_hint: "Skor, oyuncu seçtikçe otomatik artar",
     no_player_hint: "Önce kadroya oyuncu ekle, sonra gol kaydı için onlara dokun.",
     close: "Kapat",
+
+    // ★ Player attributes (saha oyuncuları)
+    attr_pas: "Pas",
+    attr_sut: "Şut",
+    attr_hiz: "Hız",
+    attr_dribbling: "Dribbling",
+    attr_defans: "Defans",
+    attr_fizik: "Fizik",
+    // Kaleci attributes
+    attr_refleks: "Refleks",
+    attr_konum: "Konum",
+    attr_hava: "Hava",
+    attr_cikis: "Çıkış",
+    attr_uzaklik: "Uzaklık",
+    attr_ayak: "Ayak",
+
+    // ★ Attribute paneli
+    attributes_title: "Yetenekler",
+    attributes_subtitle: "Pozisyona göre otomatik önerildi — istediğin gibi düzenle",
+    attributes_reset: "Sıfırla",
+    attributes_overall: "Ortalama",
+    attributes_auto_filled: "Otomatik dolduruldu",
+
+    // ★ Form gücü
+    form_title: "Form",
+    form_blazing: "Alev Alev",
+    form_hot: "Yüksek",
+    form_avg: "Orta",
+    form_cold: "Düşük",
+    form_freezing: "Buz Gibi",
+    form_no_data: "Veri yok",
+    form_explainer: "Son 5 maçtaki gol, asist ve sonuçlardan hesaplanır.",
+    form_recent_results: "Son 5 maç",
+
+    // ★ Transfer
+    transfer_title: "Takım Değiştir",
+    transfer_desc: "Bu oyuncuyu hangi takıma taşımak istersin?",
+    transfer_to: "{team} takımına taşı",
+    transfer_same_team: "Bu oyuncu zaten {team} takımında",
+    transfer_confirm_title: "Transfer onayı",
+    transfer_confirm_desc: "{name} oyuncusu {from} takımından {to} takımına taşınacak. Tüm geçmiş istatistikleri korunur.",
+    transfer_done: "Transfer tamamlandı",
+    transfer_btn: "Takım Değiştir",
+    transfer_cancel: "Vazgeç",
+    // ★ KAP-tarzı transfer bilgilendirmesi (post-transfer popup)
+    transfer_kap_title: "KAP Bilgilendirmesi",
+    transfer_kap_subtitle: "Kamuyu Aydınlatma Bildirimi",
+    transfer_kap_announcement: "{playerName} oyuncusu, {fromTeam} takımından {toTeam} takımına transfer olmuştur.",
+    transfer_kap_meta_position: "Mevki",
+    transfer_kap_meta_rating: "Güç",
+    transfer_kap_meta_jersey: "Forma",
+    transfer_kap_close: "Tamam",
+    transfer_kap_view: "Kadroyu Gör",
+    transfer_kap_signature: "HalıSaha-Kolik · Resmi Bildirim",
+    // ★ Hover tooltipleri (PlayerCard butonları için)
+    pc_btn_captain: "Kaptan",
+    pc_btn_captain_remove: "Kaptanlığı Kaldır",
+    pc_btn_stats: "İstatistik",
+    pc_btn_transfer: "Transfer",
+    pc_btn_edit: "Düzenle",
+    pc_btn_delete: "Kaldır",
   },
   en: {
     tour_0_title: "Let's Get Started",
@@ -593,6 +654,67 @@ const DICT = {
     score_auto_hint: "Score updates automatically as you tap players",
     no_player_hint: "Add players to your squad first, then tap them to register goals.",
     close: "Close",
+
+    // ★ Player attributes (field players)
+    attr_pas: "Pass",
+    attr_sut: "Shot",
+    attr_hiz: "Pace",
+    attr_dribbling: "Dribbling",
+    attr_defans: "Defense",
+    attr_fizik: "Physical",
+    // Goalkeeper attributes
+    attr_refleks: "Reflexes",
+    attr_konum: "Positioning",
+    attr_hava: "Aerial",
+    attr_cikis: "Coming Out",
+    attr_uzaklik: "Distribution",
+    attr_ayak: "Footwork",
+
+    // ★ Attribute panel
+    attributes_title: "Attributes",
+    attributes_subtitle: "Auto-suggested by position — edit as you like",
+    attributes_reset: "Reset",
+    attributes_overall: "Overall",
+    attributes_auto_filled: "Auto-filled",
+
+    // ★ Form
+    form_title: "Form",
+    form_blazing: "On Fire",
+    form_hot: "Hot",
+    form_avg: "Average",
+    form_cold: "Cold",
+    form_freezing: "Freezing",
+    form_no_data: "No data",
+    form_explainer: "Calculated from goals, assists, and results in the last 5 matches.",
+    form_recent_results: "Last 5 matches",
+
+    // ★ Transfer
+    transfer_title: "Change Team",
+    transfer_desc: "Which team would you like to move this player to?",
+    transfer_to: "Move to {team}",
+    transfer_same_team: "Already on {team}",
+    transfer_confirm_title: "Confirm transfer",
+    transfer_confirm_desc: "{name} will be moved from {from} to {to}. All historical stats are preserved.",
+    transfer_done: "Transfer complete",
+    transfer_btn: "Change Team",
+    transfer_cancel: "Cancel",
+    // ★ KAP-style transfer announcement (post-transfer popup)
+    transfer_kap_title: "Official Announcement",
+    transfer_kap_subtitle: "Public Disclosure Notice",
+    transfer_kap_announcement: "{playerName} has been transferred from {fromTeam} to {toTeam}.",
+    transfer_kap_meta_position: "Position",
+    transfer_kap_meta_rating: "Rating",
+    transfer_kap_meta_jersey: "Jersey",
+    transfer_kap_close: "OK",
+    transfer_kap_view: "View Squad",
+    transfer_kap_signature: "HaliSaha-Kolik · Official Notice",
+    // ★ Hover tooltips (PlayerCard buttons)
+    pc_btn_captain: "Captain",
+    pc_btn_captain_remove: "Remove Captain",
+    pc_btn_stats: "Stats",
+    pc_btn_transfer: "Transfer",
+    pc_btn_edit: "Edit",
+    pc_btn_delete: "Remove",
   },
 };
 
