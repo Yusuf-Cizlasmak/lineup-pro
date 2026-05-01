@@ -9,6 +9,9 @@ import { Share } from "@capacitor/share";
 import { Filesystem, Directory } from "@capacitor/filesystem";
 import { Capacitor } from "@capacitor/core";
 import { Camera, CameraResultType, CameraSource } from "@capacitor/camera";
+import MatchResultModalNew from "./MatchResultModal";
+import MatchHistoryView from "./MatchHistory";
+import PlayerStatsView from "./PlayerStats";
 
 // ─── SCREENSHOT & SHARE UTILITY ───
 const captureAndShare = async (element, filename = "halisaha-kolik.png") => {
@@ -683,7 +686,7 @@ const Modal = ({ open, onClose, title, children }) => {
 };
 
 // ─── PLAYER CARD ───
-const PlayerCard = ({ player, onEdit, onDelete, isOnField, teamColor, compact, isCaptain, onToggleCaptain }) => {
+const PlayerCard = ({ player, onEdit, onDelete, isOnField, teamColor, compact, isCaptain, onToggleCaptain, onShowStats }) => {
   const rc = ratingColor(player.rating);
   return (
     <div draggable={!isOnField} onDragStart={(e) => { if (!isOnField) e.dataTransfer.setData("playerId", player.id); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: compact ? "7px 10px" : "10px 12px", background: isOnField ? `${teamColor}11` : "rgba(255,255,255,0.03)", borderRadius: 10, border: isOnField ? `1px solid ${teamColor}33` : "1px solid rgba(255,255,255,0.06)", cursor: isOnField ? "default" : "grab", opacity: isOnField ? 0.5 : 1, transition: "opacity 0.2s" }}>
@@ -703,6 +706,7 @@ const PlayerCard = ({ player, onEdit, onDelete, isOnField, teamColor, compact, i
       {!compact && (
         <div style={{ display: "flex", gap: 3 }}>
           {onToggleCaptain && (<button onClick={() => onToggleCaptain(player.id)} title="Kaptan yap" style={{ ...S.mini, color: isCaptain ? "#fbbf24" : "rgba(255,255,255,0.3)", background: isCaptain ? "rgba(251,191,36,0.12)" : "rgba(255,255,255,0.06)", border: isCaptain ? "1px solid rgba(251,191,36,0.3)" : "1px solid rgba(255,255,255,0.08)" }}><I.Armband /></button>)}
+          {onShowStats && (<button onClick={() => onShowStats(player)} title={t("ps_view_stats")} style={{ ...S.mini, color: "#a78bfa" }}><I.Stats /></button>)}
           <button onClick={() => onEdit?.(player)} style={S.mini}><I.Edit /></button>
           <button onClick={() => onDelete?.(player.id)} style={{ ...S.mini, color: "#f87171" }}><I.Trash /></button>
         </div>
@@ -979,98 +983,6 @@ const TeamStatsCard = ({ team, accent }) => {
   );
 };
 
-// ─── MATCH RESULT MODAL ────
-const MatchResultModal = ({ open, onClose, teamA, teamB }) => {
-  const [scoreA, setScoreA] = useState(0);
-  const [scoreB, setScoreB] = useState(0);
-  const [goals, setGoals] = useState([]);
-  const [gSide, setGSide] = useState("A");
-  const [gName, setGName] = useState("");
-  const [gMin, setGMin] = useState("");
-  const [copied, setCopied] = useState(false);
-  const scoreRef = useRef(null);
-  const acA = teamA.color.secondary;
-  const acB = teamB.color.secondary;
-  const addGoal = () => {
-    if (!gName.trim()) return;
-    hapticHeavy();
-    setGoals((g) => [...g, { side: gSide, scorer: gName.trim(), minute: gMin.trim() }]);
-    setGName(""); setGMin("");
-  };
-  const winner = scoreA > scoreB ? teamA.name : scoreB > scoreA ? teamB.name : null;
-  const buildText = () => {
-    const gA = goals.filter((g) => g.side === "A"); const gB = goals.filter((g) => g.side === "B");
-    let t = `⚽ MAÇ SONUCU\n━━━━━━━━━━━━━━━━━━\n`;
-    t += `${teamA.name.toUpperCase()}  ${scoreA} – ${scoreB}  ${teamB.name.toUpperCase()}\n━━━━━━━━━━━━━━━━━━\n`;
-    t += winner ? `🏆 Kazanan: ${winner}\n` : scoreA === scoreB && (scoreA > 0 || scoreB > 0) ? `🤝 Beraberlik\n` : "";
-    if (gA.length || gB.length) { t += `\n⚽ Goller\n`; if (gA.length) { t += `${teamA.name}:\n`; gA.forEach((g) => (t += `  • ${g.scorer}${g.minute ? " (" + g.minute + "')" : ""}\n`)); } if (gB.length) { t += `${teamB.name}:\n`; gB.forEach((g) => (t += `  • ${g.scorer}${g.minute ? " (" + g.minute + "')" : ""}\n`)); } }
-    t += `\n📱 HalıSaha-Kolik`; return t;
-  };
-
-  const share = async () => {
-    // iOS user-gesture chain için reklamı paylaşım sonrası göster
-    if (scoreRef.current) {
-      const ok = await captureAndShare(scoreRef.current, "mac-sonucu.png");
-      if (ok) { setCopied(true); setTimeout(() => setCopied(false), 2200); }
-    }
-    // Paylaşımdan sonra reklamı göster
-    setTimeout(() => { showInterstitial(); }, 500);
-  };
-
-  if (!open) return null;
-  return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 1100, background: "rgba(0,0,0,0.82)", backdropFilter: "blur(12px)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: "#0e1117", borderRadius: "22px 22px 0 0", border: "1px solid rgba(255,255,255,0.08)", width: "100%", maxWidth: 480, maxHeight: "92vh", overflow: "auto", paddingBottom: "calc(20px + env(safe-area-inset-bottom, 0px))" }}>
-        <div style={{ display: "flex", justifyContent: "center", paddingTop: 10 }}><div style={{ width: 36, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.14)" }} /></div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 20px 10px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#e2e8f0", fontSize: 16, fontWeight: 700 }}><I.Trophy /> {t("match_result")}</div>
-          <button onClick={onClose} style={{ ...S.mini, border: "none", background: "none" }}><I.X /></button>
-        </div>
-        <div ref={scoreRef} style={{ padding: "0 18px 20px", display: "flex", flexDirection: "column", gap: 18, background: "#0e1117" }}>
-          {/* Score board */}
-          <div style={{ position: "relative", borderRadius: 18, overflow: "hidden", border: "1px solid rgba(255,255,255,0.07)", padding: "20px 12px", background: "rgba(20,22,30,0.98)" }}>
-            <div style={{ position: "absolute", inset: 0, background: `linear-gradient(90deg,${acA}18,transparent 42%,transparent 58%,${acB}18)`, pointerEvents: "none" }} />
-            <div style={{ display: "flex", alignItems: "center", position: "relative" }}>
-              <div style={{ flex: 1, textAlign: "center" }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: acA, textTransform: "uppercase", fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1.2, marginBottom: 8 }}>{teamA.name}</div>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-                  <button onClick={() => setScoreA((s) => Math.max(0, s - 1))} style={{ width: 28, height: 28, borderRadius: "50%", border: `1px solid ${acA}44`, background: `${acA}14`, color: acA, fontSize: 18, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>−</button>
-                  <span style={{ fontSize: 52, fontWeight: 800, color: "#fff", fontFamily: "'Bebas Neue',sans-serif", lineHeight: 1, minWidth: 40, textAlign: "center", textShadow: `0 0 24px ${acA}55` }}>{scoreA}</span>
-                  <button onClick={() => setScoreA((s) => s + 1)} style={{ width: 28, height: 28, borderRadius: "50%", border: `1px solid ${acA}44`, background: `${acA}14`, color: acA, fontSize: 18, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>+</button>
-                </div>
-              </div>
-              <div style={{ padding: "0 6px", textAlign: "center" }}><div style={{ fontSize: 10, color: "rgba(255,255,255,0.18)", fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 2 }}>–</div></div>
-              <div style={{ flex: 1, textAlign: "center" }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: acB, textTransform: "uppercase", fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1.2, marginBottom: 8 }}>{teamB.name}</div>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-                  <button onClick={() => setScoreB((s) => Math.max(0, s - 1))} style={{ width: 28, height: 28, borderRadius: "50%", border: `1px solid ${acB}44`, background: `${acB}14`, color: acB, fontSize: 18, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>−</button>
-                  <span style={{ fontSize: 52, fontWeight: 800, color: "#fff", fontFamily: "'Bebas Neue',sans-serif", lineHeight: 1, minWidth: 40, textAlign: "center", textShadow: `0 0 24px ${acB}55` }}>{scoreB}</span>
-                  <button onClick={() => setScoreB((s) => s + 1)} style={{ width: 28, height: 28, borderRadius: "50%", border: `1px solid ${acB}44`, background: `${acB}14`, color: acB, fontSize: 18, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>+</button>
-                </div>
-              </div>
-            </div>
-            {(scoreA > 0 || scoreB > 0) && (<div style={{ textAlign: "center", marginTop: 12, fontSize: 13, fontWeight: 700, color: winner ? "#fbbf24" : "rgba(255,255,255,0.45)", letterSpacing: 0.3 }}>{winner ? t("winner", {name: winner}) : t("draw")}</div>)}
-          </div>
-          {/* Goals */}
-          <div>
-            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>{t("goals")} <span style={{ color: "rgba(255,255,255,0.2)", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>{t("optional")}</span></div>
-            <div style={{ display: "flex", gap: 5, marginBottom: 8 }}>
-              <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: "1px solid rgba(255,255,255,0.08)", flexShrink: 0 }}>
-                {["A", "B"].map((s) => { const ac = s === "A" ? acA : acB; return (<button key={s} onClick={() => setGSide(s)} style={{ padding: "7px 10px", border: "none", cursor: "pointer", fontSize: 10, fontWeight: 700, background: gSide === s ? `${ac}20` : "transparent", color: gSide === s ? ac : "rgba(255,255,255,0.28)" }}>{s === "A" ? teamA.name.slice(0, 5) : teamB.name.slice(0, 5)}</button>); })}
-              </div>
-              <input list="scorer-opts" value={gName} onChange={(e) => setGName(e.target.value)} placeholder={t("scorer_ph")} onKeyDown={(e) => e.key === "Enter" && addGoal()} style={{ ...S.input, flex: 1, fontSize: 12, padding: "7px 10px" }} />
-              <datalist id="scorer-opts">{(gSide === "A" ? teamA : teamB).players.map((p) => (<option key={p.id} value={`${p.name} ${p.surname}`} />))}</datalist>
-              <input value={gMin} onChange={(e) => setGMin(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addGoal()} type="number" min="1" max="120" placeholder="'" style={{ ...S.input, width: 46, fontSize: 12, padding: "7px 6px", textAlign: "center" }} />
-              <button onClick={addGoal} style={{ ...S.mini, padding: "7px 9px", borderRadius: 8, color: gSide === "A" ? acA : acB, border: `1px solid ${gSide === "A" ? acA : acB}33`, background: gSide === "A" ? `${acA}14` : `${acB}14` }}><I.Plus /></button>
-            </div>
-            {goals.length > 0 && (<div style={{ display: "flex", flexDirection: "column", gap: 4 }}>{goals.map((g, i) => (<div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", background: "rgba(255,255,255,0.03)", borderRadius: 8, borderLeft: `3px solid ${g.side === "A" ? acA : acB}` }}><span style={{ fontSize: 14 }}>⚽</span><span style={{ flex: 1, fontSize: 13, color: "#e2e8f0", fontWeight: 600 }}>{g.scorer}</span>{g.minute && (<span style={{ fontSize: 11, color: "rgba(255,255,255,0.32)", fontFamily: "'JetBrains Mono',monospace" }}>{g.minute}'</span>)}<span style={{ fontSize: 9.5, color: g.side === "A" ? acA : acB, fontWeight: 700, letterSpacing: 0.3 }}>{g.side === "A" ? teamA.name.slice(0, 8) : teamB.name.slice(0, 8)}</span><button onClick={() => setGoals((gl) => gl.filter((_, j) => j !== i))} style={{ ...S.mini, padding: 2, border: "none", background: "none", color: "#f87171" }}>×</button></div>))}</div>)}
-          </div>
-          <button onClick={share} style={{ ...S.btn, borderRadius: 13, padding: "14px", fontSize: 15, letterSpacing: 0.4, background: copied ? "linear-gradient(135deg,#059669,#10b981)" : "linear-gradient(135deg,#7c3aed,#a855f7)", boxShadow: copied ? "0 8px 24px rgba(5,150,105,0.35)" : "0 8px 28px rgba(124,58,237,0.38)" }}><I.Share />{copied ? t("copied") : t("share_result")}</button>
-        </div>
-      </div>
-    </div>
-  );
-};
 
 // ─── APP SETTINGS MODAL (Genel ayarlar — Tanıtım, dil, haptik, takım) ───
 const AppSettingsModal = ({ open, onClose, onReplayOnboarding, onReplayTour, onOpenTeamSettings, hapticsOn, onToggleHaptics, lang }) => {
@@ -1206,6 +1118,7 @@ export default function LineupPro() {
   const [quickSelect, setQS] = useState(null);
   const [search, setSearch] = useState("");
   const [toast, setToast] = useState({ show: false, msg: "" });
+  const [historyPlayer, setHistoryPlayer] = useState(null); // null | player obj — Geçmiş ekranında oyuncu profili
   const milestones = useRef({ first: false, complete: false });
   const fieldRef = useRef(null);
 
@@ -1258,7 +1171,7 @@ export default function LineupPro() {
     const anyModalOpen =
       showPlayer || showCaptain || showAppSettings || showResult ||
       !!showSettings || !!quickSelect || tourActive || onbActive;
-    const onModeSelect = mode === null;
+    const onModeSelect = mode === null || mode === "history";
 
     if (onModeSelect && !anyModalOpen) {
       // ★ SDK init için kısa bir tampon — açılışta yarışı önler
@@ -1431,6 +1344,39 @@ const handleShareLineup = async () => {
   `;
 
   // ══════════════════════════════════════════════
+  // ══ HISTORY MODE — Geçmiş Maçlar / Oyuncu Profil
+  // ══════════════════════════════════════════════
+  if (mode === "history") {
+    if (historyPlayer) {
+      // Aktif oyuncuyu hangi takıma ait ise onun rengini al
+      const inA = teamA.players.find((p) => p.id === historyPlayer.id);
+      const inB = teamB.players.find((p) => p.id === historyPlayer.id);
+      const profileAccent = inA ? teamA.color.secondary : inB ? teamB.color.secondary : "#34d399";
+      return (
+        <>
+          <style>{globalCSS}</style>
+          <PlayerStatsView
+            player={historyPlayer}
+            accent={profileAccent}
+            onBack={() => setHistoryPlayer(null)}
+          />
+        </>
+      );
+    }
+    return (
+      <>
+        <style>{globalCSS}</style>
+        <MatchHistoryView
+          teamA={teamA}
+          teamB={teamB}
+          onBack={() => setMode(null)}
+          onOpenPlayerStats={(player) => setHistoryPlayer(player)}
+        />
+      </>
+    );
+  }
+
+  // ══════════════════════════════════════════════
   // ══ MODE SELECT SCREEN
   // ══════════════════════════════════════════════
   if (!mode) return (
@@ -1453,10 +1399,19 @@ const handleShareLineup = async () => {
         <div style={{ fontSize: 10, color: "rgba(255,255,255,0.15)", fontWeight: 600, letterSpacing: 2, textTransform: "uppercase", marginBottom: 32, animation: "fadeUp 0.45s 0.2s both" }} />
           <div style={{ display: "flex", flexDirection: "column", gap: 12, width: "100%", maxWidth: 360 }}>
             {[
-              { key: "myteam", icon: <I.Shield />, col: "#34d399", bg: "rgba(5,150,105,0.12)", bd: "rgba(52,211,153,0.2)", title: t("mode_myteam_title"), sub: t("mode_myteam_sub"), detail: t("mode_myteam_detail") },
-              { key: "match", icon: <I.Trophy />, col: "#fbbf24", bg: "rgba(245,158,11,0.12)", bd: "rgba(251,191,36,0.2)", title: t("mode_match_title"), sub: t("mode_match_sub"), detail: t("mode_match_detail") },
+              { key: "myteam",  icon: <I.Shield />,  col: "#34d399", bg: "rgba(5,150,105,0.12)",  bd: "rgba(52,211,153,0.2)",  title: t("mode_myteam_title"),  sub: t("mode_myteam_sub"),  detail: t("mode_myteam_detail") },
+              { key: "match",   icon: <I.Trophy />,  col: "#fbbf24", bg: "rgba(245,158,11,0.12)", bd: "rgba(251,191,36,0.2)",  title: t("mode_match_title"),   sub: t("mode_match_sub"),   detail: t("mode_match_detail") },
+              { key: "history", icon: <I.Stats />,   col: "#a78bfa", bg: "rgba(124,58,237,0.12)", bd: "rgba(167,139,250,0.22)", title: t("mode_history_title"), sub: t("mode_history_sub"), detail: t("mode_history_detail") },
             ].map((m, i) => (
-              <button key={m.key} data-tour={m.key === "myteam" ? "mode-myteam" : undefined} onClick={() => handleModeSelect(m.key)} style={{ padding: "18px 20px", borderRadius: 16, background: m.bg, border: `1px solid ${m.bd}`, cursor: "pointer", display: "flex", alignItems: "center", gap: 14, textAlign: "left", animation: `fadeUp 0.45s ${0.24 + i * 0.08}s both`, transition: "transform 0.15s, box-shadow 0.15s" }}>
+              <button
+                key={m.key}
+                data-tour={m.key === "myteam" ? "mode-myteam" : undefined}
+                onClick={() => {
+                  if (m.key === "history") { hapticMedium(); setMode("history"); }
+                  else { handleModeSelect(m.key); }
+                }}
+                style={{ padding: "18px 20px", borderRadius: 16, background: m.bg, border: `1px solid ${m.bd}`, cursor: "pointer", display: "flex", alignItems: "center", gap: 14, textAlign: "left", animation: `fadeUp 0.45s ${0.24 + i * 0.08}s both`, transition: "transform 0.15s, box-shadow 0.15s" }}
+              >
                 <div style={{ width: 48, height: 48, borderRadius: 13, background: `${m.col}22`, display: "flex", alignItems: "center", justifyContent: "center", color: m.col, flexShrink: 0 }}>{m.icon}</div>
                 <div style={{ flex: 1 }}>
                   <div style={{ color: m.col, fontSize: 15, fontWeight: 700, marginBottom: 2 }}>{m.title}</div>
@@ -1597,7 +1552,7 @@ const handleShareLineup = async () => {
             </button>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 9 }}><span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontWeight: 600 }}>{t("players_count", {n: filtered.length})}</span><span style={{ fontSize: 10, color: "rgba(255,255,255,0.22)" }}>{t("on_field", {n: onFieldIds.size})}</span></div>
             <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-              {filtered.map((p) => (<PlayerCard key={p.id} player={p} isOnField={onFieldIds.has(p.id)} teamColor={tc} isCaptain={team.captain === p.id} onToggleCaptain={(id) => toggleCaptain(activeTeam, id)} onEdit={(pl) => { setEP(pl); setSP(true); }} onDelete={deletePlayer} />))}
+              {filtered.map((p) => (<PlayerCard key={p.id} player={p} isOnField={onFieldIds.has(p.id)} teamColor={tc} isCaptain={team.captain === p.id} onToggleCaptain={(id) => toggleCaptain(activeTeam, id)} onEdit={(pl) => { setEP(pl); setSP(true); }} onDelete={deletePlayer} onShowStats={(pl) => { setHistoryPlayer(pl); setMode("history"); }} />))}
               {filtered.length === 0 && (<div style={{ textAlign: "center", padding: 38, color: "rgba(255,255,255,0.18)" }}><div style={{ fontSize: 30, marginBottom: 7 }}>⚽</div><div style={{ fontSize: 13, marginBottom: 11 }}>{t("no_player_found")}</div><button onClick={() => { setSearch(""); setEP(null); setSP(true); }} style={{ ...S.btn, width: "auto", padding: "7px 18px", fontSize: 12, display: "inline-flex", background: `linear-gradient(135deg,${team.color.primary},${team.color.secondary})` }}><I.Plus /> {t("add_player")}</button></div>)}
             </div>
             <div style={{ marginTop: 14 }}><TeamStatsCard team={team} accent={tc} /></div>
@@ -1627,7 +1582,15 @@ const handleShareLineup = async () => {
         ); })()}
       </Modal>
 
-      <MatchResultModal open={showResult} onClose={() => setSR(false)} teamA={teamA} teamB={teamB} />
+      <MatchResultModalNew
+        open={showResult}
+        onClose={() => setSR(false)}
+        teamA={teamA}
+        teamB={teamB}
+        isMatch={isMatch}
+        captureAndShare={captureAndShare}
+        toast={toast_}
+      />
       <AppSettingsModal
         open={showAppSettings}
         onClose={() => setShowAppSettings(false)}
