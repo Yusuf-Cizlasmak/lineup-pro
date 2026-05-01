@@ -25,7 +25,16 @@ workflows:
 
     scripts:
 
+      - name: Clean previous build
+        script: |
+          rm -rf node_modules build
+          npm cache clean --force || true
+
+    
+
       - name: Install dependencies
+
+      
         script: |
           npm install
           npm install \

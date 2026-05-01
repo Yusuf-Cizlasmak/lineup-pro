@@ -1163,7 +1163,7 @@ export default function LineupPro() {
       return () => clearTimeout(timer);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // sadece ilk mount — bağımlılıklar kasıtlı olarak boş
+  }, []); 
 
 
   // ★ Banner kontrolü — SADECE mode select ekranında ve hiçbir modal/tour/onboarding açık değilken görünsün
