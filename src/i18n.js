@@ -299,6 +299,19 @@ const DICT = {
 
     // Form chart
     ps_form_chart: "Form Grafiği (Son 10 Maç)",
+
+    // Save success popup
+    save_success_title: "Maç Kaydedildi! 🎉",
+    save_success_desc: "Maç geçmişine başarıyla eklendi. İstatistiklerin güncellendi.",
+    save_success_view: "Geçmişi Gör",
+    save_success_close: "Kapat",
+    save_success_events: "olay",
+    match_saving: "Kaydediliyor...",
+
+    // Score hint
+    score_auto_hint: "Skor, oyuncu seçtikçe otomatik artar",
+    no_player_hint: "Önce kadroya oyuncu ekle, sonra gol kaydı için onlara dokun.",
+    close: "Kapat",
   },
   en: {
     tour_0_title: "Let's Get Started",
@@ -567,6 +580,19 @@ const DICT = {
 
     // Form chart
     ps_form_chart: "Form (Last 10 Matches)",
+
+    // Save success popup
+    save_success_title: "Match Saved! 🎉",
+    save_success_desc: "Successfully added to your match history. Stats updated.",
+    save_success_view: "View History",
+    save_success_close: "Close",
+    save_success_events: "events",
+    match_saving: "Saving...",
+
+    // Score hint
+    score_auto_hint: "Score updates automatically as you tap players",
+    no_player_hint: "Add players to your squad first, then tap them to register goals.",
+    close: "Close",
   },
 };
 

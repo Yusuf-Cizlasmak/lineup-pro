@@ -284,7 +284,8 @@ const FlipScore = ({ value, color }) => {
 };
 
 // Score control with flip
-const ScoreControl = ({ value, onChange, color, name }) => (
+// Score display only — manuel +/− kaldırıldı, golleri oyuncu seçerek ekle
+const ScoreControl = ({ value, color, name }) => (
   <div style={{ flex: 1, textAlign: "center", minWidth: 0 }}>
     <div style={{
       fontSize: 10, fontWeight: 700, color, textTransform: "uppercase",
@@ -295,26 +296,8 @@ const ScoreControl = ({ value, onChange, color, name }) => (
     }}>
       {name}
     </div>
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-      <button
-        onClick={() => { hapticLight(); onChange(Math.max(0, value - 1)); }}
-        style={{
-          width: 30, height: 30, borderRadius: "50%",
-          border: `1px solid ${color}44`, background: `${color}14`,
-          color, fontSize: 18, fontWeight: 700, cursor: "pointer",
-          display: "flex", alignItems: "center", justifyContent: "center",
-        }}
-      >−</button>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
       <FlipScore value={value} color={color} />
-      <button
-        onClick={() => { hapticMedium(); onChange(value + 1); }}
-        style={{
-          width: 30, height: 30, borderRadius: "50%",
-          border: `1px solid ${color}44`, background: `${color}14`,
-          color, fontSize: 18, fontWeight: 700, cursor: "pointer",
-          display: "flex", alignItems: "center", justifyContent: "center",
-        }}
-      >+</button>
     </div>
   </div>
 );
@@ -395,6 +378,7 @@ export default function MatchResultModal({
   open, onClose, teamA, teamB, isMatch,
   captureAndShare,
   toast,
+  onNavigateToHistory,
 }) {
   const [scoreA, setScoreA] = useState(0);
   const [scoreB, setScoreB] = useState(0);
@@ -415,6 +399,8 @@ export default function MatchResultModal({
   const [showMvp, setShowMvp] = useState(false);
   const [mvpId, setMvpId] = useState(null);
   const [saved, setSaved] = useState(false);
+  const [showSuccessPopup, setShowSuccessPopup] = useState(false);
+  const [savedSummary, setSavedSummary] = useState(null);
   const [showSaveReminder, setShowSaveReminder] = useState(false);
   const scoreRef = useRef(null);
   const teamAScoreRef = useRef(null);
@@ -436,6 +422,8 @@ export default function MatchResultModal({
       setMvpId(null);
       setSaved(false);
       setShowSaveReminder(false);
+      setShowSuccessPopup(false);
+      setSavedSummary(null);
       setHatTrickBurst(null);
     }
   }, [open]);
@@ -622,14 +610,30 @@ export default function MatchResultModal({
     });
     saveMatch(match);
     setSaved(true);
-    toast?.(t("match_saved"));
 
+    // Özet bilgileri kaydet — popup'ta gösterilecek
+    setSavedSummary({
+      scoreA, scoreB,
+      teamAName: teamA.name,
+      teamBName: teamB.name,
+      eventsCount: events.length,
+      mvpName: mvpId ? (() => {
+        const all = [...teamA.players, ...teamB.players];
+        const mvp = all.find((p) => p.id === mvpId);
+        return mvp ? `${mvp.name} ${mvp.surname}` : null;
+      })() : null,
+    });
+
+    // Başarı pop-up'ı göster — paylaşmadan veya paylaştıktan sonra
     if (alsoShare && scoreRef.current && captureAndShare) {
       setTimeout(async () => {
         await captureAndShare(scoreRef.current, "mac-sonucu.png");
+        setShowSuccessPopup(true);
         setTimeout(() => { showInterstitial(); }, 500);
       }, 250);
     } else {
+      // Hemen popup
+      setTimeout(() => setShowSuccessPopup(true), 200);
       setTimeout(() => { showInterstitial(); }, 500);
     }
   };
@@ -677,6 +681,20 @@ export default function MatchResultModal({
         @keyframes cascadeInModal {
           from { opacity: 0; transform: translateX(-12px); }
           to { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes successPopIn {
+          0% { transform: scale(0.7) translateY(20px); opacity: 0; }
+          60% { transform: scale(1.04) translateY(-2px); opacity: 1; }
+          100% { transform: scale(1) translateY(0); opacity: 1; }
+        }
+        @keyframes successCheckIn {
+          0% { transform: scale(0) rotate(-30deg); opacity: 0; }
+          70% { transform: scale(1.2) rotate(8deg); opacity: 1; }
+          100% { transform: scale(1) rotate(0); opacity: 1; }
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
         }
       `}</style>
 
@@ -757,7 +775,7 @@ export default function MatchResultModal({
               }} />
               <div style={{ display: "flex", alignItems: "center", position: "relative" }}>
                 <div ref={teamAScoreRef} style={{ flex: 1 }}>
-                  <ScoreControl value={scoreA} onChange={setScoreA} color={acA} name={teamA.name} />
+                  <ScoreControl value={scoreA} color={acA} name={teamA.name} />
                 </div>
                 <div style={{ padding: "0 6px" }}>
                   <div style={{
@@ -767,7 +785,7 @@ export default function MatchResultModal({
                 </div>
                 {isMatch ? (
                   <div ref={teamBScoreRef} style={{ flex: 1 }}>
-                    <ScoreControl value={scoreB} onChange={setScoreB} color={acB} name={teamB.name} />
+                    <ScoreControl value={scoreB} color={acB} name={teamB.name} />
                   </div>
                 ) : (
                   <div style={{ flex: 1, textAlign: "center", color: "rgba(255,255,255,0.18)", fontSize: 12 }}>
@@ -775,7 +793,7 @@ export default function MatchResultModal({
                   </div>
                 )}
               </div>
-              {(scoreA > 0 || scoreB > 0) && (
+              {(scoreA > 0 || scoreB > 0) ? (
                 <div style={{
                   textAlign: "center", marginTop: 12,
                   fontSize: 13, fontWeight: 700,
@@ -783,6 +801,15 @@ export default function MatchResultModal({
                   letterSpacing: 0.3,
                 }}>
                   {winner ? t("winner", { name: winnerName }) : (scoreA === scoreB && (scoreA > 0)) ? t("draw") : ""}
+                </div>
+              ) : (
+                <div style={{
+                  textAlign: "center", marginTop: 12,
+                  fontSize: 10.5, fontWeight: 600,
+                  color: "rgba(255,255,255,0.35)",
+                  letterSpacing: 0.3,
+                }}>
+                  ⚽ {t("score_auto_hint")}
                 </div>
               )}
             </div>
@@ -969,18 +996,17 @@ export default function MatchResultModal({
             </div>
           )}
 
-          {saved && (
+          {saved && !showSuccessPopup && (
             <div style={{ padding: "0 18px" }}>
               <div style={{
                 padding: "13px",
                 borderRadius: 12,
-                background: "linear-gradient(135deg,rgba(5,150,105,0.18),rgba(16,185,129,0.18))",
-                border: "1px solid rgba(52,211,153,0.3)",
-                color: "#34d399",
-                fontSize: 13, fontWeight: 700,
+                background: "rgba(255,255,255,0.04)",
+                color: "rgba(255,255,255,0.6)",
+                fontSize: 12, fontWeight: 600,
                 textAlign: "center",
               }}>
-                ✓ {t("match_saved")}
+                ⏳ {t("match_saving")}
               </div>
             </div>
           )}
@@ -1054,31 +1080,30 @@ export default function MatchResultModal({
             </div>
 
             {pickerTeam.players.length === 0 ? (
-              <div style={{ padding: "24px 20px", textAlign: "center", color: "rgba(255,255,255,0.4)", fontSize: 13 }}>
-                {t("no_player_in_squad")}
-                <div style={{ marginTop: 14 }}>
-                  <button
-                    onClick={() => {
-                      hapticMedium();
-                      if (pickerSide === "A") setScoreA((s) => s + 1);
-                      else setScoreB((s) => s + 1);
-                      setConfettiColor(pickerAccent);
-                      setConfettiTick((x) => x + 1);
-                      closePicker();
-                    }}
-                    style={{
-                      padding: "10px 18px",
-                      borderRadius: 10, border: "none",
-                      background: pickerAccent, color: "#0a1628",
-                      fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
-                    }}
-                  >
-                    +1 (Manuel)
-                  </button>
-                  <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", marginTop: 8 }}>
-                    {t("manual_score_hint")}
-                  </div>
+              <div style={{ padding: "24px 20px", textAlign: "center" }}>
+                <div style={{ fontSize: 32, marginBottom: 8, opacity: 0.6 }}>⚠️</div>
+                <div style={{
+                  fontSize: 13, color: "rgba(255,255,255,0.6)", fontWeight: 600,
+                  marginBottom: 8,
+                }}>
+                  {t("no_player_in_squad")}
                 </div>
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginBottom: 16, lineHeight: 1.5 }}>
+                  {t("no_player_hint")}
+                </div>
+                <button
+                  onClick={closePicker}
+                  style={{
+                    padding: "10px 22px",
+                    borderRadius: 10,
+                    border: "1px solid rgba(255,255,255,0.1)",
+                    background: "rgba(255,255,255,0.04)",
+                    color: "rgba(255,255,255,0.7)",
+                    fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                  }}
+                >
+                  {t("close")}
+                </button>
               </div>
             ) : (
               <>
@@ -1416,6 +1441,145 @@ export default function MatchResultModal({
                 }}
               >
                 ⚽ {t("save_reminder_continue")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MAÇ KAYDEDİLDİ — BAŞARI POP-UP */}
+      {showSuccessPopup && savedSummary && (
+        <div
+          style={{
+            position: "fixed", inset: 0, zIndex: 1400,
+            background: "rgba(0,0,0,0.88)", backdropFilter: "blur(16px)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: 20,
+            animation: "fadeIn 0.25s",
+          }}
+        >
+          <div
+            style={{
+              background: "linear-gradient(160deg, #14532d, #0e1117 60%)",
+              borderRadius: 22,
+              border: "1px solid rgba(52,211,153,0.4)",
+              padding: "26px 22px 22px",
+              maxWidth: 380, width: "100%",
+              textAlign: "center",
+              animation: "successPopIn 0.5s cubic-bezier(.34,1.56,.64,1)",
+              boxShadow: "0 20px 80px rgba(0,0,0,0.7), 0 0 60px rgba(52,211,153,0.2)",
+              position: "relative", overflow: "hidden",
+            }}
+          >
+            {/* Glow */}
+            <div style={{
+              position: "absolute",
+              top: -50, left: "50%", transform: "translateX(-50%)",
+              width: 200, height: 100,
+              background: "radial-gradient(ellipse, rgba(52,211,153,0.4) 0%, transparent 70%)",
+              pointerEvents: "none",
+            }} />
+
+            <div style={{
+              position: "relative",
+              fontSize: 56,
+              marginBottom: 6,
+              animation: "successCheckIn 0.6s 0.2s both",
+            }}>
+              ✅
+            </div>
+
+            <div style={{
+              fontSize: 18, fontWeight: 800, color: "#fff",
+              marginBottom: 6, position: "relative",
+            }}>
+              {t("save_success_title")}
+            </div>
+
+            <div style={{
+              fontSize: 12, color: "rgba(255,255,255,0.55)",
+              marginBottom: 18, lineHeight: 1.5, position: "relative",
+            }}>
+              {t("save_success_desc")}
+            </div>
+
+            {/* Mini özet kart */}
+            <div style={{
+              padding: "14px 12px",
+              background: "rgba(0,0,0,0.4)",
+              borderRadius: 12,
+              border: "1px solid rgba(255,255,255,0.06)",
+              marginBottom: 18,
+              position: "relative",
+            }}>
+              <div style={{
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+                marginBottom: 6,
+              }}>
+                <span style={{
+                  fontSize: 12, fontWeight: 700, color: "#e2e8f0",
+                  maxWidth: 100,
+                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                }}>{savedSummary.teamAName}</span>
+                <span style={{
+                  fontSize: 28, fontWeight: 800, color: "#fbbf24",
+                  fontFamily: "'Bebas Neue', sans-serif", lineHeight: 1,
+                }}>
+                  {savedSummary.scoreA} – {savedSummary.scoreB}
+                </span>
+                <span style={{
+                  fontSize: 12, fontWeight: 700, color: "#e2e8f0",
+                  maxWidth: 100,
+                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                }}>{savedSummary.teamBName}</span>
+              </div>
+              {(savedSummary.eventsCount > 0 || savedSummary.mvpName) && (
+                <div style={{
+                  display: "flex", justifyContent: "center", gap: 12,
+                  fontSize: 10.5, color: "rgba(255,255,255,0.5)", fontWeight: 600,
+                  marginTop: 6,
+                }}>
+                  {savedSummary.eventsCount > 0 && <span>⚽ {savedSummary.eventsCount} {t("save_success_events")}</span>}
+                  {savedSummary.mvpName && <span>⭐ {savedSummary.mvpName}</span>}
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: "flex", gap: 8, position: "relative" }}>
+              <button
+                onClick={() => { hapticLight(); setShowSuccessPopup(false); onClose(); }}
+                style={{
+                  flex: 1, padding: "12px",
+                  borderRadius: 11,
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  background: "rgba(255,255,255,0.04)",
+                  color: "rgba(255,255,255,0.65)",
+                  fontSize: 12, fontWeight: 700,
+                  cursor: "pointer", fontFamily: "inherit",
+                }}
+              >
+                {t("save_success_close")}
+              </button>
+              <button
+                onClick={() => {
+                  hapticMedium();
+                  setShowSuccessPopup(false);
+                  if (onNavigateToHistory) onNavigateToHistory();
+                  else onClose();
+                }}
+                style={{
+                  flex: 1.6, padding: "12px",
+                  borderRadius: 11, border: "none",
+                  background: "linear-gradient(135deg, #10b981, #34d399)",
+                  color: "#0a1628",
+                  fontSize: 12, fontWeight: 800,
+                  cursor: "pointer", fontFamily: "inherit",
+                  letterSpacing: 0.3,
+                  boxShadow: "0 8px 22px rgba(52,211,153,0.4)",
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+                }}
+              >
+                📚 {t("save_success_view")}
               </button>
             </div>
           </div>

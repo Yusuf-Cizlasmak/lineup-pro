@@ -1565,8 +1565,42 @@ const handleShareLineup = async () => {
                   </div>
                 ); })}
               </div>
-              <div style={{ display: "flex", gap: 2 }}>
-                {(isMatch ? ["A", "B"] : ["A"]).map((s) => (<button key={`af${s}`} onClick={() => autoFill(s)} style={{ ...S.mini, padding: "4px 6px", fontSize: 9, fontWeight: 800, gap: 3, display: "flex", alignItems: "center", color: (s === "A" ? teamA : teamB).color.secondary, border: `1px solid ${(s === "A" ? teamA : teamB).color.secondary}33` }}><I.Zap />{isMatch ? s : t("auto_fill")}</button>))}
+              <div style={{ display: "flex", gap: 4 }}>
+                {(isMatch ? ["A", "B"] : ["A"]).map((s) => {
+                  const tm = s === "A" ? teamA : teamB;
+                  // Takım isminin ilk 2 büyük harfi (örn "Manchester" → "MA", "Real Madrid" → "RM")
+                  const teamAbbr = (() => {
+                    const parts = (tm.name || "").trim().split(/\s+/).filter(Boolean);
+                    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+                    if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
+                    return s; // fallback "A"/"B"
+                  })();
+                  return (
+                    <button
+                      key={`af${s}`}
+                      onClick={() => autoFill(s)}
+                      style={{
+                        ...S.mini,
+                        padding: "5px 9px",
+                        fontSize: 10,
+                        fontWeight: 800,
+                        gap: 4,
+                        display: "flex",
+                        alignItems: "center",
+                        color: tm.color.secondary,
+                        border: `1px solid ${tm.color.secondary}44`,
+                        background: `${tm.color.secondary}10`,
+                        borderRadius: 8,
+                        letterSpacing: 0.5,
+                      }}
+                    >
+                      <I.Zap />
+                      <span style={{ fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>
+                        {isMatch ? teamAbbr : t("auto_fill")}
+                      </span>
+                    </button>
+                  );
+                })}
                 <button onClick={() => { clearField("A"); if (isMatch) clearField("B"); }} style={{ ...S.mini, padding: 5, color: "#f87171" }}><I.Reset /></button>
               </div>
             </div>
@@ -1669,6 +1703,7 @@ const handleShareLineup = async () => {
         isMatch={isMatch}
         captureAndShare={captureAndShare}
         toast={toast_}
+        onNavigateToHistory={() => { setSR(false); setMode("history"); }}
       />
       <AppSettingsModal
         open={showAppSettings}
