@@ -5,7 +5,7 @@
 import React, { useMemo } from "react";
 import { t, tPos } from "./i18n";
 import { hapticLight } from "./haptics";
-import { getAllMatches, getPlayerStats } from "./matchHistory";
+import { getAllMatches, getPlayerStats } from "./matchHistoryStore";
 
 const getInitials = (n, s) => {
   const name = (n || "").trim();

@@ -6,7 +6,7 @@
 import React, { useState, useRef, useMemo, useEffect } from "react";
 import { t, tPos } from "./i18n";
 import { hapticLight, hapticMedium, hapticHeavy, hapticSuccess, hapticSelection } from "./haptics";
-import { saveMatch, buildMatch, newEvent } from "./matchHistory";
+import { saveMatch, buildMatch, newEvent } from "./matchHistoryStore";
 import { showInterstitial } from "./admob";
 
 const getInitials = (n, s) => {

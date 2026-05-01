@@ -9,7 +9,7 @@ import { hapticLight, hapticWarning, hapticSelection } from "./haptics";
 import {
   getAllMatches, deleteMatch,
   computeLeaderboards, summarizeMatch,
-} from "./matchHistory";
+} from "./matchHistoryStore";
 
 // ─── Tarih formatla — detaylı ───
 const pad2 = (n) => String(n).padStart(2, "0");
