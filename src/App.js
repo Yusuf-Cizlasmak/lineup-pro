@@ -12,7 +12,8 @@ const RATED_KEY = "halisaha_rated";
 export default function App() {
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showRate, setShowRate] = useState(false);
-  const [tourActive, setTourActive] = useState(false); // ★ Tek Tour instance burada
+  const [tourActive, setTourActive] = useState(false); // ★ Ana tur (takım kurulum)
+  const [matchEndTourActive, setMatchEndTourActive] = useState(false); // ★ Maç bitir mini-tour
 
   useEffect(() => {
     // ── Onboarding kontrolü ──
@@ -38,13 +39,18 @@ export default function App() {
     const onReplay = () => setShowOnboarding(true);
     window.addEventListener("halisaha:replay-onboarding", onReplay);
 
-    // ★ HaliSahaKolik'ten gelen tur başlatma sinyali
+    // ★ HaliSahaKolik'ten gelen tur başlatma sinyali (ana tur)
     const onStartTour = () => setTourActive(true);
     window.addEventListener("halisaha:start-tour", onStartTour);
+
+    // ★ Maç bitir mini-tur sinyali — kadrolar tamamlandığında tetiklenir
+    const onStartMatchEndTour = () => setMatchEndTourActive(true);
+    window.addEventListener("halisaha:start-match-end-tour", onStartMatchEndTour);
 
     return () => {
       window.removeEventListener("halisaha:replay-onboarding", onReplay);
       window.removeEventListener("halisaha:start-tour", onStartTour);
+      window.removeEventListener("halisaha:start-match-end-tour", onStartMatchEndTour);
     };
   }, []);
 
@@ -58,8 +64,10 @@ export default function App() {
       <HalisahaKolik />
       {showOnboarding && <Onboarding onFinish={finishOnboarding} />}
       {showRate && <RatePrompt onClose={() => setShowRate(false)} />}
-      {/* ★ Tek Tour instance — sayfa geçişlerinde unmount olmaz */}
-      <Tour active={tourActive} onFinish={() => setTourActive(false)} />
+      {/* ★ Ana Tour instance — takım kurulum akışı */}
+      <Tour active={tourActive} onFinish={() => setTourActive(false)} mode="main" />
+      {/* ★ Maç-Bitir mini Tour instance — sadece maç hazır olunca tetiklenir */}
+      <Tour active={matchEndTourActive} onFinish={() => setMatchEndTourActive(false)} mode="matchEnd" />
     </PremiumProvider>
   );
 }

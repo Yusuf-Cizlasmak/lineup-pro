@@ -1,6 +1,7 @@
 // ─────────────────────────────────────────────────────────────
-// HalıSaha-Kolik · Geçmiş Maçlar Ekranı
+// HalıSaha-Kolik · Geçmiş Maçlar Ekranı (PRO)
 // 3 sekme: Genel Bakış · Krallıklar · Oyuncularım
+// + Filtre çipleri, mini pitch, detaylı tarih/saat, cascade animasyonlar
 // ─────────────────────────────────────────────────────────────
 import React, { useState, useMemo, useEffect } from "react";
 import { t, tPos } from "./i18n";
@@ -10,16 +11,25 @@ import {
   computeLeaderboards, getPlayerStats, summarizeMatch,
 } from "./matchHistory";
 
-// ─── Tarih formatla ───
-const formatDate = (ts) => {
-  const now = Date.now();
-  const diffMs = now - ts;
-  const day = 24 * 60 * 60 * 1000;
-  if (diffMs < day) return t("history_today");
-  if (diffMs < 2 * day) return t("history_yesterday");
-  if (diffMs < 7 * day) return t("history_days_ago", { n: Math.floor(diffMs / day) });
+// ─── Tarih formatla — detaylı ───
+const pad2 = (n) => String(n).padStart(2, "0");
+const formatDateFull = (ts) => {
   const d = new Date(ts);
-  return d.toLocaleDateString();
+  const now = new Date();
+  const diffMs = now - d;
+  const day = 24 * 60 * 60 * 1000;
+  const isToday = d.toDateString() === now.toDateString();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const isYesterday = d.toDateString() === yesterday.toDateString();
+  const time = `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  if (isToday) return `${t("history_today")} · ${time}`;
+  if (isYesterday) return `${t("history_yesterday")} · ${time}`;
+  if (diffMs < 7 * day) {
+    return `${t("history_days_ago", { n: Math.floor(diffMs / day) })} · ${time}`;
+  }
+  // Tam tarih: gün ay yıl saat (kullanıcının yerel formatı)
+  return `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.${d.getFullYear()} · ${time}`;
 };
 
 const getInitials = (n, s) => {
@@ -31,8 +41,40 @@ const getInitials = (n, s) => {
   return "⚽";
 };
 
-// ─── Match Card (geçmiş listesinde) ───
-const MatchCard = ({ match, onClick, onDelete }) => {
+// ─── FİLTRE ÇİPLERİ ───
+const FilterChip = ({ active, label, count, onClick, accent = "#34d399" }) => (
+  <button
+    onClick={onClick}
+    style={{
+      flexShrink: 0,
+      padding: "6px 12px",
+      borderRadius: 14,
+      border: `1px solid ${active ? accent : "rgba(255,255,255,0.08)"}`,
+      background: active ? `${accent}1c` : "rgba(255,255,255,0.03)",
+      color: active ? accent : "rgba(255,255,255,0.55)",
+      fontSize: 11, fontWeight: 700,
+      cursor: "pointer", fontFamily: "inherit",
+      display: "flex", alignItems: "center", gap: 6,
+      transition: "all 0.18s",
+    }}
+  >
+    {label}
+    {count != null && (
+      <span style={{
+        background: active ? accent : "rgba(255,255,255,0.08)",
+        color: active ? "#0a1628" : "rgba(255,255,255,0.55)",
+        borderRadius: 6, padding: "1px 6px",
+        fontSize: 9, fontWeight: 800,
+        fontFamily: "'JetBrains Mono', monospace",
+      }}>
+        {count}
+      </span>
+    )}
+  </button>
+);
+
+// ─── MATCH CARD ───
+const MatchCard = ({ match, onClick, onDelete, idx }) => {
   const aWon = match.teamA.score > match.teamB.score;
   const bWon = match.teamB.score > match.teamA.score;
   const summary = summarizeMatch(match);
@@ -49,6 +91,7 @@ const MatchCard = ({ match, onClick, onDelete }) => {
         transition: "transform 0.12s, background 0.18s",
         position: "relative",
         fontFamily: "inherit",
+        animation: `cascadeInHistory 0.3s ${Math.min(idx, 8) * 0.04}s both`,
       }}
       onMouseDown={(e) => (e.currentTarget.style.transform = "scale(0.99)")}
       onMouseUp={(e) => (e.currentTarget.style.transform = "scale(1)")}
@@ -60,11 +103,12 @@ const MatchCard = ({ match, onClick, onDelete }) => {
         marginBottom: 10,
       }}>
         <span style={{
-          fontSize: 10, color: "rgba(255,255,255,0.4)", fontWeight: 700,
-          textTransform: "uppercase", letterSpacing: 0.8,
+          fontSize: 10, color: "rgba(255,255,255,0.45)", fontWeight: 700,
+          letterSpacing: 0.5,
+          fontFamily: "'JetBrains Mono', monospace",
         }}>
-          {formatDate(match.playedAt)}{" "}
-          {match.isMatch ? "" : `· ${t("single_lineup")}`}
+          📅 {formatDateFull(match.playedAt)}
+          {!match.isMatch && <span style={{ marginLeft: 6, color: "rgba(255,255,255,0.3)" }}>· {t("single_lineup")}</span>}
         </span>
         <button
           onClick={(e) => { e.stopPropagation(); onDelete(); }}
@@ -79,7 +123,6 @@ const MatchCard = ({ match, onClick, onDelete }) => {
 
       {/* Skor */}
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        {/* Team A */}
         <div style={{ flex: 1, textAlign: "right", minWidth: 0 }}>
           <div style={{
             fontSize: 12, fontWeight: 700, color: aWon ? match.teamA.color.secondary : "rgba(255,255,255,0.7)",
@@ -109,7 +152,6 @@ const MatchCard = ({ match, onClick, onDelete }) => {
             opacity: aWon ? 0.5 : 1,
           }}>{match.teamB.score}</span>
         </div>
-        {/* Team B */}
         <div style={{ flex: 1, textAlign: "left", minWidth: 0 }}>
           <div style={{
             fontSize: 12, fontWeight: 700, color: bWon ? match.teamB.color.secondary : "rgba(255,255,255,0.7)",
@@ -122,12 +164,12 @@ const MatchCard = ({ match, onClick, onDelete }) => {
         </div>
       </div>
 
-      {/* Olay sayısı + MVP */}
+      {/* Olay sayısı + MVP + Sonuç badge */}
       {(summary.eventsCount > 0 || match.mvpId) && (
         <div style={{
           marginTop: 10, paddingTop: 10,
           borderTop: "1px solid rgba(255,255,255,0.05)",
-          display: "flex", gap: 12,
+          display: "flex", gap: 12, alignItems: "center",
           fontSize: 10.5, color: "rgba(255,255,255,0.45)", fontWeight: 600,
         }}>
           {summary.eventsCount > 0 && <span>⚽ {summary.eventsCount}</span>}
@@ -141,6 +183,161 @@ const MatchCard = ({ match, onClick, onDelete }) => {
   );
 };
 
+// ─── Mini Pitch SVG — top 3 gol atan oyuncu ───
+const MiniPitch = ({ match }) => {
+  // Olaylardan en çok gol atanları (top 3) çıkar
+  const goalsByPlayer = useMemo(() => {
+    const map = {};
+    (match.events || []).forEach((e) => {
+      if (e.type === "goal" && e.playerId) {
+        map[e.playerId] = (map[e.playerId] || 0) + 1;
+      }
+    });
+    return map;
+  }, [match]);
+
+  const top3 = useMemo(() => {
+    return Object.entries(goalsByPlayer)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([pid, count]) => {
+        const snap = match.playerSnapshots?.[pid];
+        return snap ? { ...snap, goals: count } : null;
+      })
+      .filter(Boolean);
+  }, [goalsByPlayer, match]);
+
+  if (top3.length === 0) return null;
+
+  // Sahada konumlandırma (üçü için 3 farklı nokta)
+  const positions = [
+    { x: 50, y: 22 }, // forvet 1
+    { x: 30, y: 38 }, // sol orta
+    { x: 70, y: 38 }, // sağ orta
+  ];
+
+  return (
+    <div style={{
+      background: "rgba(255,255,255,0.03)",
+      border: "1px solid rgba(255,255,255,0.06)",
+      borderRadius: 12,
+      padding: 14,
+      marginBottom: 14,
+    }}>
+      <div style={{
+        fontSize: 10, color: "rgba(255,255,255,0.45)", fontWeight: 700,
+        textTransform: "uppercase", letterSpacing: 1, marginBottom: 10,
+      }}>
+        🏟️ {t("top_scorers_pitch")}
+      </div>
+      <div style={{
+        position: "relative",
+        width: "100%",
+        paddingBottom: "55%",
+        background: "linear-gradient(180deg, #1e7a38 0%, #1a6b31 100%)",
+        borderRadius: 10,
+        overflow: "hidden",
+      }}>
+        {/* Pitch lines */}
+        <svg viewBox="0 0 100 55" preserveAspectRatio="none" style={{
+          position: "absolute", inset: 0,
+          width: "100%", height: "100%",
+          opacity: 0.35,
+        }}>
+          <rect x="2" y="2" width="96" height="51" fill="none" stroke="#fff" strokeWidth="0.3" />
+          <line x1="2" y1="27.5" x2="98" y2="27.5" stroke="#fff" strokeWidth="0.3" />
+          <circle cx="50" cy="27.5" r="6" fill="none" stroke="#fff" strokeWidth="0.25" />
+          <circle cx="50" cy="27.5" r="0.5" fill="#fff" />
+          <rect x="30" y="2" width="40" height="9" fill="none" stroke="#fff" strokeWidth="0.25" />
+          <rect x="30" y="44" width="40" height="9" fill="none" stroke="#fff" strokeWidth="0.25" />
+        </svg>
+
+        {/* Top 3 oyuncuları yerleştir */}
+        {top3.map((player, idx) => {
+          const pos = positions[idx];
+          const sideTeam = player.side === "A" ? match.teamA : match.teamB;
+          const accent = sideTeam.color.secondary;
+          return (
+            <div
+              key={player.id}
+              style={{
+                position: "absolute",
+                left: `${pos.x}%`,
+                top: `${pos.y}%`,
+                transform: "translate(-50%, -50%)",
+                animation: `goalPopHistory 0.5s ${idx * 0.1}s both`,
+              }}
+            >
+              <div style={{
+                width: 36, height: 36,
+                borderRadius: "50%",
+                background: `linear-gradient(135deg, ${accent}, ${accent}cc)`,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                color: "#0a1628", fontWeight: 800, fontSize: 13,
+                fontFamily: "'JetBrains Mono', monospace",
+                border: "2px solid rgba(255,255,255,0.5)",
+                boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+                position: "relative",
+              }}>
+                {player.jerseyNumber || getInitials(player.name, player.surname)}
+                {/* Gol sayısı rozet */}
+                <div style={{
+                  position: "absolute",
+                  top: -6, right: -6,
+                  background: "#fbbf24",
+                  borderRadius: "50%",
+                  width: 18, height: 18,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 10, fontWeight: 800,
+                  color: "#7c2d12",
+                  border: "2px solid #0a1628",
+                  fontFamily: "'JetBrains Mono', monospace",
+                }}>
+                  {player.goals}
+                </div>
+              </div>
+              <div style={{
+                position: "absolute",
+                top: "100%", left: "50%",
+                transform: "translateX(-50%)",
+                marginTop: 4,
+                fontSize: 9, fontWeight: 700,
+                color: "#fff",
+                whiteSpace: "nowrap",
+                textShadow: "0 1px 4px rgba(0,0,0,0.8)",
+                fontFamily: "inherit",
+              }}>
+                {player.name} {(player.surname || "").charAt(0)}.
+              </div>
+            </div>
+          );
+        })}
+
+        {/* Sıra numaraları (medal) */}
+        {top3.map((player, idx) => {
+          const pos = positions[idx];
+          const medals = ["🥇", "🥈", "🥉"];
+          return (
+            <div
+              key={`m-${player.id}`}
+              style={{
+                position: "absolute",
+                left: `${pos.x}%`,
+                top: `${pos.y}%`,
+                transform: "translate(-130%, -130%)",
+                fontSize: 14,
+                pointerEvents: "none",
+              }}
+            >
+              {medals[idx]}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 // ─── Leaderboard Row ───
 const LeaderRow = ({ index, info, primaryStat, secondaryStat, primaryLabel, accent }) => (
   <div style={{
@@ -149,6 +346,7 @@ const LeaderRow = ({ index, info, primaryStat, secondaryStat, primaryLabel, acce
     background: index === 0 ? "rgba(251,191,36,0.06)" : "rgba(255,255,255,0.03)",
     border: `1px solid ${index === 0 ? "rgba(251,191,36,0.2)" : "rgba(255,255,255,0.05)"}`,
     borderRadius: 11,
+    animation: `cascadeInHistory 0.3s ${Math.min(index, 8) * 0.05}s both`,
   }}>
     <div style={{
       width: 28, height: 28,
@@ -200,11 +398,11 @@ const LeaderRow = ({ index, info, primaryStat, secondaryStat, primaryLabel, acce
 
 // ─── MAIN ───
 export default function MatchHistoryView({ teamA, teamB, onBack, onOpenPlayerStats }) {
-  const [tab, setTab] = useState("overview"); // overview | leaderboards | players
+  const [tab, setTab] = useState("overview");
   const [matches, setMatches] = useState(() => getAllMatches());
   const [selectedMatch, setSelectedMatch] = useState(null);
+  const [filter, setFilter] = useState("all"); // all | wins | losses | draws | thisWeek | thisMonth
 
-  // Cross-tab + delete sonrası refresh
   useEffect(() => {
     const refresh = () => setMatches(getAllMatches());
     window.addEventListener("halisaha:history-updated", refresh);
@@ -223,7 +421,54 @@ export default function MatchHistoryView({ teamA, teamB, onBack, onOpenPlayerSta
     return Object.values(leaderboards.allStats).reduce((a, s) => a + s.assists, 0);
   }, [leaderboards]);
 
-  // Oyuncularım — şu anki kayıtlı oyuncular + istatistik
+  // Filter logic — kullanıcının kendi takımı (teamA) için
+  const filteredMatches = useMemo(() => {
+    const now = Date.now();
+    const week = 7 * 24 * 60 * 60 * 1000;
+    const month = 30 * 24 * 60 * 60 * 1000;
+    return matches.filter((m) => {
+      // Kullanıcının takımının sonucunu bulmaya çalış
+      // Ana takımın isim eşleşmesiyle (en güvenilir)
+      const userIsA = m.teamA.name === teamA.name;
+      const userIsB = m.teamB.name === teamA.name;
+      const userScore = userIsA ? m.teamA.score : userIsB ? m.teamB.score : null;
+      const oppScore = userIsA ? m.teamB.score : userIsB ? m.teamA.score : null;
+      const userResult = userScore != null && oppScore != null
+        ? (userScore > oppScore ? "W" : userScore < oppScore ? "L" : "D")
+        : null;
+
+      switch (filter) {
+        case "wins":      return userResult === "W";
+        case "losses":    return userResult === "L";
+        case "draws":     return userResult === "D";
+        case "thisWeek":  return now - m.playedAt <= week;
+        case "thisMonth": return now - m.playedAt <= month;
+        default:          return true;
+      }
+    });
+  }, [matches, filter, teamA.name]);
+
+  const filterCounts = useMemo(() => {
+    const counts = { all: matches.length, wins: 0, losses: 0, draws: 0, thisWeek: 0, thisMonth: 0 };
+    const now = Date.now();
+    const week = 7 * 24 * 60 * 60 * 1000;
+    const month = 30 * 24 * 60 * 60 * 1000;
+    matches.forEach((m) => {
+      const userIsA = m.teamA.name === teamA.name;
+      const userIsB = m.teamB.name === teamA.name;
+      const userScore = userIsA ? m.teamA.score : userIsB ? m.teamB.score : null;
+      const oppScore = userIsA ? m.teamB.score : userIsB ? m.teamA.score : null;
+      if (userScore != null && oppScore != null) {
+        if (userScore > oppScore) counts.wins++;
+        else if (userScore < oppScore) counts.losses++;
+        else counts.draws++;
+      }
+      if (now - m.playedAt <= week) counts.thisWeek++;
+      if (now - m.playedAt <= month) counts.thisMonth++;
+    });
+    return counts;
+  }, [matches, teamA.name]);
+
   const myPlayers = useMemo(() => {
     const all = [
       ...(teamA?.players || []).map((p) => ({ ...p, side: "A" })),
@@ -261,7 +506,18 @@ export default function MatchHistoryView({ teamA, teamB, onBack, onOpenPlayerSta
       display: "flex", flexDirection: "column",
       overflow: "hidden",
     }}>
-      {/* HEADER */}
+      <style>{`
+        @keyframes cascadeInHistory {
+          from { opacity: 0; transform: translateY(8px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes goalPopHistory {
+          0% { transform: translate(-50%, -50%) scale(0.4); opacity: 0; }
+          70% { transform: translate(-50%, -50%) scale(1.15); opacity: 1; }
+          100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+        }
+      `}</style>
+
       <div style={{
         padding: "10px 13px",
         paddingTop: "calc(10px + env(safe-area-inset-top, 0px))",
@@ -290,7 +546,6 @@ export default function MatchHistoryView({ teamA, teamB, onBack, onOpenPlayerSta
         <div style={{ width: 32 }} />
       </div>
 
-      {/* TAB BAR */}
       <div style={{
         display: "flex", gap: 4,
         padding: "10px 13px 0",
@@ -320,7 +575,6 @@ export default function MatchHistoryView({ teamA, teamB, onBack, onOpenPlayerSta
         ))}
       </div>
 
-      {/* CONTENT */}
       <div style={{
         flex: 1, overflow: "auto",
         paddingBottom: "calc(20px + env(safe-area-inset-bottom, 0px))",
@@ -331,35 +585,63 @@ export default function MatchHistoryView({ teamA, teamB, onBack, onOpenPlayerSta
               <EmptyState />
             ) : (
               <>
-                {/* Stat cards */}
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 14 }}>
                   <StatCard icon="📅" value={matches.length} label={t("stats_total_matches")} />
                   <StatCard icon="⚽" value={totalGoals} label={t("stats_total_goals")} />
                   <StatCard icon="🎯" value={totalAssists} label={t("stats_total_assists")} />
                 </div>
 
-                {/* Maç listesi */}
+                {/* Filtre çipleri */}
+                <div style={{
+                  display: "flex", gap: 6, marginBottom: 12,
+                  overflowX: "auto", paddingBottom: 4,
+                  scrollbarWidth: "none",
+                }}>
+                  <FilterChip active={filter === "all"}       label={t("filter_all")}        count={filterCounts.all}       onClick={() => { hapticSelection(); setFilter("all"); }}      accent="#34d399" />
+                  <FilterChip active={filter === "wins"}      label={`✅ ${t("filter_wins")}`}     count={filterCounts.wins}      onClick={() => { hapticSelection(); setFilter("wins"); }}     accent="#10b981" />
+                  <FilterChip active={filter === "draws"}     label={`🤝 ${t("filter_draws")}`}    count={filterCounts.draws}     onClick={() => { hapticSelection(); setFilter("draws"); }}    accent="#94a3b8" />
+                  <FilterChip active={filter === "losses"}    label={`❌ ${t("filter_losses")}`}   count={filterCounts.losses}    onClick={() => { hapticSelection(); setFilter("losses"); }}   accent="#dc2626" />
+                  <FilterChip active={filter === "thisWeek"}  label={t("filter_this_week")}  count={filterCounts.thisWeek}  onClick={() => { hapticSelection(); setFilter("thisWeek"); }} accent="#60a5fa" />
+                  <FilterChip active={filter === "thisMonth"} label={t("filter_this_month")} count={filterCounts.thisMonth} onClick={() => { hapticSelection(); setFilter("thisMonth"); }} accent="#a78bfa" />
+                </div>
+
                 <div style={{
                   fontSize: 10, color: "rgba(255,255,255,0.4)", fontWeight: 700,
                   textTransform: "uppercase", letterSpacing: 1, marginBottom: 8,
                 }}>
-                  {t("history_match_count", { n: matches.length })}
+                  {filteredMatches.length === matches.length
+                    ? t("history_match_count", { n: matches.length })
+                    : `${filteredMatches.length} / ${matches.length} ${t("full_match")}`}
                 </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {matches.map((m) => (
-                    <MatchCard
-                      key={m.id}
-                      match={m}
-                      onClick={() => { hapticLight(); setSelectedMatch(m); }}
-                      onDelete={() => {
-                        if (window.confirm(t("history_delete_confirm"))) {
-                          hapticWarning();
-                          deleteMatch(m.id);
-                        }
-                      }}
-                    />
-                  ))}
-                </div>
+
+                {filteredMatches.length === 0 ? (
+                  <div style={{
+                    padding: "30px 14px", textAlign: "center",
+                    color: "rgba(255,255,255,0.3)", fontSize: 12,
+                    background: "rgba(255,255,255,0.02)",
+                    border: "1px dashed rgba(255,255,255,0.06)",
+                    borderRadius: 10,
+                  }}>
+                    {t("filter_no_results")}
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {filteredMatches.map((m, idx) => (
+                      <MatchCard
+                        key={m.id}
+                        match={m}
+                        idx={idx}
+                        onClick={() => { hapticLight(); setSelectedMatch(m); }}
+                        onDelete={() => {
+                          if (window.confirm(t("history_delete_confirm"))) {
+                            hapticWarning();
+                            deleteMatch(m.id);
+                          }
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -424,7 +706,7 @@ export default function MatchHistoryView({ teamA, teamB, onBack, onOpenPlayerSta
               <EmptyState message={t("ps_no_matches")} />
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {myPlayers.map(({ player, stat }) => (
+                {myPlayers.map(({ player, stat }, idx) => (
                   <button
                     key={player.id}
                     onClick={() => { hapticLight(); onOpenPlayerStats?.(player); }}
@@ -436,6 +718,7 @@ export default function MatchHistoryView({ teamA, teamB, onBack, onOpenPlayerSta
                       borderRadius: 11,
                       cursor: "pointer", fontFamily: "inherit",
                       width: "100%", textAlign: "left",
+                      animation: `cascadeInHistory 0.25s ${Math.min(idx, 10) * 0.03}s both`,
                     }}
                   >
                     <div style={{
@@ -479,7 +762,6 @@ export default function MatchHistoryView({ teamA, teamB, onBack, onOpenPlayerSta
   );
 }
 
-// ─── Empty state ───
 const EmptyState = ({ message }) => (
   <div style={{
     padding: "40px 20px", textAlign: "center",
@@ -493,7 +775,6 @@ const EmptyState = ({ message }) => (
   </div>
 );
 
-// ─── Stat Card ───
 const StatCard = ({ icon, value, label }) => (
   <div style={{
     padding: "12px 8px",
@@ -527,7 +808,6 @@ const MiniStat = ({ label, value, accent = "rgba(255,255,255,0.7)" }) => (
   </div>
 );
 
-// ─── Leaderboard Section ───
 const LeaderboardSection = ({ title, entries, primaryKey, primaryLabel, accent, formatSecondary }) => (
   <div style={{ marginBottom: 18 }}>
     <div style={{
@@ -565,7 +845,7 @@ const LeaderboardSection = ({ title, entries, primaryKey, primaryLabel, accent, 
 );
 
 // ═══════════════════════════════════════════════════
-// MATCH DETAIL VIEW
+// MATCH DETAIL VIEW — mini pitch + tam tarih saat
 // ═══════════════════════════════════════════════════
 const MatchDetailView = ({ match, onBack, onDelete }) => {
   const events = match.events || [];
@@ -577,6 +857,9 @@ const MatchDetailView = ({ match, onBack, onDelete }) => {
     return map[gt] || "⚽";
   };
 
+  const d = new Date(match.playedAt);
+  const tam = `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.${d.getFullYear()} · ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+
   return (
     <div style={{
       fontFamily: "'DM Sans','Segoe UI',sans-serif",
@@ -586,7 +869,18 @@ const MatchDetailView = ({ match, onBack, onDelete }) => {
       maxWidth: 480, margin: "0 auto",
       display: "flex", flexDirection: "column", overflow: "hidden",
     }}>
-      {/* Header */}
+      <style>{`
+        @keyframes cascadeInHistory {
+          from { opacity: 0; transform: translateY(8px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes goalPopHistory {
+          0% { transform: translate(-50%, -50%) scale(0.4); opacity: 0; }
+          70% { transform: translate(-50%, -50%) scale(1.15); opacity: 1; }
+          100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+        }
+      `}</style>
+
       <div style={{
         padding: "10px 13px",
         paddingTop: "calc(10px + env(safe-area-inset-top, 0px))",
@@ -624,7 +918,6 @@ const MatchDetailView = ({ match, onBack, onDelete }) => {
         padding: 13,
         paddingBottom: "calc(20px + env(safe-area-inset-bottom, 0px))",
       }}>
-        {/* Score */}
         <div style={{
           background: "rgba(20,22,30,0.98)",
           border: "1px solid rgba(255,255,255,0.07)",
@@ -639,10 +932,11 @@ const MatchDetailView = ({ match, onBack, onDelete }) => {
             pointerEvents: "none",
           }} />
           <div style={{
-            fontSize: 10, color: "rgba(255,255,255,0.35)", textAlign: "center",
-            marginBottom: 10, letterSpacing: 1, fontWeight: 700, textTransform: "uppercase",
+            fontSize: 10, color: "rgba(255,255,255,0.5)", textAlign: "center",
+            marginBottom: 10, letterSpacing: 0.8, fontWeight: 700,
+            fontFamily: "'JetBrains Mono', monospace",
           }}>
-            {formatDate(match.playedAt)} · {new Date(match.playedAt).toLocaleTimeString().slice(0, 5)}
+            📅 {tam}
           </div>
           <div style={{ display: "flex", alignItems: "center", position: "relative" }}>
             <div style={{ flex: 1, textAlign: "center" }}>
@@ -674,6 +968,9 @@ const MatchDetailView = ({ match, onBack, onDelete }) => {
             </div>
           </div>
         </div>
+
+        {/* Mini pitch with top scorers */}
+        <MiniPitch match={match} />
 
         {/* MVP */}
         {match.mvpId && (() => {
@@ -720,7 +1017,7 @@ const MatchDetailView = ({ match, onBack, onDelete }) => {
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {events.map((e) => {
+            {events.map((e, idx) => {
               const isA = e.side === "A";
               const accent = isA ? acA : acB;
               const scorer = match.playerSnapshots?.[e.playerId];
@@ -736,6 +1033,7 @@ const MatchDetailView = ({ match, onBack, onDelete }) => {
                     border: "1px solid rgba(255,255,255,0.05)",
                     borderRadius: 10,
                     borderLeft: `3px solid ${accent}`,
+                    animation: `cascadeInHistory 0.25s ${Math.min(idx, 8) * 0.04}s both`,
                   }}
                 >
                   <span style={{ fontSize: 18 }}>{goalTypeIcon(e.goalType)}</span>

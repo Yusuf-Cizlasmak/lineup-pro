@@ -273,6 +273,32 @@ const DICT = {
     // Settings
     settings_history_clear: "Tüm geçmişi sil",
     settings_history_clear_sub: "Kayıtlı tüm maçlar silinir",
+
+    // ═══ STAGE 2: PRO POLISH ═══
+    // Match-end mini tour
+    tour_me_0_title: "Maçı Bitir Zamanı! 🏁",
+    tour_me_0_desc: "Maç hazır! Sağ üstteki büyük kırmızı butona dokunarak maçı bitir, golleri ve asistleri ekleyebilirsin.",
+
+    // Gol ekle hatırlatma popup
+    save_reminder_title: "Skor var ama gol yok! 📊",
+    save_reminder_desc: "Maçta golleri eklemeden çıkıyorsun. Geçmişe sadece skor kaydedilecek, oyuncu istatistikleri tutulmayacak. Devam etmek ister misin?",
+    save_reminder_skip: "Yine de Çık",
+    save_reminder_continue: "Gol Eklemeye Devam",
+
+    // Mini pitch
+    top_scorers_pitch: "Maçın Yıldızları",
+
+    // Filter chips
+    filter_all: "Tümü",
+    filter_wins: "Galibiyet",
+    filter_draws: "Beraberlik",
+    filter_losses: "Mağlubiyet",
+    filter_this_week: "🗓️ Bu Hafta",
+    filter_this_month: "📅 Bu Ay",
+    filter_no_results: "Bu filtreyle eşleşen maç yok",
+
+    // Form chart
+    ps_form_chart: "Form Grafiği (Son 10 Maç)",
   },
   en: {
     tour_0_title: "Let's Get Started",
@@ -515,6 +541,32 @@ const DICT = {
 
     settings_history_clear: "Clear all history",
     settings_history_clear_sub: "All saved matches will be deleted",
+
+    // ═══ STAGE 2: PRO POLISH ═══
+    // Match-end mini tour
+    tour_me_0_title: "Time to End the Match! 🏁",
+    tour_me_0_desc: "The match is ready! Tap the big red button at the top right to end the match and add goals & assists.",
+
+    // Add goals reminder popup
+    save_reminder_title: "Score recorded, no goals added! 📊",
+    save_reminder_desc: "You're leaving without adding goals. Only the score will be saved to history — player stats won't be tracked. Continue anyway?",
+    save_reminder_skip: "Exit Anyway",
+    save_reminder_continue: "Keep Adding Goals",
+
+    // Mini pitch
+    top_scorers_pitch: "Match Stars",
+
+    // Filter chips
+    filter_all: "All",
+    filter_wins: "Wins",
+    filter_draws: "Draws",
+    filter_losses: "Losses",
+    filter_this_week: "🗓️ This Week",
+    filter_this_month: "📅 This Month",
+    filter_no_results: "No matches found with this filter",
+
+    // Form chart
+    ps_form_chart: "Form (Last 10 Matches)",
   },
 };
 

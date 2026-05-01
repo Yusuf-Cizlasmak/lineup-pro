@@ -1,14 +1,14 @@
 // ─────────────────────────────────────────────────────────────
-// HalıSaha-Kolik · Maç Sonucu Modalı (TAP-TO-SCORE)
-// Form doldurmak yerine sahadaki oyuncu kartlarına dokunarak gol ekleme.
+// HalıSaha-Kolik · Maç Sonucu Modalı (TAP-TO-SCORE — PRO)
+// FIFA-tarzı tap-to-score, kupa animasyonu, skor flip, dakika slider,
+// +1 floating animation, hat-trick fullscreen efekt.
 // ─────────────────────────────────────────────────────────────
-import React, { useState, useRef, useMemo, useEffect } from "react";
+import React, { useState, useRef, useMemo, useEffect, useCallback } from "react";
 import { t, tPos } from "./i18n";
 import { hapticLight, hapticMedium, hapticHeavy, hapticSuccess, hapticSelection } from "./haptics";
 import { saveMatch, buildMatch, newEvent } from "./matchHistory";
 import { showInterstitial } from "./admob";
 
-// captureAndShare ana dosyada tanımlı; prop ile alıyoruz.
 const getInitials = (n, s) => {
   const name = (n || "").trim();
   const surname = (s || "").trim();
@@ -26,26 +26,27 @@ const GOAL_TYPES = [
   { id: "own_goal", icon: "😅", labelKey: "goal_type_own_goal" },
 ];
 
-// Konfeti — basit canvas tabanlı, performanslı
+// ─── Konfeti — 80 partikül, daha zengin ───
 const Confetti = ({ trigger, color = "#fbbf24" }) => {
   const ref = useRef(null);
   useEffect(() => {
     if (!trigger || !ref.current) return;
     const canvas = ref.current;
     const ctx = canvas.getContext("2d");
-    const W = canvas.width = canvas.offsetWidth * 2;
-    const H = canvas.height = canvas.offsetHeight * 2;
-    const colors = [color, "#fff", "#fbbf24", "#34d399", "#60a5fa"];
-    const N = 60;
+    const dpr = window.devicePixelRatio || 1;
+    const W = canvas.width = canvas.offsetWidth * dpr;
+    const H = canvas.height = canvas.offsetHeight * dpr;
+    const colors = [color, "#fff", "#fbbf24", "#34d399", "#60a5fa", "#f87171"];
+    const N = 80;
     const particles = Array.from({ length: N }, () => ({
-      x: W / 2,
+      x: W / 2 + (Math.random() - 0.5) * 120,
       y: H / 3,
-      vx: (Math.random() - 0.5) * 14,
-      vy: -Math.random() * 14 - 4,
-      g: 0.45,
-      size: 3 + Math.random() * 5,
+      vx: (Math.random() - 0.5) * 18,
+      vy: -Math.random() * 18 - 6,
+      g: 0.55,
+      size: 4 + Math.random() * 6,
       rot: Math.random() * Math.PI * 2,
-      vrot: (Math.random() - 0.5) * 0.3,
+      vrot: (Math.random() - 0.5) * 0.4,
       color: colors[Math.floor(Math.random() * colors.length)],
       life: 1,
     }));
@@ -59,7 +60,7 @@ const Confetti = ({ trigger, color = "#fbbf24" }) => {
         p.y += p.vy;
         p.vy += p.g;
         p.rot += p.vrot;
-        p.life -= 0.012;
+        p.life -= 0.011;
         ctx.save();
         ctx.translate(p.x, p.y);
         ctx.rotate(p.rot);
@@ -87,61 +88,159 @@ const Confetti = ({ trigger, color = "#fbbf24" }) => {
   );
 };
 
-// Mini player chip — tap to select
-const PlayerChip = ({ player, accentColor, onClick, selected, disabled, badge }) => {
+// ─── +1 Floating animation ───
+const FloatingPlusOne = ({ trigger, color, anchor }) => {
+  if (!trigger || !anchor) return null;
+  return (
+    <div
+      key={trigger}
+      style={{
+        position: "fixed",
+        left: anchor.x,
+        top: anchor.y,
+        transform: "translate(-50%, -50%)",
+        color: color,
+        fontSize: 28,
+        fontWeight: 900,
+        fontFamily: "'Bebas Neue', sans-serif",
+        textShadow: `0 0 12px ${color}, 0 4px 12px rgba(0,0,0,0.6)`,
+        pointerEvents: "none",
+        zIndex: 1600,
+        animation: "floatUpModal 1s ease-out forwards",
+      }}
+    >
+      +1
+    </div>
+  );
+};
+
+// ─── Hat-trick fullscreen efekti ───
+const HatTrickBurst = ({ trigger, playerName, color }) => {
+  if (!trigger) return null;
+  return (
+    <div
+      key={trigger}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 1700,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        pointerEvents: "none",
+        background: `radial-gradient(circle, ${color}33 0%, transparent 60%)`,
+        animation: "fadeIn 0.3s",
+      }}
+    >
+      <div
+        style={{
+          textAlign: "center",
+          animation: "hatTrickInModal 0.6s cubic-bezier(.34,1.56,.64,1)",
+        }}
+      >
+        <div
+          style={{
+            fontSize: 72,
+            fontWeight: 900,
+            fontFamily: "'Bebas Neue', sans-serif",
+            color: "#fff",
+            textShadow: `0 0 30px ${color}, 0 0 60px ${color}, 0 8px 24px rgba(0,0,0,0.6)`,
+            letterSpacing: 4,
+            lineHeight: 1,
+          }}
+        >
+          HAT-TRICK!
+        </div>
+        <div
+          style={{
+            fontSize: 18,
+            fontWeight: 700,
+            color: color,
+            marginTop: 12,
+            textShadow: "0 4px 12px rgba(0,0,0,0.5)",
+          }}
+        >
+          ⚽⚽⚽ {playerName}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── Mini player chip — FIFA-tarzı, forma + numara büyük ───
+const PlayerChip = ({ player, accentColor, onClick, selected, disabled, badge, large }) => {
   return (
     <button
       onClick={onClick}
       disabled={disabled}
       style={{
         position: "relative",
-        display: "flex", alignItems: "center", gap: 8,
-        padding: "8px 11px 8px 8px",
+        display: "flex",
+        flexDirection: large ? "column" : "row",
+        alignItems: "center",
+        gap: large ? 6 : 8,
+        padding: large ? "10px 8px 9px" : "8px 11px 8px 8px",
         background: selected ? `${accentColor}28` : "rgba(255,255,255,0.04)",
         border: `1.5px solid ${selected ? accentColor : "rgba(255,255,255,0.08)"}`,
-        borderRadius: 11,
+        borderRadius: large ? 13 : 11,
         cursor: disabled ? "not-allowed" : "pointer",
         opacity: disabled ? 0.4 : 1,
-        minWidth: 0, flex: "1 1 auto",
-        textAlign: "left",
-        transition: "transform 0.12s, background 0.18s",
+        minWidth: 0,
+        flex: "1 1 auto",
+        textAlign: large ? "center" : "left",
+        transition: "transform 0.12s, background 0.18s, border-color 0.18s",
         transform: selected ? "scale(1.02)" : "scale(1)",
         fontFamily: "inherit",
       }}
-      onMouseDown={(e) => !disabled && (e.currentTarget.style.transform = "scale(0.97)")}
+      onMouseDown={(e) => !disabled && (e.currentTarget.style.transform = "scale(0.95)")}
       onMouseUp={(e) => !disabled && (e.currentTarget.style.transform = selected ? "scale(1.02)" : "scale(1)")}
       onMouseLeave={(e) => !disabled && (e.currentTarget.style.transform = selected ? "scale(1.02)" : "scale(1)")}
     >
-      {/* Forma + numara */}
+      {/* Forma */}
       <div style={{
         position: "relative",
-        width: 30, height: 30, flexShrink: 0,
-        borderRadius: 8,
+        width: large ? 44 : 30,
+        height: large ? 44 : 30,
+        flexShrink: 0,
+        borderRadius: large ? 11 : 8,
         background: `linear-gradient(135deg, ${accentColor}, ${accentColor}cc)`,
         display: "flex", alignItems: "center", justifyContent: "center",
-        color: "#0a1628", fontWeight: 800, fontSize: 12,
+        color: "#0a1628",
+        fontWeight: 800,
+        fontSize: large ? 16 : 12,
         fontFamily: "'JetBrains Mono', monospace",
-        boxShadow: selected ? `0 4px 12px ${accentColor}66` : "none",
+        boxShadow: selected ? `0 6px 18px ${accentColor}66` : `0 2px 6px rgba(0,0,0,0.25)`,
       }}>
         {player.jerseyNumber || getInitials(player.name, player.surname)}
       </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ flex: large ? "none" : 1, minWidth: 0, width: large ? "100%" : "auto" }}>
         <div style={{
-          fontSize: 12, fontWeight: 700, color: "#e2e8f0",
-          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+          fontSize: large ? 11 : 12,
+          fontWeight: 700,
+          color: "#e2e8f0",
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
         }}>
           {player.name} {player.surname}
         </div>
-        <div style={{ fontSize: 9, color: "rgba(255,255,255,0.4)", fontWeight: 600, letterSpacing: 0.3 }}>
+        <div style={{ fontSize: large ? 8.5 : 9, color: "rgba(255,255,255,0.4)", fontWeight: 600, letterSpacing: 0.3 }}>
           {tPos(player.position)}
         </div>
       </div>
       {badge != null && badge > 0 && (
         <div style={{
-          background: accentColor, color: "#0a1628",
-          borderRadius: 8, padding: "2px 6px",
-          fontSize: 10, fontWeight: 800,
-          minWidth: 18, textAlign: "center",
+          position: large ? "absolute" : "static",
+          top: large ? 6 : "auto",
+          right: large ? 6 : "auto",
+          background: accentColor,
+          color: "#0a1628",
+          borderRadius: 8,
+          padding: "2px 6px",
+          fontSize: 10,
+          fontWeight: 800,
+          minWidth: 18,
+          textAlign: "center",
           fontFamily: "'JetBrains Mono', monospace",
         }}>
           {badge}
@@ -151,8 +250,41 @@ const PlayerChip = ({ player, accentColor, onClick, selected, disabled, badge })
   );
 };
 
-// Score control
-const ScoreControl = ({ value, onChange, color, name, isHome }) => (
+// ─── Score number with flip animation ───
+const FlipScore = ({ value, color }) => {
+  const [displayValue, setDisplayValue] = useState(value);
+  const [flipping, setFlipping] = useState(false);
+  useEffect(() => {
+    if (value !== displayValue) {
+      setFlipping(true);
+      const t1 = setTimeout(() => {
+        setDisplayValue(value);
+      }, 180);
+      const t2 = setTimeout(() => setFlipping(false), 360);
+      return () => { clearTimeout(t1); clearTimeout(t2); };
+    }
+  }, [value, displayValue]);
+  return (
+    <span style={{
+      display: "inline-block",
+      fontSize: 56,
+      fontWeight: 800,
+      color: "#fff",
+      fontFamily: "'Bebas Neue',sans-serif",
+      lineHeight: 1,
+      minWidth: 44,
+      textAlign: "center",
+      textShadow: `0 0 24px ${color}55`,
+      animation: flipping ? "scoreFlipModal 0.36s cubic-bezier(.4,0,.2,1)" : "none",
+      transformOrigin: "center",
+    }}>
+      {displayValue}
+    </span>
+  );
+};
+
+// Score control with flip
+const ScoreControl = ({ value, onChange, color, name }) => (
   <div style={{ flex: 1, textAlign: "center", minWidth: 0 }}>
     <div style={{
       fontSize: 10, fontWeight: 700, color, textTransform: "uppercase",
@@ -173,12 +305,7 @@ const ScoreControl = ({ value, onChange, color, name, isHome }) => (
           display: "flex", alignItems: "center", justifyContent: "center",
         }}
       >−</button>
-      <span style={{
-        fontSize: 56, fontWeight: 800, color: "#fff",
-        fontFamily: "'Bebas Neue',sans-serif", lineHeight: 1,
-        minWidth: 44, textAlign: "center",
-        textShadow: `0 0 24px ${color}55`,
-      }}>{value}</span>
+      <FlipScore value={value} color={color} />
       <button
         onClick={() => { hapticMedium(); onChange(value + 1); }}
         style={{
@@ -192,7 +319,7 @@ const ScoreControl = ({ value, onChange, color, name, isHome }) => (
   </div>
 );
 
-// Mini event row — kayıtlı bir olayı göster
+// ─── Mini event row ───
 const EventRow = ({ event, accent, scorerInfo, assistInfo, onDelete }) => {
   const goalType = GOAL_TYPES.find((g) => g.id === event.goalType) || GOAL_TYPES[0];
   return (
@@ -202,6 +329,7 @@ const EventRow = ({ event, accent, scorerInfo, assistInfo, onDelete }) => {
       background: "rgba(255,255,255,0.03)",
       borderRadius: 9,
       borderLeft: `3px solid ${accent}`,
+      animation: "cascadeInModal 0.3s",
     }}>
       <span style={{ fontSize: 16 }}>{goalType.icon}</span>
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -238,29 +366,59 @@ const EventRow = ({ event, accent, scorerInfo, assistInfo, onDelete }) => {
   );
 };
 
+// ─── Trophy header (kazanan takım için) ───
+const TrophyHeader = ({ winnerName, winnerColor }) => {
+  if (!winnerName) return null;
+  return (
+    <div style={{
+      textAlign: "center",
+      marginBottom: -8,
+      paddingTop: 4,
+      animation: "trophyDropModal 0.7s cubic-bezier(.4,0,.2,1)",
+    }}>
+      <div style={{ fontSize: 36, lineHeight: 1, filter: `drop-shadow(0 0 12px ${winnerColor})` }}>🏆</div>
+      <div style={{
+        fontSize: 11, fontWeight: 800, color: winnerColor,
+        letterSpacing: 1, textTransform: "uppercase",
+        marginTop: 4,
+      }}>
+        {winnerName}
+      </div>
+    </div>
+  );
+};
+
 // ═══════════════════════════════════════════════════════════
 // MAIN MODAL
 // ═══════════════════════════════════════════════════════════
 export default function MatchResultModal({
   open, onClose, teamA, teamB, isMatch,
-  captureAndShare, // ana dosyadan geçiyor (DOM dependency)
-  toast,           // toast fonksiyonu
+  captureAndShare,
+  toast,
 }) {
   const [scoreA, setScoreA] = useState(0);
   const [scoreB, setScoreB] = useState(0);
   const [events, setEvents] = useState([]);
-  const [pickerSide, setPickerSide] = useState(null); // null | "A" | "B"
+  const [pickerSide, setPickerSide] = useState(null);
   const [draftScorer, setDraftScorer] = useState(null);
   const [draftGoalType, setDraftGoalType] = useState("normal");
-  const [draftMinute, setDraftMinute] = useState("");
+  const [draftMinute, setDraftMinute] = useState(45);
+  const [draftMinuteEnabled, setDraftMinuteEnabled] = useState(false);
   const [draftAssist, setDraftAssist] = useState(null);
-  const [step, setStep] = useState("scorer"); // scorer | assist | confirm
+  const [step, setStep] = useState("scorer");
   const [confettiTick, setConfettiTick] = useState(0);
   const [confettiColor, setConfettiColor] = useState("#fbbf24");
+  const [hatTrickBurst, setHatTrickBurst] = useState(null);
+  const [floaterTick, setFloaterTick] = useState(0);
+  const [floaterAnchor, setFloaterAnchor] = useState(null);
+  const [floaterColor, setFloaterColor] = useState("#fbbf24");
   const [showMvp, setShowMvp] = useState(false);
   const [mvpId, setMvpId] = useState(null);
   const [saved, setSaved] = useState(false);
+  const [showSaveReminder, setShowSaveReminder] = useState(false);
   const scoreRef = useRef(null);
+  const teamAScoreRef = useRef(null);
+  const teamBScoreRef = useRef(null);
 
   const acA = teamA.color.secondary;
   const acB = teamB.color.secondary;
@@ -272,19 +430,16 @@ export default function MatchResultModal({
       setEvents([]);
       setPickerSide(null);
       setDraftScorer(null); setDraftAssist(null);
-      setDraftGoalType("normal"); setDraftMinute("");
+      setDraftGoalType("normal"); setDraftMinute(45); setDraftMinuteEnabled(false);
       setStep("scorer");
       setShowMvp(false);
       setMvpId(null);
       setSaved(false);
+      setShowSaveReminder(false);
+      setHatTrickBurst(null);
     }
   }, [open]);
 
-  // Skor değişimi — events ile senkron için tek yön: skor öncelikli
-  // (kullanıcı skoru elle artırırsa events boş kalır → manuel skor artışı)
-  // Goller eklendikçe skor otomatik artar (aşağıda addEvent)
-
-  // Bir takım için "gol başına" sayım (rozet için)
   const goalsByPlayer = useMemo(() => {
     const map = {};
     for (const e of events) {
@@ -303,9 +458,10 @@ export default function MatchResultModal({
     return map;
   }, [events]);
 
-  const winner = scoreA > scoreB ? teamA.name : scoreB > scoreA ? teamB.name : null;
+  const winner = scoreA > scoreB ? teamA : scoreB > scoreA ? teamB : null;
+  const winnerName = winner?.name || null;
+  const winnerColor = winner?.color?.secondary || null;
 
-  // Picker'ı aç
   const openPicker = (side) => {
     if (saved) return;
     hapticSelection();
@@ -314,7 +470,8 @@ export default function MatchResultModal({
     setDraftScorer(null);
     setDraftAssist(null);
     setDraftGoalType("normal");
-    setDraftMinute("");
+    setDraftMinute(45);
+    setDraftMinuteEnabled(false);
   };
 
   const closePicker = () => {
@@ -324,21 +481,18 @@ export default function MatchResultModal({
     setStep("scorer");
   };
 
-  // Gol atan seçildi
   const handleScorerPick = (player) => {
     hapticMedium();
     setDraftScorer(player);
-    // Aynı takımın oyuncuları varsa asist adımına geç, yoksa direkt confirm
     const sideTeam = pickerSide === "A" ? teamA : teamB;
     const others = sideTeam.players.filter((p) => p.id !== player.id);
-    if (others.length === 0) {
+    if (others.length === 0 || draftGoalType === "own_goal") {
       setStep("confirm");
     } else {
       setStep("assist");
     }
   };
 
-  // Asistçi seçildi (veya skip)
   const handleAssistPick = (player) => {
     hapticLight();
     setDraftAssist(player);
@@ -351,7 +505,7 @@ export default function MatchResultModal({
     setStep("confirm");
   };
 
-  // Olayı kaydet
+  // Olayı kaydet — +1 floater + konfeti + hat-trick check
   const commitEvent = () => {
     if (!draftScorer || !pickerSide) return;
     const isOwnGoal = draftGoalType === "own_goal";
@@ -360,16 +514,14 @@ export default function MatchResultModal({
       side: pickerSide,
       playerId: draftScorer.id,
       assistPlayerId: isOwnGoal ? null : (draftAssist?.id || null),
-      minute: draftMinute ? Math.max(1, Math.min(120, parseInt(draftMinute, 10))) : null,
+      minute: draftMinuteEnabled ? draftMinute : null,
       goalType: draftGoalType,
     });
 
-    // Kendi kalesi: gol KARŞI takıma gider, oyuncu kayıtta kalır
     const scoreSide = isOwnGoal ? (pickerSide === "A" ? "B" : "A") : pickerSide;
 
     setEvents((arr) => {
       const next = [...arr, ev];
-      // Dakikaya göre sırala (dakikası olmayanlar sona)
       next.sort((a, b) => {
         if (a.minute == null && b.minute == null) return a.createdAt - b.createdAt;
         if (a.minute == null) return 1;
@@ -382,19 +534,36 @@ export default function MatchResultModal({
     if (scoreSide === "A") setScoreA((s) => s + 1);
     else setScoreB((s) => s + 1);
 
-    // Konfeti + haptic
     const accent = scoreSide === "A" ? acA : acB;
     setConfettiColor(accent);
     setConfettiTick((x) => x + 1);
     hapticHeavy();
 
+    // +1 floater anchor — score box'ın konumu
+    setTimeout(() => {
+      const target = scoreSide === "A" ? teamAScoreRef.current : teamBScoreRef.current;
+      if (target) {
+        const rect = target.getBoundingClientRect();
+        setFloaterAnchor({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+        setFloaterColor(accent);
+        setFloaterTick((x) => x + 1);
+      }
+    }, 50);
+
     // Hat-trick kontrolü
     const newCount = (goalsByPlayer[draftScorer.id] || 0) + (isOwnGoal ? 0 : 1);
     if (newCount === 3 && !isOwnGoal) {
-      setTimeout(() => toast?.(t("hat_trick")), 400);
+      setTimeout(() => {
+        setHatTrickBurst({ player: `${draftScorer.name} ${draftScorer.surname}`, color: accent, key: Date.now() });
+        // Çok sert haptic
+        hapticHeavy();
+        setTimeout(() => hapticHeavy(), 100);
+        setTimeout(() => hapticHeavy(), 200);
+        setTimeout(() => setHatTrickBurst(null), 1800);
+      }, 300);
     } else if (draftAssist && !isOwnGoal) {
       setTimeout(() => toast?.(t("assist_added")), 200);
-    } else {
+    } else if (!isOwnGoal) {
       setTimeout(() => toast?.(t("goal_added")), 200);
     }
 
@@ -406,7 +575,6 @@ export default function MatchResultModal({
     if (!ev) return;
     hapticLight();
     setEvents((arr) => arr.filter((e) => e.id !== eventId));
-    // Skoru da geri al
     const isOwnGoal = ev.type === "own_goal";
     const scoreSide = isOwnGoal ? (ev.side === "A" ? "B" : "A") : ev.side;
     if (ev.type === "goal" || ev.type === "own_goal") {
@@ -416,7 +584,6 @@ export default function MatchResultModal({
     toast?.(t("t_event_deleted"));
   };
 
-  // MVP otomatik öneri: en çok gol+asist katkısı
   const mvpSuggestion = useMemo(() => {
     const scores = {};
     for (const e of events) {
@@ -432,7 +599,16 @@ export default function MatchResultModal({
     return best;
   }, [events]);
 
-  // Kaydet
+  // Modal kapatma — gol ekledi mi kontrolü
+  const handleAttemptClose = () => {
+    if (!saved && (scoreA > 0 || scoreB > 0) && events.length === 0) {
+      // Skor var ama event yok → hatırlat
+      setShowSaveReminder(true);
+      return;
+    }
+    onClose();
+  };
+
   const handleSave = (alsoShare) => {
     if (saved) return;
     if (scoreA === 0 && scoreB === 0 && events.length === 0) {
@@ -449,7 +625,6 @@ export default function MatchResultModal({
     toast?.(t("match_saved"));
 
     if (alsoShare && scoreRef.current && captureAndShare) {
-      // Paylaşım
       setTimeout(async () => {
         await captureAndShare(scoreRef.current, "mac-sonucu.png");
         setTimeout(() => { showInterstitial(); }, 500);
@@ -461,17 +636,13 @@ export default function MatchResultModal({
 
   if (!open) return null;
 
-  // Picker'da hangi takımın oyuncuları gösterilecek
-  // Kendi kalesi seçildiyse: sahibi farklı takım olur
   const pickerTeam = pickerSide === "A" ? teamA : pickerSide === "B" ? teamB : null;
   const pickerAccent = pickerSide === "A" ? acA : acB;
 
-  // Asist için: aynı takımdan, gol atan dışındaki oyuncular
   const assistCandidates = pickerTeam && draftScorer
     ? pickerTeam.players.filter((p) => p.id !== draftScorer.id)
     : [];
 
-  // Tüm oyuncuların düz listesi (MVP için)
   const allPlayers = [
     ...teamA.players.map((p) => ({ ...p, side: "A" })),
     ...(isMatch ? teamB.players.map((p) => ({ ...p, side: "B" })) : []),
@@ -479,9 +650,42 @@ export default function MatchResultModal({
 
   return (
     <>
+      <style>{`
+        @keyframes slideUpModal { from { transform: translateY(100%) } to { transform: translateY(0) } }
+        @keyframes pulse2 { 0%,100% { transform: scale(1); opacity: 1 } 50% { transform: scale(1.06); opacity: 0.85 } }
+        @keyframes goalPop { 0% { transform: scale(0.6); opacity: 0 } 60% { transform: scale(1.15) } 100% { transform: scale(1); opacity: 1 } }
+        @keyframes floatUpModal {
+          0% { transform: translate(-50%, -50%) scale(0.7); opacity: 0; }
+          25% { transform: translate(-50%, -90%) scale(1.4); opacity: 1; }
+          100% { transform: translate(-50%, -180%) scale(1); opacity: 0; }
+        }
+        @keyframes scoreFlipModal {
+          0% { transform: rotateX(0); }
+          50% { transform: rotateX(-90deg); }
+          100% { transform: rotateX(0); }
+        }
+        @keyframes trophyDropModal {
+          0% { transform: translateY(-60px) rotate(-30deg) scale(0.4); opacity: 0; }
+          60% { transform: translateY(8px) rotate(10deg) scale(1.1); opacity: 1; }
+          100% { transform: translateY(0) rotate(0) scale(1); opacity: 1; }
+        }
+        @keyframes hatTrickInModal {
+          0% { transform: scale(0.3) rotate(-15deg); opacity: 0; }
+          60% { transform: scale(1.15) rotate(3deg); opacity: 1; }
+          100% { transform: scale(1) rotate(0); opacity: 1; }
+        }
+        @keyframes cascadeInModal {
+          from { opacity: 0; transform: translateX(-12px); }
+          to { opacity: 1; transform: translateX(0); }
+        }
+      `}</style>
+
       {confettiTick > 0 && <Confetti trigger={confettiTick} color={confettiColor} key={confettiTick} />}
+      {floaterTick > 0 && <FloatingPlusOne trigger={floaterTick} color={floaterColor} anchor={floaterAnchor} />}
+      {hatTrickBurst && <HatTrickBurst trigger={hatTrickBurst.key} playerName={hatTrickBurst.player} color={hatTrickBurst.color} />}
+
       <div
-        onClick={onClose}
+        onClick={handleAttemptClose}
         style={{
           position: "fixed", inset: 0, zIndex: 1100,
           background: "rgba(0,0,0,0.82)", backdropFilter: "blur(12px)",
@@ -500,12 +704,6 @@ export default function MatchResultModal({
             animation: "slideUpModal 0.28s cubic-bezier(.4,0,.2,1)",
           }}
         >
-          <style>{`
-            @keyframes slideUpModal { from { transform: translateY(100%) } to { transform: translateY(0) } }
-            @keyframes pulse2 { 0%,100% { transform: scale(1); opacity: 1 } 50% { transform: scale(1.06); opacity: 0.85 } }
-            @keyframes goalPop { 0% { transform: scale(0.6); opacity: 0 } 60% { transform: scale(1.15) } 100% { transform: scale(1); opacity: 1 } }
-          `}</style>
-
           {/* Drag handle */}
           <div style={{ display: "flex", justifyContent: "center", paddingTop: 10 }}>
             <div style={{ width: 36, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.14)" }} />
@@ -523,7 +721,7 @@ export default function MatchResultModal({
               🏆 {t("match_result")}
             </div>
             <button
-              onClick={onClose}
+              onClick={handleAttemptClose}
               style={{
                 background: "rgba(255,255,255,0.06)",
                 border: "1px solid rgba(255,255,255,0.08)",
@@ -542,6 +740,9 @@ export default function MatchResultModal({
             display: "flex", flexDirection: "column", gap: 16,
             background: "#0e1117",
           }}>
+            {/* Trophy header */}
+            {winner && <TrophyHeader winnerName={winnerName} winnerColor={winnerColor} />}
+
             {/* SCORE BOARD */}
             <div style={{
               position: "relative", borderRadius: 18, overflow: "hidden",
@@ -555,7 +756,9 @@ export default function MatchResultModal({
                 pointerEvents: "none",
               }} />
               <div style={{ display: "flex", alignItems: "center", position: "relative" }}>
-                <ScoreControl value={scoreA} onChange={setScoreA} color={acA} name={teamA.name} isHome />
+                <div ref={teamAScoreRef} style={{ flex: 1 }}>
+                  <ScoreControl value={scoreA} onChange={setScoreA} color={acA} name={teamA.name} />
+                </div>
                 <div style={{ padding: "0 6px" }}>
                   <div style={{
                     fontSize: 12, color: "rgba(255,255,255,0.18)", fontWeight: 800,
@@ -563,7 +766,9 @@ export default function MatchResultModal({
                   }}>–</div>
                 </div>
                 {isMatch ? (
-                  <ScoreControl value={scoreB} onChange={setScoreB} color={acB} name={teamB.name} />
+                  <div ref={teamBScoreRef} style={{ flex: 1 }}>
+                    <ScoreControl value={scoreB} onChange={setScoreB} color={acB} name={teamB.name} />
+                  </div>
                 ) : (
                   <div style={{ flex: 1, textAlign: "center", color: "rgba(255,255,255,0.18)", fontSize: 12 }}>
                     —
@@ -577,12 +782,12 @@ export default function MatchResultModal({
                   color: winner ? "#fbbf24" : "rgba(255,255,255,0.45)",
                   letterSpacing: 0.3,
                 }}>
-                  {winner ? t("winner", { name: winner }) : (scoreA === scoreB && (scoreA > 0)) ? t("draw") : ""}
+                  {winner ? t("winner", { name: winnerName }) : (scoreA === scoreB && (scoreA > 0)) ? t("draw") : ""}
                 </div>
               )}
             </div>
 
-            {/* TAP-TO-SCORE: Takım oyuncu listeleri */}
+            {/* TAP-TO-SCORE: Takım strip */}
             {isMatch ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <div style={{
@@ -668,7 +873,7 @@ export default function MatchResultModal({
               )}
             </div>
 
-            {/* MVP toggle (sadece events varsa) */}
+            {/* MVP toggle */}
             {events.length > 0 && !saved && (
               <button
                 onClick={() => { hapticSelection(); setShowMvp((v) => !v); }}
@@ -782,7 +987,7 @@ export default function MatchResultModal({
         </div>
       </div>
 
-      {/* PICKER OVERLAY — ikinci modal */}
+      {/* PICKER OVERLAY */}
       {pickerSide && pickerTeam && (
         <div
           onClick={closePicker}
@@ -825,10 +1030,26 @@ export default function MatchResultModal({
                 {pickerTeam.name}
               </span>
               <span style={{ flex: 1 }} />
-              {pickerTeam.players.length === 0 && (
-                <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>
-                  {t("no_player_in_squad")}
-                </span>
+              {/* Step göstergesi */}
+              {pickerTeam.players.length > 0 && (
+                <div style={{ display: "flex", gap: 4 }}>
+                  {[
+                    "scorer",
+                    ...(draftGoalType !== "own_goal" && pickerTeam.players.length > 1 ? ["assist"] : []),
+                    "confirm",
+                  ].map((stepId, idx, arr) => (
+                    <div
+                      key={stepId}
+                      style={{
+                        width: step === stepId ? 16 : 5,
+                        height: 5,
+                        borderRadius: 3,
+                        background: arr.indexOf(step) >= idx ? pickerAccent : "rgba(255,255,255,0.15)",
+                        transition: "all 0.25s",
+                      }}
+                    />
+                  ))}
+                </div>
               )}
             </div>
 
@@ -838,7 +1059,6 @@ export default function MatchResultModal({
                 <div style={{ marginTop: 14 }}>
                   <button
                     onClick={() => {
-                      // Manuel skor + 1 (oyuncu yokken)
                       hapticMedium();
                       if (pickerSide === "A") setScoreA((s) => s + 1);
                       else setScoreB((s) => s + 1);
@@ -872,7 +1092,7 @@ export default function MatchResultModal({
                       ⚽ {t("pick_scorer")}
                     </div>
 
-                    {/* Goal type segmented (üstte, scorer seçilmeden) */}
+                    {/* Goal type segmented */}
                     <div style={{
                       display: "flex", gap: 4, marginBottom: 12,
                       overflowX: "auto", paddingBottom: 4,
@@ -900,10 +1120,10 @@ export default function MatchResultModal({
                       ))}
                     </div>
 
-                    {/* Player grid */}
+                    {/* FIFA-tarzı player grid (large kart) */}
                     <div style={{
                       display: "grid",
-                      gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
+                      gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))",
                       gap: 6,
                     }}>
                       {pickerTeam.players.map((p) => (
@@ -913,6 +1133,7 @@ export default function MatchResultModal({
                           accentColor={pickerAccent}
                           onClick={() => handleScorerPick(p)}
                           badge={goalsByPlayer[p.id]}
+                          large
                         />
                       ))}
                     </div>
@@ -934,7 +1155,7 @@ export default function MatchResultModal({
 
                     <div style={{
                       display: "grid",
-                      gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
+                      gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))",
                       gap: 6, marginBottom: 12,
                     }}>
                       {assistCandidates.map((p) => (
@@ -944,6 +1165,7 @@ export default function MatchResultModal({
                           accentColor={pickerAccent}
                           onClick={() => handleAssistPick(p)}
                           badge={assistsByPlayer[p.id]}
+                          large
                         />
                       ))}
                     </div>
@@ -965,7 +1187,7 @@ export default function MatchResultModal({
                   </div>
                 )}
 
-                {/* STEP 3: CONFIRM (dakika opsiyonel + kaydet) */}
+                {/* STEP 3: CONFIRM with slider minute */}
                 {step === "confirm" && draftScorer && (
                   <div style={{ padding: "10px 18px 18px" }}>
                     {/* Özet kart */}
@@ -993,56 +1215,105 @@ export default function MatchResultModal({
                       )}
                     </div>
 
-                    {/* Dakika input — opsiyonel */}
-                    <label style={{
-                      fontSize: 10, color: "rgba(255,255,255,0.5)", fontWeight: 700,
-                      textTransform: "uppercase", letterSpacing: 1, marginBottom: 6,
-                      display: "block",
+                    {/* Dakika — slider tarzı */}
+                    <div style={{
+                      padding: 14,
+                      background: "rgba(255,255,255,0.03)",
+                      border: "1px solid rgba(255,255,255,0.06)",
+                      borderRadius: 11,
+                      marginBottom: 14,
                     }}>
-                      {t("minute_optional")} ({t("optional")})
-                    </label>
-                    <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
-                      {[15, 30, 45, 60, 75, 90].map((m) => (
+                      <div style={{
+                        display: "flex", alignItems: "center", justifyContent: "space-between",
+                        marginBottom: 10,
+                      }}>
+                        <label style={{
+                          fontSize: 10, color: "rgba(255,255,255,0.5)", fontWeight: 700,
+                          textTransform: "uppercase", letterSpacing: 1,
+                        }}>
+                          {t("minute_optional")}
+                        </label>
                         <button
-                          key={m}
-                          onClick={() => { hapticSelection(); setDraftMinute(String(m)); }}
+                          onClick={() => { hapticSelection(); setDraftMinuteEnabled((v) => !v); }}
                           style={{
-                            padding: "8px 12px",
-                            borderRadius: 9,
-                            border: `1px solid ${draftMinute === String(m) ? pickerAccent : "rgba(255,255,255,0.08)"}`,
-                            background: draftMinute === String(m) ? `${pickerAccent}1f` : "rgba(255,255,255,0.03)",
-                            color: draftMinute === String(m) ? pickerAccent : "rgba(255,255,255,0.55)",
-                            fontSize: 12, fontWeight: 700, cursor: "pointer",
-                            fontFamily: "'JetBrains Mono', monospace",
+                            padding: "4px 10px",
+                            borderRadius: 6,
+                            border: `1px solid ${draftMinuteEnabled ? pickerAccent : "rgba(255,255,255,0.1)"}`,
+                            background: draftMinuteEnabled ? `${pickerAccent}22` : "transparent",
+                            color: draftMinuteEnabled ? pickerAccent : "rgba(255,255,255,0.4)",
+                            fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
                           }}
                         >
-                          {m}'
+                          {draftMinuteEnabled ? "✓ AÇIK" : "KAPALI"}
                         </button>
-                      ))}
-                      <input
-                        type="number"
-                        min="1" max="120"
-                        placeholder="..."
-                        value={draftMinute}
-                        onChange={(e) => setDraftMinute(e.target.value)}
-                        style={{
-                          width: 70,
-                          padding: "8px 10px",
-                          borderRadius: 9,
-                          border: "1px solid rgba(255,255,255,0.1)",
-                          background: "rgba(255,255,255,0.04)",
-                          color: "#e2e8f0",
-                          fontSize: 12, fontWeight: 700,
-                          fontFamily: "'JetBrains Mono', monospace",
-                          textAlign: "center", outline: "none",
-                        }}
-                      />
+                      </div>
+
+                      {draftMinuteEnabled && (
+                        <>
+                          <div style={{
+                            display: "flex", alignItems: "baseline", justifyContent: "center",
+                            gap: 4, marginBottom: 10,
+                          }}>
+                            <span style={{
+                              fontSize: 44, fontWeight: 800, color: pickerAccent,
+                              fontFamily: "'Bebas Neue', sans-serif", lineHeight: 1,
+                              textShadow: `0 0 16px ${pickerAccent}55`,
+                            }}>{draftMinute}</span>
+                            <span style={{
+                              fontSize: 14, color: pickerAccent, fontWeight: 700,
+                              opacity: 0.7,
+                            }}>'</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="1" max="120"
+                            value={draftMinute}
+                            onChange={(e) => setDraftMinute(parseInt(e.target.value, 10))}
+                            onTouchStart={() => hapticLight()}
+                            style={{
+                              width: "100%",
+                              accentColor: pickerAccent,
+                              cursor: "pointer",
+                            }}
+                          />
+                          <div style={{
+                            display: "flex", justifyContent: "space-between",
+                            fontSize: 9, color: "rgba(255,255,255,0.3)",
+                            marginTop: 4, fontFamily: "'JetBrains Mono', monospace",
+                          }}>
+                            <span>1'</span>
+                            <span>45'</span>
+                            <span>90'</span>
+                            <span>120'</span>
+                          </div>
+                          {/* Hızlı butonlar */}
+                          <div style={{ display: "flex", gap: 5, marginTop: 10, justifyContent: "center" }}>
+                            {[15, 30, 45, 60, 75, 90].map((m) => (
+                              <button
+                                key={m}
+                                onClick={() => { hapticSelection(); setDraftMinute(m); }}
+                                style={{
+                                  flex: 1,
+                                  padding: "5px 0",
+                                  borderRadius: 6,
+                                  border: `1px solid ${draftMinute === m ? pickerAccent : "rgba(255,255,255,0.06)"}`,
+                                  background: draftMinute === m ? `${pickerAccent}22` : "transparent",
+                                  color: draftMinute === m ? pickerAccent : "rgba(255,255,255,0.45)",
+                                  fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: "'JetBrains Mono', monospace",
+                                }}
+                              >
+                                {m}'
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      )}
                     </div>
 
                     {/* Buttons */}
                     <div style={{ display: "flex", gap: 8 }}>
                       <button
-                        onClick={() => setStep(draftGoalType === "own_goal" ? "scorer" : "assist")}
+                        onClick={() => setStep(draftGoalType === "own_goal" || pickerTeam.players.length === 1 ? "scorer" : "assist")}
                         style={{
                           flex: 1, padding: "12px",
                           borderRadius: 10,
@@ -1078,12 +1349,90 @@ export default function MatchResultModal({
           </div>
         </div>
       )}
+
+      {/* GOL EKLEME HATIRLATMA POP */}
+      {showSaveReminder && (
+        <div
+          onClick={() => setShowSaveReminder(false)}
+          style={{
+            position: "fixed", inset: 0, zIndex: 1300,
+            background: "rgba(0,0,0,0.85)", backdropFilter: "blur(14px)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: 20,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "linear-gradient(160deg, #1a1d27, #0e1117)",
+              borderRadius: 18,
+              border: "1px solid rgba(251,191,36,0.3)",
+              padding: 22,
+              maxWidth: 360,
+              textAlign: "center",
+              animation: "goalPop 0.35s",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.6), 0 0 40px rgba(251,191,36,0.15)",
+            }}
+          >
+            <div style={{ fontSize: 44, marginBottom: 8 }}>📊</div>
+            <div style={{
+              fontSize: 16, fontWeight: 800, color: "#fff",
+              marginBottom: 8,
+            }}>
+              {t("save_reminder_title")}
+            </div>
+            <div style={{
+              fontSize: 12, color: "rgba(255,255,255,0.55)",
+              marginBottom: 18, lineHeight: 1.5,
+            }}>
+              {t("save_reminder_desc")}
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={() => { setShowSaveReminder(false); onClose(); }}
+                style={{
+                  flex: 1, padding: "11px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  background: "rgba(255,255,255,0.03)",
+                  color: "rgba(255,255,255,0.55)",
+                  fontSize: 12, fontWeight: 700,
+                  cursor: "pointer", fontFamily: "inherit",
+                }}
+              >
+                {t("save_reminder_skip")}
+              </button>
+              <button
+                onClick={() => setShowSaveReminder(false)}
+                style={{
+                  flex: 1.4, padding: "11px",
+                  borderRadius: 10, border: "none",
+                  background: "linear-gradient(135deg, #fbbf24, #f59e0b)",
+                  color: "#7c2d12",
+                  fontSize: 12, fontWeight: 800,
+                  cursor: "pointer", fontFamily: "inherit",
+                  letterSpacing: 0.3,
+                  boxShadow: "0 6px 18px rgba(251,191,36,0.35)",
+                }}
+              >
+                ⚽ {t("save_reminder_continue")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
 
-// ─── Helper: Takım oyuncuları yatay strip (modal'da gösterim) ───
+// ─── Helper: Takım strip ───
 const TeamScorerStrip = ({ team, accent, side, onPlayerTap, goalsByPlayer, assistsByPlayer }) => {
+  const teamGoals = (team.players || [])
+    .map((p) => ({ p, g: goalsByPlayer[p.id] || 0 }))
+    .filter((x) => x.g > 0)
+    .sort((a, b) => b.g - a.g);
+  const totalGoals = teamGoals.reduce((a, b) => a + b.g, 0);
+
   return (
     <button
       onClick={onPlayerTap}
@@ -1125,30 +1474,22 @@ const TeamScorerStrip = ({ team, accent, side, onPlayerTap, goalsByPlayer, assis
             : "Önce kadro oluştur"}
         </div>
       </div>
-      {/* Top scorer rozet */}
-      {(() => {
-        const teamGoals = team.players
-          .map((p) => ({ p, g: goalsByPlayer[p.id] || 0 }))
-          .filter((x) => x.g > 0)
-          .sort((a, b) => b.g - a.g);
-        if (teamGoals.length === 0) return null;
-        return (
-          <div style={{
-            display: "flex", alignItems: "center", gap: 4,
-            padding: "5px 9px",
-            background: `${accent}25`,
-            borderRadius: 8,
+      {totalGoals > 0 && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 4,
+          padding: "5px 9px",
+          background: `${accent}25`,
+          borderRadius: 8,
+        }}>
+          <span style={{ fontSize: 11 }}>⚽</span>
+          <span style={{
+            fontSize: 11, fontWeight: 800, color: accent,
+            fontFamily: "'JetBrains Mono', monospace",
           }}>
-            <span style={{ fontSize: 11 }}>⚽</span>
-            <span style={{
-              fontSize: 11, fontWeight: 800, color: accent,
-              fontFamily: "'JetBrains Mono', monospace",
-            }}>
-              {teamGoals.reduce((a, b) => a + b.g, 0)}
-            </span>
-          </div>
-        );
-      })()}
+            {totalGoals}
+          </span>
+        </div>
+      )}
       <span style={{ color: accent, fontSize: 18, fontWeight: 700 }}>+</span>
     </button>
   );

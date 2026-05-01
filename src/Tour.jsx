@@ -7,6 +7,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { t } from "./i18n";
 
 const STORAGE_KEY = "halisaha_tour_done";
+const STORAGE_KEY_MATCH = "halisaha_tour_match_end_done";
 
 export const isTourDone = () => {
   try { return localStorage.getItem(STORAGE_KEY) === "1"; } catch { return false; }
@@ -15,11 +16,19 @@ export const markTourDone = () => {
   try { localStorage.setItem(STORAGE_KEY, "1"); } catch {}
 };
 export const resetTour = () => {
-  try { localStorage.removeItem(STORAGE_KEY); } catch {}
+  try { localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(STORAGE_KEY_MATCH); } catch {}
+};
+// Match-end mini-tour
+export const isMatchEndTourDone = () => {
+  try { return localStorage.getItem(STORAGE_KEY_MATCH) === "1"; } catch { return false; }
+};
+export const markMatchEndTourDone = () => {
+  try { localStorage.setItem(STORAGE_KEY_MATCH, "1"); } catch {}
 };
 
-const STEPS = [
-  { target: "mode-myteam",    title: "tour_0_title", desc: "tour_0_desc", placement: "bottom", waitFor: "event:mode-selected" }, // ← değişti
+// Ana tur — takım kurma akışı
+const STEPS_MAIN = [
+  { target: "mode-myteam",    title: "tour_0_title", desc: "tour_0_desc", placement: "bottom", waitFor: "event:mode-selected" },
   { target: "tab-squad",      title: "tour_1_title", desc: "tour_1_desc", placement: "top",    waitFor: "click" },
   { target: "btn-add-player", title: "tour_2_title", desc: "tour_2_desc", placement: "bottom", waitFor: "click" },
   { target: null,             title: "tour_3_title", desc: "tour_3_desc", placement: "center", waitFor: "event:player-saved" },
@@ -27,10 +36,17 @@ const STEPS = [
   { target: "empty-slot",     title: "tour_5_title", desc: "tour_5_desc", placement: "bottom", waitFor: "click" },
 ];
 
+// Mini tour — maçı bitir vurgu
+const STEPS_MATCH_END = [
+  { target: "end-match", title: "tour_me_0_title", desc: "tour_me_0_desc", placement: "bottom", waitFor: "click" },
+];
+
 const PAD = 8;
 const DIM = "rgba(0,0,0,0.78)";
 
-export default function Tour({ active, onFinish }) {
+export default function Tour({ active, onFinish, mode = "main" }) {
+  // mode: "main" (takım kurulum) | "matchEnd" (maçı bitir vurgusu)
+  const STEPS = mode === "matchEnd" ? STEPS_MATCH_END : STEPS_MAIN;
   const [stepIdx, setStepIdx] = useState(0);
   const [rect, setRect] = useState(null);
   const [tick, setTick] = useState(0);

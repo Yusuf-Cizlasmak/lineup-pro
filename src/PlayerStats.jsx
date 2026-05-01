@@ -1,5 +1,6 @@
 // ─────────────────────────────────────────────────────────────
-// HalıSaha-Kolik · Oyuncu Profil & İstatistik Sayfası
+// HalıSaha-Kolik · Oyuncu Profil & İstatistik (FIFA Kart Tarzı)
+// + Form chart (son 10 maç) — saf SVG ile çizdik (recharts dependency yok)
 // ─────────────────────────────────────────────────────────────
 import React, { useMemo } from "react";
 import { t, tPos } from "./i18n";
@@ -15,11 +16,256 @@ const getInitials = (n, s) => {
   return "⚽";
 };
 
+// Rating'e göre renk
+const ratingColor = (rating) => {
+  if (rating >= 90) return "#fbbf24"; // gold
+  if (rating >= 80) return "#a78bfa"; // purple
+  if (rating >= 70) return "#60a5fa"; // blue
+  if (rating >= 60) return "#34d399"; // green
+  return "#94a3b8"; // gray
+};
+
+// Pozisyon kısaltması (FIFA tarzı)
+const positionShort = (pos) => {
+  const map = {
+    "KALECİ": "GK", "DEFANS": "DEF", "ORTASAHA": "MID", "FORVET": "FWD",
+    "SOL BEK": "LB", "SAĞ BEK": "RB", "STOPER": "CB",
+    "DEFANSİF ORTASAHA": "DM", "OFANSİF ORTASAHA": "AM",
+    "SOL KANAT": "LW", "SAĞ KANAT": "RW", "SANTRAFOR": "ST",
+  };
+  return map[pos] || (pos || "—").substring(0, 3).toUpperCase();
+};
+
+// ─── FIFA STYLE PLAYER CARD ───
+const FifaCard = ({ player, accent }) => {
+  const rating = player.rating || 70;
+  const ratingCol = ratingColor(rating);
+
+  return (
+    <div style={{
+      position: "relative",
+      borderRadius: 18,
+      overflow: "hidden",
+      padding: "0",
+      background: `linear-gradient(160deg, ${accent}28, ${accent}08 60%, rgba(0,0,0,0.4))`,
+      border: `1px solid ${accent}40`,
+      marginBottom: 14,
+      boxShadow: `0 12px 40px rgba(0,0,0,0.4), 0 0 30px ${accent}22`,
+      animation: "fifaCardIn 0.5s cubic-bezier(.34,1.56,.64,1)",
+    }}>
+      {/* Glow background */}
+      <div style={{
+        position: "absolute",
+        top: -40, left: -40, right: -40, height: 140,
+        background: `radial-gradient(circle at 50% 0%, ${accent}55 0%, transparent 70%)`,
+        pointerEvents: "none",
+      }} />
+
+      <div style={{
+        position: "relative",
+        padding: "18px 20px",
+        display: "grid",
+        gridTemplateColumns: "auto 1fr auto",
+        gap: 14,
+        alignItems: "center",
+      }}>
+        {/* Sol: Rating + position */}
+        <div style={{
+          display: "flex", flexDirection: "column",
+          alignItems: "center", gap: 4,
+          minWidth: 56,
+        }}>
+          <div style={{
+            fontSize: 38, fontWeight: 900, color: ratingCol,
+            fontFamily: "'Bebas Neue', sans-serif", lineHeight: 1,
+            textShadow: `0 0 16px ${ratingCol}88`,
+          }}>{rating}</div>
+          <div style={{
+            fontSize: 11, fontWeight: 800,
+            color: ratingCol, opacity: 0.85,
+            fontFamily: "'Bebas Neue', sans-serif",
+            letterSpacing: 1.2,
+          }}>
+            {positionShort(player.position)}
+          </div>
+        </div>
+
+        {/* Orta: Forma + isim */}
+        <div style={{ minWidth: 0, textAlign: "center" }}>
+          <div style={{
+            width: 64, height: 64, borderRadius: 16,
+            background: `linear-gradient(135deg, ${accent}, ${accent}cc)`,
+            margin: "0 auto 8px",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            color: "#0a1628", fontWeight: 800,
+            fontSize: 24,
+            fontFamily: "'JetBrains Mono', monospace",
+            boxShadow: `0 8px 22px ${accent}66`,
+          }}>
+            {player.jerseyNumber || getInitials(player.name, player.surname)}
+          </div>
+          <div style={{
+            fontSize: 11, color: "rgba(255,255,255,0.55)",
+            fontWeight: 700, textTransform: "uppercase",
+            letterSpacing: 0.5, lineHeight: 1.2,
+            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+          }}>
+            {player.name}
+          </div>
+          <div style={{
+            fontSize: 16, fontWeight: 800, color: "#fff",
+            fontFamily: "'Bebas Neue', sans-serif",
+            letterSpacing: 1, lineHeight: 1.1,
+            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+          }}>
+            {(player.surname || "").toUpperCase()}
+          </div>
+        </div>
+
+        {/* Sağ: Pozisyon detayı */}
+        <div style={{
+          display: "flex", flexDirection: "column",
+          alignItems: "center", gap: 4,
+          minWidth: 56,
+        }}>
+          <div style={{
+            padding: "5px 8px",
+            borderRadius: 6,
+            background: "rgba(0,0,0,0.35)",
+            fontSize: 9, fontWeight: 800,
+            color: ratingCol,
+            letterSpacing: 0.5,
+            fontFamily: "'Bebas Neue', sans-serif",
+            textTransform: "uppercase",
+          }}>
+            ⭐ {rating >= 90 ? "ELITE" : rating >= 80 ? "RARE" : rating >= 70 ? "GOLD" : rating >= 60 ? "SILVER" : "BRONZE"}
+          </div>
+        </div>
+      </div>
+
+      {/* Pozisyon tam isim */}
+      <div style={{
+        background: "rgba(0,0,0,0.3)",
+        padding: "8px 20px",
+        textAlign: "center",
+        fontSize: 10, fontWeight: 700,
+        color: "rgba(255,255,255,0.5)",
+        letterSpacing: 1.2, textTransform: "uppercase",
+        borderTop: "1px solid rgba(255,255,255,0.05)",
+      }}>
+        {tPos(player.position)}
+      </div>
+    </div>
+  );
+};
+
+// ─── FORM CHART (son 10 maç) — Saf SVG ───
+const FormChart = ({ matches, accent }) => {
+  if (!matches || matches.length === 0) return null;
+
+  // Maçları kronolojik sırala (eskiden yeniye)
+  const sorted = [...matches].sort((a, b) => a.playedAt - b.playedAt).slice(-10);
+
+  // Her maç için "performans skoru" — gol*2 + asist*1 + (W:2, D:1, L:0)
+  const dataPoints = sorted.map((m) => {
+    const result = m.result === "W" ? 2 : m.result === "D" ? 1 : 0;
+    return Math.min(10, m.goals * 2 + m.assists + result);
+  });
+
+  if (dataPoints.length < 2) return null;
+
+  const W = 280;
+  const H = 80;
+  const PAD = 8;
+  const max = 10;
+
+  // Path
+  const stepX = (W - PAD * 2) / (dataPoints.length - 1);
+  const points = dataPoints.map((v, i) => {
+    const x = PAD + i * stepX;
+    const y = H - PAD - (v / max) * (H - PAD * 2);
+    return { x, y, v };
+  });
+  const path = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
+  const fill = `${path} L ${points[points.length - 1].x} ${H - PAD} L ${points[0].x} ${H - PAD} Z`;
+
+  return (
+    <div style={{
+      padding: 14,
+      background: "rgba(255,255,255,0.03)",
+      border: "1px solid rgba(255,255,255,0.05)",
+      borderRadius: 12,
+      marginBottom: 14,
+    }}>
+      <div style={{
+        fontSize: 10, color: "rgba(255,255,255,0.4)", fontWeight: 700,
+        textTransform: "uppercase", letterSpacing: 1, marginBottom: 10,
+      }}>
+        📈 {t("ps_form_chart")}
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: "100%", height: 80 }}>
+        <defs>
+          <linearGradient id={`formFill-${accent.replace("#", "")}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={accent} stopOpacity="0.4" />
+            <stop offset="100%" stopColor={accent} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {/* Grid lines */}
+        {[0, 0.5, 1].map((g) => (
+          <line key={g}
+            x1={PAD} y1={H - PAD - g * (H - PAD * 2)}
+            x2={W - PAD} y2={H - PAD - g * (H - PAD * 2)}
+            stroke="rgba(255,255,255,0.05)" strokeWidth="1" strokeDasharray="2 4"
+          />
+        ))}
+        {/* Fill */}
+        <path d={fill} fill={`url(#formFill-${accent.replace("#", "")})`} />
+        {/* Line */}
+        <path d={path} fill="none" stroke={accent} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+        {/* Points */}
+        {points.map((p, i) => {
+          const m = sorted[i];
+          const isWin = m.result === "W";
+          return (
+            <g key={i}>
+              <circle cx={p.x} cy={p.y} r={isWin ? 4 : 3} fill={accent} />
+              <circle cx={p.x} cy={p.y} r={isWin ? 6 : 4} fill={accent} opacity="0.3" />
+            </g>
+          );
+        })}
+      </svg>
+      {/* W/D/L badge satırı */}
+      <div style={{
+        display: "flex", justifyContent: "space-between",
+        marginTop: 8, gap: 4,
+      }}>
+        {sorted.map((m, i) => {
+          const c = m.result === "W" ? "#10b981" : m.result === "D" ? "#94a3b8" : "#dc2626";
+          return (
+            <div key={i} style={{
+              flex: 1,
+              height: 14,
+              borderRadius: 3,
+              background: `${c}22`,
+              color: c,
+              fontSize: 9, fontWeight: 800,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontFamily: "'JetBrains Mono', monospace",
+            }}>
+              {m.result}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+// ─── MAIN ───
 export default function PlayerStatsView({ player, accent = "#34d399", onBack }) {
   const matches = useMemo(() => getAllMatches(), []);
   const { stat } = useMemo(() => getPlayerStats(player.id, matches), [player.id, matches]);
 
-  // Gol türü dağılımı (basit horizontal bar)
   const goalTypeData = stat ? [
     { id: "normal",   label: "⚽", value: stat.goalsByType.normal,   color: "#fbbf24" },
     { id: "penalty",  label: "🎯", value: stat.goalsByType.penalty,  color: "#f87171" },
@@ -28,6 +274,9 @@ export default function PlayerStatsView({ player, accent = "#34d399", onBack }) 
   ].filter((d) => d.value > 0) : [];
 
   const totalTypedGoals = goalTypeData.reduce((a, b) => a + b.value, 0);
+
+  // Son 10 maç (form chart için)
+  const last10 = stat?.lastMatches || [];
 
   return (
     <div style={{
@@ -38,7 +287,18 @@ export default function PlayerStatsView({ player, accent = "#34d399", onBack }) 
       maxWidth: 480, margin: "0 auto",
       display: "flex", flexDirection: "column", overflow: "hidden",
     }}>
-      {/* Header */}
+      <style>{`
+        @keyframes fifaCardIn {
+          0% { transform: scale(0.85) rotateY(-15deg); opacity: 0; }
+          60% { transform: scale(1.02) rotateY(2deg); opacity: 1; }
+          100% { transform: scale(1) rotateY(0); opacity: 1; }
+        }
+        @keyframes cascadeInPS {
+          from { opacity: 0; transform: translateY(8px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
+
       <div style={{
         padding: "10px 13px",
         paddingTop: "calc(10px + env(safe-area-inset-top, 0px))",
@@ -67,51 +327,8 @@ export default function PlayerStatsView({ player, accent = "#34d399", onBack }) 
         padding: 13,
         paddingBottom: "calc(20px + env(safe-area-inset-bottom, 0px))",
       }}>
-        {/* HERO CARD */}
-        <div style={{
-          background: `linear-gradient(135deg, ${accent}1a, ${accent}05)`,
-          border: `1px solid ${accent}33`,
-          borderRadius: 16,
-          padding: "18px 16px",
-          marginBottom: 14,
-          display: "flex", alignItems: "center", gap: 14,
-        }}>
-          <div style={{
-            width: 64, height: 64, borderRadius: 14,
-            background: `linear-gradient(135deg, ${accent}, ${accent}cc)`,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            color: "#0a1628", fontWeight: 800, fontSize: 22,
-            boxShadow: `0 8px 24px ${accent}55`,
-            flexShrink: 0,
-          }}>
-            {player.jerseyNumber || getInitials(player.name, player.surname)}
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{
-              fontSize: 18, fontWeight: 800, color: "#fff",
-              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-            }}>
-              {player.name} {player.surname}
-            </div>
-            <div style={{ fontSize: 11, color: accent, fontWeight: 700, marginTop: 2, letterSpacing: 0.3 }}>
-              {tPos(player.position)}
-            </div>
-            {player.rating && (
-              <div style={{
-                marginTop: 6,
-                display: "inline-block",
-                padding: "3px 8px",
-                background: "rgba(0,0,0,0.35)",
-                borderRadius: 6,
-                fontSize: 11, fontWeight: 700,
-                color: "#fbbf24",
-                fontFamily: "'JetBrains Mono', monospace",
-              }}>
-                ⭐ {player.rating}
-              </div>
-            )}
-          </div>
-        </div>
+        {/* FIFA CARD HERO */}
+        <FifaCard player={player} accent={accent} />
 
         {/* No data state */}
         {!stat || stat.matches === 0 ? (
@@ -127,15 +344,15 @@ export default function PlayerStatsView({ player, accent = "#34d399", onBack }) 
           </div>
         ) : (
           <>
-            {/* PRIMARY STATS */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
-              <BigStat label={t("ps_matches")}  value={stat.matches} icon="📅" color="#94a3b8" />
-              <BigStat label={t("ps_goals")}    value={stat.goals}   icon="⚽" color="#fbbf24" />
-              <BigStat label={t("ps_assists")}  value={stat.assists} icon="🎯" color="#60a5fa" />
-              <BigStat label={t("ps_g_per_m")}  value={stat.goalsPerMatch.toFixed(2)} icon="📈" color="#34d399" />
+            <div style={{ animation: "cascadeInPS 0.35s 0.1s both" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+                <BigStat label={t("ps_matches")}  value={stat.matches} icon="📅" color="#94a3b8" />
+                <BigStat label={t("ps_goals")}    value={stat.goals}   icon="⚽" color="#fbbf24" />
+                <BigStat label={t("ps_assists")}  value={stat.assists} icon="🎯" color="#60a5fa" />
+                <BigStat label={t("ps_g_per_m")}  value={stat.goalsPerMatch.toFixed(2)} icon="📈" color="#34d399" />
+              </div>
             </div>
 
-            {/* SECONDARY STATS */}
             <div style={{
               padding: 12,
               background: "rgba(255,255,255,0.03)",
@@ -143,14 +360,20 @@ export default function PlayerStatsView({ player, accent = "#34d399", onBack }) 
               borderRadius: 12,
               marginBottom: 14,
               display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12,
+              animation: "cascadeInPS 0.35s 0.18s both",
             }}>
               <SmallStat label={t("ps_win_rate")}     value={`${(stat.winRate * 100).toFixed(0)}%`} accent="#a78bfa" />
               <SmallStat label={t("ps_clean_sheets")} value={stat.cleanSheets} accent="#34d399" />
               <SmallStat label={t("ps_mvp")}          value={stat.mvpCount} accent="#fbbf24" />
             </div>
 
+            {/* FORM CHART */}
+            <div style={{ animation: "cascadeInPS 0.35s 0.25s both" }}>
+              <FormChart matches={last10} accent={accent} />
+            </div>
+
             {/* W/D/L RECORD */}
-            <div style={{ marginBottom: 14 }}>
+            <div style={{ marginBottom: 14, animation: "cascadeInPS 0.35s 0.3s both" }}>
               <div style={{
                 fontSize: 10, color: "rgba(255,255,255,0.4)", fontWeight: 700,
                 textTransform: "uppercase", letterSpacing: 1, marginBottom: 8,
@@ -207,7 +430,7 @@ export default function PlayerStatsView({ player, accent = "#34d399", onBack }) 
 
             {/* GOAL BREAKDOWN */}
             {totalTypedGoals > 0 && (
-              <div style={{ marginBottom: 14 }}>
+              <div style={{ marginBottom: 14, animation: "cascadeInPS 0.35s 0.35s both" }}>
                 <div style={{
                   fontSize: 10, color: "rgba(255,255,255,0.4)", fontWeight: 700,
                   textTransform: "uppercase", letterSpacing: 1, marginBottom: 8,
@@ -231,7 +454,7 @@ export default function PlayerStatsView({ player, accent = "#34d399", onBack }) 
                             width: `${pct}%`, height: "100%",
                             background: `linear-gradient(90deg, ${d.color}, ${d.color}cc)`,
                             borderRadius: 4,
-                            transition: "width 0.4s",
+                            transition: "width 0.6s ease-out",
                           }} />
                         </div>
                         <span style={{
@@ -248,7 +471,7 @@ export default function PlayerStatsView({ player, accent = "#34d399", onBack }) 
 
             {/* LAST 5 MATCHES */}
             {stat.lastMatches.length > 0 && (
-              <div>
+              <div style={{ animation: "cascadeInPS 0.35s 0.4s both" }}>
                 <div style={{
                   fontSize: 10, color: "rgba(255,255,255,0.4)", fontWeight: 700,
                   textTransform: "uppercase", letterSpacing: 1, marginBottom: 8,
@@ -258,6 +481,9 @@ export default function PlayerStatsView({ player, accent = "#34d399", onBack }) 
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   {stat.lastMatches.map((m, idx) => {
                     const resultColor = m.result === "W" ? "#10b981" : m.result === "D" ? "#94a3b8" : "#dc2626";
+                    const d = new Date(m.playedAt);
+                    const dateStr = `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()}`;
+                    const timeStr = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
                     return (
                       <div key={`${m.matchId}-${idx}`} style={{
                         display: "flex", alignItems: "center", gap: 10,
@@ -284,8 +510,11 @@ export default function PlayerStatsView({ player, accent = "#34d399", onBack }) 
                           }}>
                             vs {m.opponent}
                           </div>
-                          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)" }}>
-                            {new Date(m.playedAt).toLocaleDateString()}
+                          <div style={{
+                            fontSize: 10, color: "rgba(255,255,255,0.4)",
+                            fontFamily: "'JetBrains Mono', monospace",
+                          }}>
+                            {dateStr} · {timeStr}
                           </div>
                         </div>
                         <div style={{ display: "flex", gap: 8, fontSize: 11 }}>

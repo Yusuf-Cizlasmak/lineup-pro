@@ -4,7 +4,7 @@ import { startAds, showInterstitial, showRewarded, showBanner, hideBanner } from
 import { t, useLang, setLang, tPos } from "./i18n";
 import { LangToggle } from "./Onboarding";
 import { hapticLight, hapticMedium, hapticHeavy, hapticSuccess, hapticWarning, hapticSelection, isHapticsEnabled, setHapticsEnabled } from "./haptics";
-import { isTourDone, resetTour } from "./Tour";
+import { isTourDone, resetTour, isMatchEndTourDone, markMatchEndTourDone } from "./Tour";
 import { Share } from "@capacitor/share";
 import { Filesystem, Directory } from "@capacitor/filesystem";
 import { Capacitor } from "@capacitor/core";
@@ -1202,6 +1202,27 @@ export default function LineupPro() {
     saveData(teamA, teamB);
   }, [teamA, teamB]);
 
+  // ★ MATCH-END TOUR: maç modunda her iki takımda en az 1 oyuncu sahadayken
+  //    ilk kez "Maçı Bitir" butonunu vurgulayan mini-tour'u tetikle
+  useEffect(() => {
+    if (!isMatch) return;
+    if (isMatchEndTourDone()) return;
+    const aOnField = teamA.fieldPlayers?.filter(Boolean).length || 0;
+    const bOnField = teamB.fieldPlayers?.filter(Boolean).length || 0;
+    if (aOnField >= 1 && bOnField >= 1) {
+      // Modal/tour açıkken tetiklemeyelim
+      const onbActive = window.__onboardingActive === true;
+      if (showPlayer || showCaptain || showAppSettings || showResult || showSettings || quickSelect || onbActive) return;
+      const t1 = setTimeout(() => {
+        if (!isMatchEndTourDone()) {
+          markMatchEndTourDone();
+          window.dispatchEvent(new CustomEvent("halisaha:start-match-end-tour"));
+        }
+      }, 1000);
+      return () => clearTimeout(t1);
+    }
+  }, [isMatch, teamA.fieldPlayers, teamB.fieldPlayers, showPlayer, showCaptain, showAppSettings, showResult, showSettings, quickSelect]);
+
   const toast_ = (m) => { setToast({ show: true, msg: m }); setTimeout(() => setToast({ show: false, msg: "" }), 1800); };
 
   const getPositions = (side) => FORMATIONS[(side === "A" ? teamA : teamB).formation].positions.map((p) => mapPos(p, side, isMatch));
@@ -1333,6 +1354,39 @@ const handleShareLineup = async () => {
     @keyframes tooltipIn { from { opacity: 0; transform: translate(-50%, -4px) scale(0.95) } to { opacity: 1; transform: translate(-50%, 0) scale(1) } }
     @keyframes pulseGlow { 0%,100% { opacity: 0.5 } 50% { opacity: 1 } }
     @keyframes pulse { 0%,100% { opacity: 0.6 } 50% { opacity: 1 } }
+    @keyframes matchEndPulse {
+      0%, 100% { box-shadow: 0 4px 14px rgba(220,38,38,0.45), 0 0 0 0 rgba(248,113,113,0.6); }
+      50% { box-shadow: 0 6px 22px rgba(220,38,38,0.7), 0 0 0 8px rgba(248,113,113,0); }
+    }
+    @keyframes floatUp {
+      0% { transform: translateY(0) scale(0.8); opacity: 0; }
+      30% { transform: translateY(-20px) scale(1.2); opacity: 1; }
+      100% { transform: translateY(-60px) scale(1); opacity: 0; }
+    }
+    @keyframes scoreFlip {
+      0% { transform: rotateX(0); }
+      50% { transform: rotateX(90deg); }
+      100% { transform: rotateX(0); }
+    }
+    @keyframes trophyDrop {
+      0% { transform: translateY(-100px) rotate(-20deg); opacity: 0; }
+      60% { transform: translateY(10px) rotate(8deg); opacity: 1; }
+      100% { transform: translateY(0) rotate(0); opacity: 1; }
+    }
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      10%, 30%, 50%, 70%, 90% { transform: translateX(-3px); }
+      20%, 40%, 60%, 80% { transform: translateX(3px); }
+    }
+    @keyframes hatTrickIn {
+      0% { transform: scale(0.3) rotate(-15deg); opacity: 0; }
+      60% { transform: scale(1.15) rotate(3deg); opacity: 1; }
+      100% { transform: scale(1) rotate(0); opacity: 1; }
+    }
+    @keyframes cascadeIn {
+      from { opacity: 0; transform: translateX(-12px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
     * { box-sizing: border-box; margin: 0; padding: 0 }
     html { height: 100%; overflow: hidden; }
     body { height: 100%; overflow: hidden; position: fixed; width: 100%; }
@@ -1454,9 +1508,34 @@ const handleShareLineup = async () => {
           {/* PAYLAŞ BUTONU: Her iki modda da görünür */}
           <button onClick={handleShareLineup} style={{ ...S.mini, padding: "5px 10px", gap: 4, display: "flex", alignItems: "center", borderRadius: 8, fontSize: 10, fontWeight: 600, color: tc, border: `1px solid ${tc}33`, background: `${tc}11` }}><I.Share /></button>
 
-          {/* MAÇI BİTİR BUTONU: Sadece maç modunda */}
+          {/* MAÇI BİTİR BUTONU: Sadece maç modunda — büyük, pulse + glow */}
           {isMatch && (
-            <button onClick={handleMatchEnd} style={{ ...S.mini, padding: "5px 10px", gap: 5, fontSize: 10, fontWeight: 700, color: "#fbbf24", border: "1px solid rgba(251,191,36,0.3)", background: "rgba(251,191,36,0.08)", borderRadius: 8, display: "flex", alignItems: "center" }}><I.Flag /> {t("hdr_end_match")}</button>
+            <button
+              data-tour="end-match"
+              onClick={handleMatchEnd}
+              style={{
+                position: "relative",
+                padding: "7px 12px",
+                gap: 6,
+                fontSize: 11,
+                fontWeight: 800,
+                color: "#fff",
+                border: "1px solid rgba(248,113,113,0.6)",
+                background: "linear-gradient(135deg, #dc2626, #ef4444)",
+                borderRadius: 10,
+                display: "flex",
+                alignItems: "center",
+                cursor: "pointer",
+                fontFamily: "inherit",
+                letterSpacing: 0.4,
+                textTransform: "uppercase",
+                boxShadow: "0 4px 14px rgba(220,38,38,0.45), 0 0 0 0 rgba(248,113,113,0.5)",
+                animation: "matchEndPulse 2.2s ease-in-out infinite",
+                whiteSpace: "nowrap",
+              }}
+            >
+              <I.Flag /> {t("hdr_end_match")}
+            </button>
           )}
         </div>
       </div>
