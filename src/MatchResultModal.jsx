@@ -403,6 +403,7 @@ export default function MatchResultModal({
   const [savedSummary, setSavedSummary] = useState(null);
   const [showSaveReminder, setShowSaveReminder] = useState(false);
   const scoreRef = useRef(null);
+  const shareRef = useRef(null); // sadece trophy + skor board — paylaşım için
   const teamAScoreRef = useRef(null);
   const teamBScoreRef = useRef(null);
 
@@ -627,7 +628,7 @@ export default function MatchResultModal({
     // Başarı pop-up'ı göster — paylaşmadan veya paylaştıktan sonra
     if (alsoShare && scoreRef.current && captureAndShare) {
       setTimeout(async () => {
-        await captureAndShare(scoreRef.current, "mac-sonucu.png");
+        await captureAndShare(shareRef.current, "mac-sonucu.png");
         setShowSuccessPopup(true);
         setTimeout(() => { showInterstitial(); }, 500);
       }, 250);
@@ -752,12 +753,18 @@ export default function MatchResultModal({
             >×</button>
           </div>
 
-          {/* SCREENSHOT TARGET */}
+          {/* SCREENSHOT TARGET — Tüm alan (eskiden kullanılıyordu) */}
           <div ref={scoreRef} style={{
             padding: "0 18px 20px",
             display: "flex", flexDirection: "column", gap: 16,
             background: "#0e1117",
           }}>
+            {/* PAYLAŞIM ALANI — sadece trophy + skor board */}
+            <div ref={shareRef} style={{
+              background: "#0e1117",
+              padding: "16px 18px",
+              borderRadius: 18,
+            }}>
             {/* Trophy header */}
             {winner && <TrophyHeader winnerName={winnerName} winnerColor={winnerColor} />}
 
@@ -813,6 +820,7 @@ export default function MatchResultModal({
                 </div>
               )}
             </div>
+            </div>{/* /shareRef */}
 
             {/* TAP-TO-SCORE: Takım strip */}
             {isMatch ? (
