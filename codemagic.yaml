@@ -146,8 +146,18 @@ workflows:
           add_or_set_string "NSPhotoLibraryAddUsageDescription" \
             "Oluşturulan kadro görselini galeriye kaydetmek için izin gerekir."
 
-          echo "----- Info.plist Camera/Photo keys -----"
-          /usr/libexec/PlistBuddy -c "Print" "$PLIST" | grep -E "Camera|Photo" || echo "⚠️ Eklenememiş!"
+          # KRİTİK: AdMob iOS App ID — olmadan SDK crash/sessiz fail atar
+          # npx cap sync bazen bunu üzerine yazabiliyor, garantiye alıyoruz
+          add_or_set_string "GADApplicationIdentifier" \
+            "$GAD_APP_ID"
+
+          # KRİTİK: ATT dialog metni — iOS 14.5+ zorunlu
+          # Bu olmadan ATT dialog açılmaz, tracking denied sayılır -> match rate 0
+          add_or_set_string "NSUserTrackingUsageDescription" \
+            "Size daha alakalı reklamlar göstermek için reklam kimliğinize erişim gereklidir."
+
+          echo "----- Info.plist AdMob + ATT + Camera keys -----"
+          /usr/libexec/PlistBuddy -c "Print" "$PLIST" | grep -E "Camera|Photo|GAD|Tracking" || echo "Eklenememiş!"
 
       - name: Detect provisioning profile
         script: |

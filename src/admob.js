@@ -39,6 +39,9 @@ let isInterstitialReady = false;
 let isInterstitialLoading = false;     // ★ Android: prepareInterstitial çağrıldı mı?
 let isRewardedReady = false;
 let isRewardedLoading = false;         // ★ Android: prepareRewarded çağrıldı mı?
+// ★ FIX: iOS'ta Türkiye gibi UMP-scope dışı bölgelerde status UNKNOWN dönebilir.
+// Başlangıç değeri false yerine null bırakıyoruz; consent sonrası set edilecek.
+// Eğer status belirlenemezse güvenli varsayılan: true (reklam göster, npa=false).
 let canShowAds = false;
 let listenersAttached = false;         // ★ Listener'lar bir kez eklensin
 
@@ -148,26 +151,39 @@ export async function initializeAdMob() {
     // ═══ 3) UMP Consent ═══
     try {
       const consentInfo = await AdMob.requestConsentInfo();
-      console.log('ℹ️ Consent:', consentInfo.status);
+      console.log('ℹ️ Consent status:', consentInfo.status);
+
       if (consentInfo.isConsentFormAvailable && consentInfo.status === AdmobConsentStatus.REQUIRED) {
         await AdMob.showConsentForm();
+        // Form gösterildikten sonra güncel status'u tekrar al
+        const updatedInfo = await AdMob.requestConsentInfo();
+        console.log('ℹ️ Consent (form sonrası):', updatedInfo.status);
+        canShowAds = updatedInfo.status === AdmobConsentStatus.OBTAINED
+                  || updatedInfo.status === AdmobConsentStatus.NOT_REQUIRED;
+      } else {
+        // ★ KRİTİK FIX: Türkiye gibi UMP-scope dışı bölgelerde UNKNOWN veya
+        // NOT_REQUIRED dönebilir. UNKNOWN dahil tüm "form gerekmez" durumlarında
+        // reklam göster. Sadece açıkça REQUIRED ve form gösterilmemişse kapat.
+        const explicitlyBlocked = consentInfo.status === AdmobConsentStatus.REQUIRED
+                                  && !consentInfo.isConsentFormAvailable;
+        canShowAds = !explicitlyBlocked;
+        console.log('ℹ️ canShowAds:', canShowAds, '(status:', consentInfo.status, ')');
       }
-      canShowAds = consentInfo.status === AdmobConsentStatus.OBTAINED
-                || consentInfo.status === AdmobConsentStatus.NOT_REQUIRED;
     } catch (e) {
-      console.warn('⚠️ Consent hatası:', e);
+      console.warn('⚠️ Consent hatası — reklam göstermeye devam:', e);
       canShowAds = true;
     }
 
     isInitialized = true;
 
-    // ★ Android: SDK init Promise resolve etse de internal mediation
-    //    adapter'ları tam hazır olmuyor. Kısa gecikme ile reklam preload
-    //    çağrılarının başarı oranını ciddi şekilde artırıyoruz.
+    // ★ FIX: iOS'a da yeterli süre ver. iOS mediation adapterleri de
+    // initialize() Promise'i resolve ettikten hemen sonra hazır olmayabiliyor.
+    // 0ms → 600ms yaparak "no fill" oranını ciddi düşürüyoruz.
+    const preloadDelay = PLATFORM === 'android' ? 800 : 600;
     setTimeout(() => {
       prepareInterstitial();
       prepareRewarded();
-    }, PLATFORM === 'android' ? 800 : 0);
+    }, preloadDelay);
 
     return true;
   } catch (e) {
