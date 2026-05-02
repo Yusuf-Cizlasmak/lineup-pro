@@ -8,7 +8,7 @@ import Tour from "./Tour";
 // ─── ADMOB DEBUG PANEL ───────────────────────────────────────
 // Geçici: Mac olmadan iOS'ta AdMob loglarını ekranda görmek için.
 // Test bittikten sonra ADMOB_DEBUG = false yap veya tüm bloğu sil.
-const ADMOB_DEBUG = true;
+const ADMOB_DEBUG = false;
 
 function AdMobDebugPanel() {
   const [logs, setLogs] = useState([]);

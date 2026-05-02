@@ -1,7 +1,7 @@
 import { AdMob, BannerAdSize, BannerAdPosition, MaxAdContentRating, AdmobConsentStatus } from '@capacitor-community/admob';
 import { Capacitor } from '@capacitor/core';
 
-const IS_TESTING = true;
+const IS_TESTING = false;
 
 // ═══ PLATFORM-SPECIFIC AD IDs ═══
 const PLATFORM = Capacitor.getPlatform(); // 'ios' | 'android' | 'web'
