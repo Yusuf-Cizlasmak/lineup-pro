@@ -29,7 +29,7 @@ import {
   setCoAdmin, setCaptain, removeCaptain,
   setMVP, togglePlayerReady,
 } from './LiveMatchService';
-import { hapticMedium, hapticHeavy, hapticSuccess, hapticLight } from './haptics';
+import { hapticMedium, hapticHeavy, hapticSuccess, hapticLight, hapticSelection } from './haptics';
 import SpiderChart from './SpiderChart';
 import {
   getAttrKeys, generateDefaultAttributes, computeOverallFromAttributes,
@@ -233,18 +233,21 @@ const Pitch = ({ colA, colB }) => (
 // ═══════════════════════════════════════════════════════════
 const FieldAvatar = ({
   player, x, y, teamColor, isMe, side,
-  onTap, onLongPress, onDragEnd,
+  onTap, onLongPress, onDragStart, onDragMove, onDragEnd,
   isSelected, fieldRef,
   isCaptain, isMVP, goalCount, ovr,
+  isSwapTarget,  // başka bir avatar buna doğru sürükleniyor mu (swap önizlemesi)
 }) => {
   const pressTimer = useRef(null);
   const longFired = useRef(false);
   const dragStartPos = useRef(null);
-  const isDragging = useRef(false);
+  const isDraggingRef = useRef(false);
+  const [dragOffset, setDragOffset] = useState({ dx: 0, dy: 0 });
+  const [dragging, setDragging] = useState(false);
 
   const start = (clientX, clientY) => {
     longFired.current = false;
-    isDragging.current = false;
+    isDraggingRef.current = false;
     dragStartPos.current = { x: clientX, y: clientY };
     if (onLongPress) {
       pressTimer.current = setTimeout(() => {
@@ -254,35 +257,59 @@ const FieldAvatar = ({
       }, 500);
     }
   };
+
   const move = (clientX, clientY) => {
     if (!dragStartPos.current) return;
     const dx = clientX - dragStartPos.current.x;
     const dy = clientY - dragStartPos.current.y;
-    if (Math.abs(dx) > 6 || Math.abs(dy) > 6) {
-      isDragging.current = true;
+    // Threshold aşıldıktan sonra drag aktifleşir
+    if (!isDraggingRef.current && (Math.abs(dx) > 6 || Math.abs(dy) > 6)) {
+      isDraggingRef.current = true;
       clearTimeout(pressTimer.current);
+      if (onDragEnd) {  // sadece sürüklenebilirse drag mode aç
+        setDragging(true);
+        hapticLight();
+        onDragStart?.(player);
+      }
+    }
+    if (isDraggingRef.current && onDragEnd) {
+      setDragOffset({ dx, dy });
+      // Saha koordinatlarını hesapla → parent'a anlık bildir
+      if (onDragMove && fieldRef?.current) {
+        const rect = fieldRef.current.getBoundingClientRect();
+        const px = ((clientX - rect.left) / rect.width) * 100;
+        const py = ((clientY - rect.top) / rect.height) * 100;
+        onDragMove(px, py);
+      }
     }
   };
+
   const end = (clientX, clientY) => {
     clearTimeout(pressTimer.current);
-    if (isDragging.current && onDragEnd && fieldRef?.current) {
+    if (isDraggingRef.current && onDragEnd && fieldRef?.current) {
       const rect = fieldRef.current.getBoundingClientRect();
       const px = ((clientX - rect.left) / rect.width) * 100;
       const py = ((clientY - rect.top) / rect.height) * 100;
       onDragEnd(px, py);
-    } else if (!longFired.current && !isDragging.current && onTap) {
+    } else if (!longFired.current && !isDraggingRef.current && onTap) {
       onTap();
     }
-    isDragging.current = false;
+    isDraggingRef.current = false;
     dragStartPos.current = null;
+    setDragging(false);
+    setDragOffset({ dx: 0, dy: 0 }); // smooth geri-dönüş (transition var)
   };
+
   const cancel = () => {
     clearTimeout(pressTimer.current);
-    isDragging.current = false;
+    isDraggingRef.current = false;
     dragStartPos.current = null;
+    setDragging(false);
+    setDragOffset({ dx: 0, dy: 0 });
   };
 
   const initial = (player.nickname || '?').charAt(0).toUpperCase();
+  const scale = dragging ? 1.18 : isSwapTarget ? 1.08 : 1;
 
   return (
     <div
@@ -297,14 +324,33 @@ const FieldAvatar = ({
       className={isSelected ? 'lm-selecting' : ''}
       style={{
         position: 'absolute', left: `${x}%`, top: `${y}%`,
-        transform: 'translate(-50%,-50%)',
-        zIndex: isMe ? 25 : 15,
+        transform: `translate(-50%,-50%) translate(${dragOffset.dx}px, ${dragOffset.dy}px) scale(${scale})`,
+        // Drag aktifken transition kapalı (parmağı anlık takip etsin),
+        // bırakınca pürüzsüz snap-back/snap-to-target
+        transition: dragging
+          ? 'none'
+          : 'transform 0.32s cubic-bezier(.34,1.56,.64,1)',
+        zIndex: dragging ? 200 : isSwapTarget ? 50 : (isMe ? 25 : 15),
         userSelect: 'none', touchAction: 'none',
-        cursor: (onTap || onLongPress || onDragEnd) ? 'pointer' : 'default',
+        cursor: dragging ? 'grabbing' : (onDragEnd ? 'grab' : (onTap || onLongPress ? 'pointer' : 'default')),
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
-        filter: 'drop-shadow(0 4px 10px rgba(0,0,0,0.55))',
+        filter: dragging
+          ? `drop-shadow(0 18px 32px rgba(0,0,0,0.85)) drop-shadow(0 0 18px ${teamColor}aa)`
+          : isSwapTarget
+          ? `drop-shadow(0 8px 16px rgba(0,0,0,0.6)) drop-shadow(0 0 12px ${C.warn}aa)`
+          : 'drop-shadow(0 4px 10px rgba(0,0,0,0.55))',
+        willChange: dragging ? 'transform' : 'auto',
       }}
     >
+      {/* Swap target ring — başka bir oyuncu bu üzerime sürüklenirken */}
+      {isSwapTarget && (
+        <div style={{
+          position: 'absolute', inset: -6, borderRadius: '50%',
+          border: `3px dashed ${C.warn}`,
+          animation: 'lmPulse 1s ease-out infinite',
+          pointerEvents: 'none',
+        }} />
+      )}
       <div style={{
         position: 'relative',
         width: 48, height: 48, borderRadius: '50%',
@@ -448,37 +494,58 @@ const FieldAvatar = ({
 // ═══════════════════════════════════════════════════════════
 // EMPTY SLOT — boş pozisyon
 // ═══════════════════════════════════════════════════════════
-const EmptySlot = ({ x, y, role, teamColor, canTap, onTap }) => (
-  <div
-    onClick={() => { if (canTap) { hapticLight(); onTap?.(); } }}
-    style={{
-      position: 'absolute', left: `${x}%`, top: `${y}%`,
-      transform: 'translate(-50%,-50%)',
-      zIndex: 5,
-      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-      cursor: canTap ? 'pointer' : 'default',
-    }}
-  >
-    <div style={{
-      width: 48, height: 48, borderRadius: '50%',
-      border: `2.5px dashed ${teamColor}${canTap ? '99' : '55'}`,
-      background: `radial-gradient(circle at 50% 50%, ${teamColor}1c 0%, ${teamColor}06 70%, transparent 100%)`,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      color: teamColor, fontSize: 22, fontWeight: 300,
-      transition: 'transform 0.15s',
-      boxShadow: `inset 0 0 12px ${teamColor}15`,
-    }}>{canTap ? '+' : ''}</div>
-    <div style={{
-      fontSize: 8.5, color: 'rgba(255,255,255,0.5)',
-      fontWeight: 800, textTransform: 'uppercase',
-      letterSpacing: 0.5,
-      fontFamily: "'Bebas Neue','DM Sans',sans-serif",
-      background: 'rgba(0,0,0,0.5)',
-      padding: '1.5px 5px', borderRadius: 3,
-      backdropFilter: 'blur(4px)',
-    }}>{POS_SHORT[role] || role}</div>
-  </div>
-);
+const EmptySlot = ({ x, y, role, teamColor, canTap, onTap, isHighlighted, isAllowed, dragActive }) => {
+  // Drag aktifken — uygun olanlar nazikçe pulse, uygun olmayanlar sönük
+  const dim = dragActive && isAllowed === false;
+  const highlight = isHighlighted;
+  return (
+    <div
+      onClick={() => { if (canTap) { hapticLight(); onTap?.(); } }}
+      style={{
+        position: 'absolute', left: `${x}%`, top: `${y}%`,
+        transform: `translate(-50%,-50%) scale(${highlight ? 1.22 : 1})`,
+        transition: 'transform 0.18s cubic-bezier(.34,1.56,.64,1), opacity 0.2s',
+        zIndex: highlight ? 40 : 5,
+        opacity: dim ? 0.25 : 1,
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+        cursor: canTap ? 'pointer' : 'default',
+        pointerEvents: dim ? 'none' : 'auto',
+        filter: highlight ? `drop-shadow(0 0 16px ${teamColor})` : 'none',
+      }}
+    >
+      <div style={{
+        width: 48, height: 48, borderRadius: '50%',
+        border: highlight
+          ? `2.5px solid ${teamColor}`
+          : `2.5px dashed ${teamColor}${canTap ? '99' : '55'}`,
+        background: highlight
+          ? `radial-gradient(circle at 50% 50%, ${teamColor}55 0%, ${teamColor}22 70%, transparent 100%)`
+          : `radial-gradient(circle at 50% 50%, ${teamColor}1c 0%, ${teamColor}06 70%, transparent 100%)`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: highlight ? '#fff' : teamColor,
+        fontSize: highlight ? 26 : 22,
+        fontWeight: highlight ? 900 : 300,
+        transition: 'all 0.18s',
+        boxShadow: highlight
+          ? `inset 0 0 22px ${teamColor}, 0 0 0 4px ${teamColor}33, 0 8px 24px ${teamColor}66`
+          : dragActive && isAllowed
+            ? `inset 0 0 12px ${teamColor}15, 0 0 0 1px ${teamColor}33`
+            : `inset 0 0 12px ${teamColor}15`,
+        animation: dragActive && isAllowed && !highlight ? 'lmPulse 1.4s ease-in-out infinite' : 'none',
+      }}>{canTap ? '+' : ''}</div>
+      <div style={{
+        fontSize: 8.5,
+        color: highlight ? teamColor : 'rgba(255,255,255,0.5)',
+        fontWeight: 800, textTransform: 'uppercase',
+        letterSpacing: 0.5,
+        fontFamily: "'Bebas Neue','DM Sans',sans-serif",
+        background: highlight ? `${teamColor}22` : 'rgba(0,0,0,0.5)',
+        padding: '1.5px 5px', borderRadius: 3,
+        backdropFilter: 'blur(4px)',
+      }}>{POS_SHORT[role] || role}</div>
+    </div>
+  );
+};
 
 // ═══════════════════════════════════════════════════════════
 // ATOMIC UI — Pill, Btn, Input, Card, StatusBadge, BackBtn
@@ -683,6 +750,9 @@ export default function LiveMatch() {
   const [showGoalSheet, setShowGoalSheet] = useState(null);    // { team }
   const [showMVPSheet, setShowMVPSheet] = useState(false);
   const [selectedPlayerId, setSelectedPlayerId] = useState(null);
+
+  // Drag visual feedback state'i: null veya { player, x, y, nearest }
+  const [dragInfo, setDragInfo] = useState(null);
 
   // Bağlantı durumu
   const [connStatus, setConnStatus] = useState('live');
@@ -954,10 +1024,10 @@ export default function LiveMatch() {
     setAdminMenuFor(targetDeviceId);
   };
 
-  const handleDragDrop = async (player, dropX, dropY) => {
-    if (!session) return;
-    setError('');
-
+  // Tüm slot pozisyonlarını ve uygunluğunu bir kez hesapla; drag move + drop
+  // sırasında aynı mantık paylaşılır
+  const computeAllowedSlotsForPlayer = useCallback((player) => {
+    if (!session || !player) return [];
     const allSlots = [];
     (FORMATIONS[formationA] || FORMATIONS['3-2-1']).positions.forEach((rp, idx) => {
       const p = mapPos(rp, 'A');
@@ -968,7 +1038,6 @@ export default function LiveMatch() {
       allSlots.push({ team: 'B', slotIdx: idx, role: rp.role, x: p.x, y: p.y });
     });
 
-    // Rol bazlı slot uygunluğu — defans forvet slotuna gitmesin vb.
     const pr = player.position || '';
     const isDef = /DEFANS|STOPER|BEK/.test(pr);
     const isMid = pr === 'ORTA SAHA';
@@ -986,20 +1055,55 @@ export default function LiveMatch() {
     const base = amIFullPower
       ? allSlots
       : allSlots.filter(s => s.team === player.team && canControlTeam(s.team));
-    const allowed = base.filter(s => roleAllows(s.role));
+    return base.filter(s => roleAllows(s.role));
+  }, [session, formationA, formationB, amIFullPower, canControlTeam]);
 
+  const findNearestSlot = (allowed, dropX, dropY) => {
     let best = null, bestDist = Infinity;
-    for (const slot of allowed) {
-      const dist = Math.hypot(slot.x - dropX, slot.y - dropY);
-      if (dist < bestDist) { bestDist = dist; best = slot; }
+    for (const s of allowed) {
+      const d = Math.hypot(s.x - dropX, s.y - dropY);
+      if (d < bestDist) { bestDist = d; best = s; }
     }
-    if (!best || bestDist > 14) return;
+    if (!best || bestDist > 14) return { slot: null, dist: bestDist };
+    return { slot: best, dist: bestDist };
+  };
 
+  // ─── Drag handlers (FieldAvatar'dan tetiklenir) ───
+  const handleDragStart = (player) => {
+    const allowed = computeAllowedSlotsForPlayer(player);
+    setDragInfo({ player, x: null, y: null, nearest: null, allowed });
+  };
+
+  const handleDragMove = (player, dropX, dropY) => {
+    setDragInfo(prev => {
+      if (!prev || prev.player.device_id !== player.device_id) return prev;
+      const { slot } = findNearestSlot(prev.allowed, dropX, dropY);
+      const prevKey = prev.nearest ? `${prev.nearest.team}:${prev.nearest.slotIdx}` : null;
+      const newKey = slot ? `${slot.team}:${slot.slotIdx}` : null;
+      // Yakın slot değiştiyse light haptic — "snap" hissi
+      if (newKey && newKey !== prevKey) {
+        try { hapticSelection(); } catch {}
+      }
+      return { ...prev, x: dropX, y: dropY, nearest: slot };
+    });
+  };
+
+  const handleDragDrop = async (player, dropX, dropY) => {
+    if (!session) return;
+    setError('');
+    const allowed = computeAllowedSlotsForPlayer(player);
+    const { slot } = findNearestSlot(allowed, dropX, dropY);
+    setDragInfo(null);  // overlay'leri kaldır
+    if (!slot) {
+      // Hedefsiz bırakıldı — yumuşak bir fail haptiği
+      try { hapticLight(); } catch {}
+      return;
+    }
     try {
-      if (canControlTeam(best.team) && player.device_id !== deviceId) {
-        await adminSetPlayerSlot(session.id, player.device_id, best.team, best.slotIdx, best.role);
+      if (canControlTeam(slot.team) && player.device_id !== deviceId) {
+        await adminSetPlayerSlot(session.id, player.device_id, slot.team, slot.slotIdx, slot.role);
       } else {
-        await setPlayerSlot(session.id, deviceId, best.slotIdx, best.role);
+        await setPlayerSlot(session.id, deviceId, slot.slotIdx, slot.role);
       }
       hapticSuccess();
     } catch (e) { setError(e.message); }
@@ -1617,6 +1721,11 @@ export default function LiveMatch() {
               if (player) {
                 const isMe = player.device_id === deviceId;
                 const canDrag = canControlTeam('A') || isMe;
+                const beingDragged = dragInfo?.player?.device_id === player.device_id;
+                const isSwapTarget = !!dragInfo
+                  && !beingDragged
+                  && dragInfo.nearest?.team === 'A'
+                  && dragInfo.nearest?.slotIdx === idx;
                 return (
                   <FieldAvatar
                     key={`a-${idx}-${player.device_id}`}
@@ -1631,6 +1740,7 @@ export default function LiveMatch() {
                     isMVP={session.mvp_device_id === player.device_id}
                     goalCount={goalsByPlayer[player.device_id] || 0}
                     ovr={ovrByPlayer[player.device_id]}
+                    isSwapTarget={isSwapTarget}
                     onTap={() => {
                       if (isMe) { handleMyAvatarTap(); return; }
                       if (canControlTeam('A')) {
@@ -1639,11 +1749,16 @@ export default function LiveMatch() {
                       }
                     }}
                     onLongPress={amIFullPower && !isMe ? () => handleAvatarLongPress(player.device_id) : undefined}
+                    onDragStart={canDrag ? () => handleDragStart(player) : undefined}
+                    onDragMove={canDrag ? (px, py) => handleDragMove(player, px, py) : undefined}
                     onDragEnd={canDrag ? (px, py) => handleDragDrop(player, px, py) : undefined}
                   />
                 );
               }
               const canTapA = isLobby && (canControlTeam('A') || myTeam === 'A');
+              const dragActive = !!dragInfo;
+              const isAllowedDrop = dragActive && dragInfo.allowed?.some(s => s.team === 'A' && s.slotIdx === idx);
+              const isHighlightedDrop = dragInfo?.nearest?.team === 'A' && dragInfo?.nearest?.slotIdx === idx;
               return (
                 <EmptySlot
                   key={`ae-${idx}`}
@@ -1651,6 +1766,9 @@ export default function LiveMatch() {
                   role={rawPos.role}
                   teamColor={colA}
                   canTap={canTapA}
+                  dragActive={dragActive}
+                  isAllowed={dragActive ? isAllowedDrop : undefined}
+                  isHighlighted={isHighlightedDrop}
                   onTap={() => isLobby && handleEmptySlotTap('A', idx, rawPos.role)}
                 />
               );
@@ -1663,6 +1781,11 @@ export default function LiveMatch() {
               if (player) {
                 const isMe = player.device_id === deviceId;
                 const canDrag = canControlTeam('B') || isMe;
+                const beingDragged = dragInfo?.player?.device_id === player.device_id;
+                const isSwapTarget = !!dragInfo
+                  && !beingDragged
+                  && dragInfo.nearest?.team === 'B'
+                  && dragInfo.nearest?.slotIdx === idx;
                 return (
                   <FieldAvatar
                     key={`b-${idx}-${player.device_id}`}
@@ -1677,6 +1800,7 @@ export default function LiveMatch() {
                     isMVP={session.mvp_device_id === player.device_id}
                     goalCount={goalsByPlayer[player.device_id] || 0}
                     ovr={ovrByPlayer[player.device_id]}
+                    isSwapTarget={isSwapTarget}
                     onTap={() => {
                       if (isMe) { handleMyAvatarTap(); return; }
                       if (canControlTeam('B')) {
@@ -1685,11 +1809,16 @@ export default function LiveMatch() {
                       }
                     }}
                     onLongPress={amIFullPower && !isMe ? () => handleAvatarLongPress(player.device_id) : undefined}
+                    onDragStart={canDrag ? () => handleDragStart(player) : undefined}
+                    onDragMove={canDrag ? (px, py) => handleDragMove(player, px, py) : undefined}
                     onDragEnd={canDrag ? (px, py) => handleDragDrop(player, px, py) : undefined}
                   />
                 );
               }
               const canTapB = isLobby && (canControlTeam('B') || myTeam === 'B');
+              const dragActiveB = !!dragInfo;
+              const isAllowedDropB = dragActiveB && dragInfo.allowed?.some(s => s.team === 'B' && s.slotIdx === idx);
+              const isHighlightedDropB = dragInfo?.nearest?.team === 'B' && dragInfo?.nearest?.slotIdx === idx;
               return (
                 <EmptySlot
                   key={`be-${idx}`}
@@ -1697,6 +1826,9 @@ export default function LiveMatch() {
                   role={rawPos.role}
                   teamColor={colB}
                   canTap={canTapB}
+                  dragActive={dragActiveB}
+                  isAllowed={dragActiveB ? isAllowedDropB : undefined}
+                  isHighlighted={isHighlightedDropB}
                   onTap={() => isLobby && handleEmptySlotTap('B', idx, rawPos.role)}
                 />
               );

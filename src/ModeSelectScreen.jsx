@@ -22,6 +22,7 @@ import { LangToggle } from "./Onboarding";
 import { hapticLight, hapticMedium, hapticSelection, hapticSuccess } from "./haptics";
 import { getAllMatches, computePlayerStats } from "./matchHistoryStore";
 import { getNickname, setNickname, registerDevice, getMyActiveSessions } from "./LiveMatchService";
+import { hideBanner, showBanner } from "./admob";
 
 // ═══ SABİTLER ═══
 const C = {
@@ -96,6 +97,8 @@ export default function ModeSelectScreen({ onSelectMode }) {
 
   // ─── Lokal istatistik özeti ───
   const [stats, setStats] = useState(null);
+  // ─── Son maçlar (lokal geçmiş) ───
+  const [lastMatches, setLastMatches] = useState([]);
   // ─── Aktif online maç (devam eden, henüz finished değil) ───
   const [activeOnline, setActiveOnline] = useState(null);
 
@@ -104,7 +107,6 @@ export default function ModeSelectScreen({ onSelectMode }) {
       const matches = getAllMatches();
       if (matches.length > 0) {
         const { stats: s } = computePlayerStats(matches);
-        // Tüm oyuncuların toplam goller / galibiyet vb.
         let totalGoals = 0,
           totalAssists = 0,
           totalWins = 0,
@@ -115,9 +117,13 @@ export default function ModeSelectScreen({ onSelectMode }) {
           totalWins += v.wins || 0;
         });
         setStats({ matches: totalMatches, goals: totalGoals, assists: totalAssists, wins: totalWins });
+
+        // Son 3 maç (en yeniye göre)
+        const sorted = [...matches].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        setLastMatches(sorted.slice(0, 3));
       }
     } catch (e) {
-      // Sessizce yut — istatistik gösterilmesin
+      // sessizce yut
     }
 
     // Aktif online maç var mı?
@@ -152,11 +158,13 @@ export default function ModeSelectScreen({ onSelectMode }) {
   };
 
   return (
-    <div style={S.root}>
+    <>
       <style>{cssAnims}</style>
 
-      {/* ═══ ATMOSFER ═══ */}
+      {/* ═══ ATMOSFER (FIXED — scroll'da kaymaz) ═══ */}
       <AmbientBackground />
+
+      <div style={S.root}>
 
       {/* ═══ ÜST BAR ═══ */}
       <header style={S.header}>
@@ -241,6 +249,28 @@ export default function ModeSelectScreen({ onSelectMode }) {
         ))}
       </section>
 
+      {/* ═══ SON MAÇLAR ═══ */}
+      {lastMatches.length > 0 && (
+        <section style={S.recentSection}>
+          <div style={S.recentHeader}>
+            <span style={S.recentLabel}>SON MAÇLAR</span>
+            <button onClick={() => { hapticLight(); onSelectMode?.("history"); }}
+                    style={S.recentMoreBtn}>
+              Tümü →
+            </button>
+          </div>
+          <div style={S.recentList}>
+            {lastMatches.map((m) => (
+              <RecentMatchCard
+                key={m.id}
+                match={m}
+                onClick={() => { hapticMedium(); onSelectMode?.("history"); }}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* ═══ ALT İNFO ═══ */}
       <footer style={S.footer}>
         <span style={S.footerDot} />
@@ -256,6 +286,7 @@ export default function ModeSelectScreen({ onSelectMode }) {
         />
       )}
     </div>
+    </>
   );
 }
 
@@ -270,7 +301,13 @@ function RenameModal({ currentName, onSave, onClose }) {
   useEffect(() => {
     // Açılınca input'a otomatik fokus
     const t = setTimeout(() => inputRef.current?.focus(), 100);
-    return () => clearTimeout(t);
+    // ★ Banner reklamı gizle — modal'ın altına çakışmasın
+    hideBanner().catch(() => {});
+    return () => {
+      clearTimeout(t);
+      // Modal kapanınca banner'ı geri getir
+      showBanner().catch(() => {});
+    };
   }, []);
 
   const handleSave = () => {
@@ -374,45 +411,101 @@ function RenameModal({ currentName, onSave, onClose }) {
 function AmbientBackground() {
   return (
     <>
-      {/* Üst stadyum ışığı */}
-      <div style={S.bgFloodTop} aria-hidden />
-      {/* Alt drift halo */}
-      <div style={S.bgHaloBottom} aria-hidden />
-      {/* Çim deseni (çok soluk) */}
-      <svg
-        aria-hidden
-        style={S.bgPitch}
-        viewBox="0 0 100 200"
-        preserveAspectRatio="xMidYMid slice"
-      >
-        <defs>
-          <pattern id="ms-grass" patternUnits="userSpaceOnUse" width="100" height="6">
-            <rect width="100" height="6" fill="rgba(26,107,49,0.18)" />
-            <rect width="100" height="3" fill="rgba(30,122,56,0.12)" opacity="0.5" />
-          </pattern>
-          <linearGradient id="ms-fade" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="rgba(0,0,0,0.55)" />
-            <stop offset="50%" stopColor="rgba(0,0,0,0.25)" />
-            <stop offset="100%" stopColor="rgba(0,0,0,0.85)" />
-          </linearGradient>
-        </defs>
-        <rect width="100" height="200" fill="url(#ms-grass)" />
-        {/* Saha çizgileri */}
-        <rect x="6" y="4" width="88" height="192" fill="none"
-              stroke="rgba(255,255,255,0.07)" strokeWidth="0.3" />
-        <line x1="6" y1="100" x2="94" y2="100"
-              stroke="rgba(255,255,255,0.07)" strokeWidth="0.3" />
-        <circle cx="50" cy="100" r="14" fill="none"
+      {/* Tüm atmosfer fixed — scroll'dan etkilenmez, içerik üzerine binmez */}
+      <div style={S.bgFixedWrap} aria-hidden>
+        {/* Üst stadyum ışığı */}
+        <div style={S.bgFloodTop} />
+        {/* Alt drift halo */}
+        <div style={S.bgHaloBottom} />
+        {/* Çim deseni — sadece üst %55 + agresif alt karartma */}
+        <svg
+          style={S.bgPitch}
+          viewBox="0 0 100 200"
+          preserveAspectRatio="xMidYMid slice"
+        >
+          <defs>
+            <pattern id="ms-grass" patternUnits="userSpaceOnUse" width="100" height="6">
+              <rect width="100" height="6" fill="rgba(26,107,49,0.18)" />
+              <rect width="100" height="3" fill="rgba(30,122,56,0.12)" opacity="0.5" />
+            </pattern>
+            <linearGradient id="ms-fade" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="rgba(0,0,0,0.55)" />
+              <stop offset="40%" stopColor="rgba(0,0,0,0.45)" />
+              <stop offset="80%" stopColor="rgba(7,12,19,0.95)" />
+              <stop offset="100%" stopColor="rgba(7,12,19,1)" />
+            </linearGradient>
+          </defs>
+          <rect width="100" height="200" fill="url(#ms-grass)" />
+          {/* Saha çizgileri — sadece üst yarıda */}
+          <rect x="6" y="4" width="88" height="96" fill="none"
                 stroke="rgba(255,255,255,0.07)" strokeWidth="0.3" />
-        <circle cx="50" cy="100" r="0.8" fill="rgba(255,255,255,0.18)" />
-        <rect x="22" y="178" width="56" height="18" fill="none"
-              stroke="rgba(255,255,255,0.06)" strokeWidth="0.3" />
-        <rect x="22" y="4" width="56" height="18" fill="none"
-              stroke="rgba(255,255,255,0.06)" strokeWidth="0.3" />
-        {/* Karartma overlay */}
-        <rect width="100" height="200" fill="url(#ms-fade)" />
-      </svg>
+          <line x1="6" y1="100" x2="94" y2="100"
+                stroke="rgba(255,255,255,0.07)" strokeWidth="0.3" />
+          <circle cx="50" cy="100" r="14" fill="none"
+                  stroke="rgba(255,255,255,0.07)" strokeWidth="0.3" />
+          <circle cx="50" cy="100" r="0.8" fill="rgba(255,255,255,0.18)" />
+          <rect x="22" y="4" width="56" height="18" fill="none"
+                stroke="rgba(255,255,255,0.06)" strokeWidth="0.3" />
+          {/* Karartma overlay — alt yarı tamamen koyu */}
+          <rect width="100" height="200" fill="url(#ms-fade)" />
+        </svg>
+      </div>
     </>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// RECENT MATCH CARD — Son maç önizlemesi
+// ═══════════════════════════════════════════════════════════
+function formatRelativeDate(ts) {
+  if (!ts) return "";
+  const diff = Date.now() - ts;
+  const days = Math.floor(diff / 86400000);
+  if (days === 0) return "Bugün";
+  if (days === 1) return "Dün";
+  if (days < 7) return `${days} gün önce`;
+  if (days < 30) return `${Math.floor(days / 7)} hafta önce`;
+  const d = new Date(ts);
+  return `${d.getDate()}.${(d.getMonth() + 1).toString().padStart(2, "0")}`;
+}
+
+function RecentMatchCard({ match, onClick }) {
+  const a = match.teamA || {};
+  const b = match.teamB || {};
+  const aWin = (match.scoreA || 0) > (match.scoreB || 0);
+  const bWin = (match.scoreB || 0) > (match.scoreA || 0);
+  const draw = !aWin && !bWin;
+  const colA = a.color?.secondary || "#34d399";
+  const colB = b.color?.secondary || "#f87171";
+
+  return (
+    <button onClick={onClick} style={S.recentCard}>
+      {/* Sol şerit + Takım A */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0 }}>
+        <span style={{ width: 3, alignSelf: "stretch", borderRadius: 2,
+          background: `linear-gradient(180deg, ${colA}, ${colB})` }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={S.recentRow}>
+            <span style={{ ...S.recentTeamName, color: aWin ? "#fff" : "rgba(255,255,255,0.65)" }}>
+              {a.name || "Takım A"}
+            </span>
+            <span style={{ ...S.recentScore, color: aWin ? colA : draw ? "#fff" : "rgba(255,255,255,0.4)" }}>
+              {match.scoreA ?? 0}
+            </span>
+          </div>
+          <div style={S.recentRow}>
+            <span style={{ ...S.recentTeamName, color: bWin ? "#fff" : "rgba(255,255,255,0.65)" }}>
+              {b.name || "Takım B"}
+            </span>
+            <span style={{ ...S.recentScore, color: bWin ? colB : draw ? "#fff" : "rgba(255,255,255,0.4)" }}>
+              {match.scoreB ?? 0}
+            </span>
+          </div>
+        </div>
+      </div>
+      {/* Sağ — tarih */}
+      <div style={S.recentDate}>{formatRelativeDate(match.createdAt)}</div>
+    </button>
   );
 }
 
@@ -586,7 +679,7 @@ const S = {
     position: "fixed",
     inset: 0,
     overflow: "hidden",
-    background: `radial-gradient(ellipse 100% 60% at 50% -10%, #0c1a2c 0%, ${C.bg1} 50%, ${C.bg0} 100%)`,
+    background: `linear-gradient(180deg, transparent 0%, transparent 50vh, #070c13 100vh)`,
     color: C.text,
     fontFamily: "'DM Sans', 'Segoe UI', sans-serif",
     paddingTop: "calc(12px + env(safe-area-inset-top, 0px))",
@@ -596,9 +689,17 @@ const S = {
     alignItems: "center",
     overflowY: "auto",
     WebkitOverflowScrolling: "touch",
+    zIndex: 1,
   },
 
-  // ─── Atmosfer ───
+  // ─── Atmosfer (sabit, scroll'dan etkilenmez) ───
+  bgFixedWrap: {
+    position: "fixed",
+    inset: 0,
+    overflow: "hidden",
+    pointerEvents: "none",
+    zIndex: 0,
+  },
   bgFloodTop: {
     position: "absolute",
     top: "-15%",
@@ -607,8 +708,6 @@ const S = {
     height: "55%",
     background: "radial-gradient(ellipse 70% 100% at 50% 0%, rgba(180,210,255,0.08), transparent 60%)",
     animation: "msFloodPulse 7s ease-in-out infinite",
-    pointerEvents: "none",
-    zIndex: 0,
   },
   bgHaloBottom: {
     position: "absolute",
@@ -618,17 +717,15 @@ const S = {
     height: "55%",
     background: "radial-gradient(ellipse 60% 60% at 50% 100%, rgba(52,211,153,0.07), transparent 60%)",
     animation: "msHaloDrift 28s ease-in-out infinite",
-    pointerEvents: "none",
-    zIndex: 0,
   },
   bgPitch: {
     position: "absolute",
-    inset: 0,
+    top: 0,
+    left: 0,
     width: "100%",
-    height: "100%",
+    // Yalnızca viewport'un üst %60'ı — alt kısım solid koyu kalır
+    height: "60vh",
     opacity: 0.85,
-    pointerEvents: "none",
-    zIndex: 0,
   },
 
   // ─── Header ───
@@ -971,6 +1068,100 @@ const S = {
     pointerEvents: "none",
     mixBlendMode: "overlay",
     opacity: 0.5,
+  },
+
+  // ─── Recent Matches ───
+  recentSection: {
+    position: "relative",
+    zIndex: 2,
+    width: "100%",
+    maxWidth: 460,
+    padding: "18px 18px 0",
+    animation: "msFadeUp 0.55s 0.5s both",
+  },
+  recentHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 10,
+    padding: "0 2px",
+  },
+  recentLabel: {
+    fontSize: 10,
+    color: C.muted,
+    fontWeight: 800,
+    letterSpacing: 2,
+    textTransform: "uppercase",
+    fontFamily: "'JetBrains Mono', 'DM Sans', monospace",
+  },
+  recentMoreBtn: {
+    background: "transparent",
+    border: "none",
+    color: C.accent,
+    fontSize: 11,
+    fontWeight: 700,
+    cursor: "pointer",
+    fontFamily: "'DM Sans', sans-serif",
+    letterSpacing: 0.5,
+    padding: 0,
+  },
+  recentList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+  },
+  recentCard: {
+    width: "100%",
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    padding: "10px 12px",
+    background: "rgba(255,255,255,0.03)",
+    border: `1px solid ${C.border}`,
+    borderRadius: 12,
+    cursor: "pointer",
+    color: C.text,
+    fontFamily: "inherit",
+    textAlign: "left",
+    backdropFilter: "blur(8px)",
+    WebkitBackdropFilter: "blur(8px)",
+    transition: "background 0.15s, border-color 0.15s",
+  },
+  recentRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 8,
+    minHeight: 18,
+  },
+  recentTeamName: {
+    fontSize: 12.5,
+    fontWeight: 700,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    flex: 1,
+    minWidth: 0,
+  },
+  recentScore: {
+    fontSize: 16,
+    fontWeight: 900,
+    fontFamily: "'JetBrains Mono', monospace",
+    minWidth: 18,
+    textAlign: "right",
+  },
+  recentDate: {
+    fontSize: 9.5,
+    color: C.dim,
+    fontWeight: 700,
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+    fontFamily: "'JetBrains Mono', monospace",
+    flexShrink: 0,
+    paddingLeft: 8,
+    borderLeft: `1px solid ${C.border}`,
+    minWidth: 60,
+    textAlign: "right",
   },
 
   // ─── Footer ───

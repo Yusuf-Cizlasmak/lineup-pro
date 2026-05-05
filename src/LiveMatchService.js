@@ -407,12 +407,10 @@ export const setTeamFormation = async (sessionId, team, formation) => {
     console.warn('[setTeamFormation] kolon yok mu? Migration çalıştırıldı mı?', error.message);
     return;
   }
-  // Diziliş değişince ilgili takımdaki herkesin slot'u sıfırlansın
-  await supabase
-    .from('session_players')
-    .update({ slot_index: null, pos_x: null, pos_y: null })
-    .eq('session_id', sessionId)
-    .eq('team', team);
+  // ★ NOT: Eskiden burada tüm oyuncuların slot_index'i null'lanıyordu — bu
+  // formasyon değiştirmek istediğinizde kadronuzu kaybetmenize sebep oluyordu.
+  // Artık slot_index korunuyor; sadece x/y görsel koordinatları yeni
+  // formasyona göre yeniden hizalanır (bu zaten render tarafında oluyor).
 };
 
 // Oyuncu: Kendi profilini güncelle

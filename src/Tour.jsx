@@ -219,12 +219,28 @@ export default function Tour({ active, onFinish, mode = "main" }) {
     <>
       <style>{`
         @keyframes tourPulse {
-          0%, 100% { opacity: 0.5; transform: scale(1); }
-          50% { opacity: 1; transform: scale(1.03); }
+          0%, 100% { opacity: 0.55; transform: scale(1); }
+          50% { opacity: 1; transform: scale(1.04); }
+        }
+        @keyframes tourPulseOuter {
+          0%   { opacity: 0.55; transform: scale(1); }
+          100% { opacity: 0;    transform: scale(1.45); }
+        }
+        @keyframes tourSlideUp {
+          from { opacity: 0; transform: translateY(14px) scale(0.97); }
+          to   { opacity: 1; transform: translateY(0) scale(1); }
         }
         @keyframes tourFadeIn {
           from { opacity: 0; transform: translateY(8px); }
           to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes tourShimmer {
+          0%   { background-position: -100% 0; }
+          100% { background-position: 200% 0; }
+        }
+        @keyframes tourFloat {
+          0%, 100% { transform: translateY(0); }
+          50%      { transform: translateY(-3px); }
         }
       `}</style>
 
@@ -258,7 +274,39 @@ export default function Tour({ active, onFinish, mode = "main" }) {
         />
       )}
 
-      {/* Pulsing ring around target */}
+      {/* Spotlight halo — hedefin etrafında soft glow */}
+      {hole && !isCenterStep && (
+        <div
+          style={{
+            position: "fixed",
+            left: hole.x - 24, top: hole.y - 24,
+            width: hole.w + 48, height: hole.h + 48,
+            borderRadius: 28,
+            background: "radial-gradient(ellipse at center, rgba(52,211,153,0.18) 0%, rgba(52,211,153,0.05) 50%, transparent 75%)",
+            zIndex: 4500,
+            pointerEvents: "none",
+            filter: "blur(8px)",
+          }}
+        />
+      )}
+
+      {/* Outer pulsing ring — yayılan halka */}
+      {hole && (
+        <div
+          style={{
+            position: "fixed",
+            left: hole.x - 4, top: hole.y - 4,
+            width: hole.w + 8, height: hole.h + 8,
+            borderRadius: 16,
+            border: "1.5px solid rgba(52,211,153,0.5)",
+            zIndex: 4501,
+            pointerEvents: "none",
+            animation: "tourPulseOuter 1.6s ease-out infinite",
+          }}
+        />
+      )}
+
+      {/* Inner pulsing ring around target */}
       {hole && (
         <div
           style={{
@@ -267,7 +315,7 @@ export default function Tour({ active, onFinish, mode = "main" }) {
             width: hole.w, height: hole.h,
             borderRadius: 14,
             border: "2.5px solid #34d399",
-            boxShadow: "0 0 0 4px rgba(52,211,153,0.18), 0 0 24px rgba(52,211,153,0.4)",
+            boxShadow: "0 0 0 4px rgba(52,211,153,0.18), 0 0 32px rgba(52,211,153,0.5)",
             zIndex: 4501,
             pointerEvents: "none",
             animation: "tourPulse 1.4s ease-in-out infinite",
@@ -288,37 +336,60 @@ export default function Tour({ active, onFinish, mode = "main" }) {
           backdropFilter: isCenterStep && !isInfoStep ? "blur(16px)" : "none",
           WebkitBackdropFilter: isCenterStep && !isInfoStep ? "blur(16px)" : "none",
           color: "#e2e8f0",
-          padding: isInfoStep ? "20px 22px" : isCenterStep ? "12px 14px" : "14px 16px",
-          borderRadius: isInfoStep ? 18 : isCenterStep ? 12 : 14,
-          border: isInfoStep ? "1px solid rgba(52,211,153,0.45)" : "1px solid rgba(52,211,153,0.35)",
+          padding: isInfoStep ? "22px 22px" : isCenterStep ? "12px 14px" : "16px 18px",
+          borderRadius: isInfoStep ? 20 : isCenterStep ? 12 : 16,
+          border: isInfoStep ? "1px solid rgba(52,211,153,0.35)" : "1px solid rgba(52,211,153,0.35)",
           boxShadow: isInfoStep
-            ? "0 24px 60px rgba(0,0,0,0.65), 0 0 50px rgba(52,211,153,0.25)"
+            ? "0 30px 80px rgba(0,0,0,0.7), 0 0 60px rgba(52,211,153,0.22), 0 0 0 1px rgba(255,255,255,0.04) inset"
             : isCenterStep
             ? "0 12px 32px rgba(0,0,0,0.55), 0 0 20px rgba(52,211,153,0.18)"
-            : "0 16px 40px rgba(0,0,0,0.5), 0 0 24px rgba(52,211,153,0.15)",
+            : "0 18px 44px rgba(0,0,0,0.55), 0 0 28px rgba(52,211,153,0.18), 0 0 0 1px rgba(255,255,255,0.04) inset",
           fontFamily: "'DM Sans','Segoe UI',sans-serif",
           zIndex: 4502,
           pointerEvents: "auto",
-          animation: "tourFadeIn 0.25s ease-out",
+          animation: isInfoStep
+            ? "tourSlideUp 0.42s cubic-bezier(.34,1.56,.64,1)"
+            : "tourFadeIn 0.28s ease-out",
         }}
       >
+        {/* Premium gradient border halo (info step için) */}
+        {isInfoStep && (
+          <div
+            aria-hidden
+            style={{
+              position: "absolute",
+              inset: -1,
+              borderRadius: 21,
+              padding: 1,
+              background: "linear-gradient(135deg, rgba(52,211,153,0.55) 0%, rgba(96,165,250,0.35) 50%, rgba(251,191,36,0.4) 100%)",
+              WebkitMask: "linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)",
+              WebkitMaskComposite: "xor",
+              maskComposite: "exclude",
+              opacity: 0.7,
+              pointerEvents: "none",
+            }}
+          />
+        )}
+
         {isInfoStep ? (
           // ★ INFO STEP — bilgilendirici büyük kart (özellik tanıtımı)
           <>
-            {/* Step counter + skip */}
+            {/* Üst satır: STEP X/Y + skip */}
             <div style={{
               display: "flex", justifyContent: "space-between", alignItems: "center",
               marginBottom: 14,
             }}>
-              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                {STEPS.map((_, i) => (
-                  <div key={i} style={{
-                    width: i === stepIdx ? 18 : 5, height: 5,
-                    borderRadius: 3,
-                    background: i <= stepIdx ? "#34d399" : "rgba(255,255,255,0.18)",
-                    transition: "all 0.25s",
-                  }} />
-                ))}
+              <div style={{
+                fontSize: 9.5, fontWeight: 800,
+                color: "rgba(52,211,153,0.85)",
+                textTransform: "uppercase", letterSpacing: 1.6,
+                fontFamily: "'JetBrains Mono', monospace",
+                background: "rgba(52,211,153,0.1)",
+                border: "1px solid rgba(52,211,153,0.25)",
+                padding: "3px 9px",
+                borderRadius: 5,
+              }}>
+                STEP {String(stepIdx + 1).padStart(2, "0")} / {String(STEPS.length).padStart(2, "0")}
               </div>
               <button
                 onClick={finish}
@@ -326,7 +397,7 @@ export default function Tour({ active, onFinish, mode = "main" }) {
                   border: "none", background: "rgba(255,255,255,0.05)",
                   color: "rgba(255,255,255,0.55)",
                   fontSize: 11, fontWeight: 600,
-                  cursor: "pointer", padding: "4px 10px",
+                  cursor: "pointer", padding: "4px 11px",
                   borderRadius: 6, fontFamily: "inherit",
                 }}
               >
@@ -334,60 +405,87 @@ export default function Tour({ active, onFinish, mode = "main" }) {
               </button>
             </div>
 
-            {/* Adım numarası */}
+            {/* Yatay progress bar */}
             <div style={{
-              fontSize: 10, fontWeight: 700,
-              color: "rgba(52,211,153,0.7)",
-              textTransform: "uppercase", letterSpacing: 1,
-              marginBottom: 6,
-              fontFamily: "'JetBrains Mono', monospace",
+              height: 3, borderRadius: 2,
+              background: "rgba(255,255,255,0.08)",
+              overflow: "hidden",
+              marginBottom: 16,
             }}>
-              {t("tour_step_label", { current: stepIdx + 1, total: STEPS.length })}
+              <div style={{
+                height: "100%",
+                width: `${((stepIdx + 1) / STEPS.length) * 100}%`,
+                background: "linear-gradient(90deg, #34d399, #10b981)",
+                borderRadius: 2,
+                boxShadow: "0 0 8px rgba(52,211,153,0.6)",
+                transition: "width 0.4s cubic-bezier(.4,0,.2,1)",
+              }} />
             </div>
 
-            {/* Başlık */}
+            {/* Başlık — gradient text */}
             <div style={{
-              fontSize: 16, fontWeight: 800, color: "#fff",
-              marginBottom: 10, letterSpacing: -0.2,
+              fontSize: 18, fontWeight: 800,
+              marginBottom: 10, letterSpacing: -0.3,
               lineHeight: 1.25,
+              backgroundImage: "linear-gradient(180deg, #ffffff 0%, #cbd5e1 100%)",
+              WebkitBackgroundClip: "text",
+              backgroundClip: "text",
+              WebkitTextFillColor: "transparent",
             }}>
               {t(step.title)}
             </div>
 
             {/* Açıklama */}
             <div style={{
-              fontSize: 13, lineHeight: 1.55,
+              fontSize: 13, lineHeight: 1.6,
               color: "rgba(255,255,255,0.72)",
-              marginBottom: 16,
+              marginBottom: 18,
             }}>
               {t(step.desc)}
             </div>
 
-            {/* CTA — İleri / Anladım */}
+            {/* CTA — Shimmer overlay'li gradient */}
             <button
               onClick={() => advance()}
               style={{
-                width: "100%", padding: "12px",
-                borderRadius: 11, border: "none",
+                position: "relative",
+                width: "100%", padding: "13px",
+                borderRadius: 12, border: "none",
                 background: "linear-gradient(135deg, #10b981, #34d399)",
                 color: "#0a1628",
-                fontSize: 13, fontWeight: 800,
+                fontSize: 13.5, fontWeight: 800,
                 cursor: "pointer", fontFamily: "inherit",
-                letterSpacing: 0.3,
-                boxShadow: "0 6px 18px rgba(52,211,153,0.35)",
+                letterSpacing: 0.5,
+                boxShadow: "0 8px 24px rgba(52,211,153,0.4), inset 0 1px 0 rgba(255,255,255,0.25)",
                 transition: "transform 0.12s",
+                overflow: "hidden",
+                textTransform: "uppercase",
               }}
               onMouseDown={(e) => { e.currentTarget.style.transform = "scale(0.98)"; }}
               onMouseUp={(e) => { e.currentTarget.style.transform = "scale(1)"; }}
               onMouseLeave={(e) => { e.currentTarget.style.transform = "scale(1)"; }}
             >
-              {stepIdx >= STEPS.length - 1 ? t("tour_finish") : t("tour_got_it")} →
+              {/* Shimmer overlay */}
+              <span aria-hidden style={{
+                position: "absolute",
+                inset: 0,
+                background: "linear-gradient(110deg, transparent 35%, rgba(255,255,255,0.35) 50%, transparent 65%)",
+                backgroundSize: "200% 100%",
+                animation: "tourShimmer 2.4s linear infinite",
+                pointerEvents: "none",
+              }} />
+              <span style={{ position: "relative", zIndex: 1 }}>
+                {stepIdx >= STEPS.length - 1 ? t("tour_finish") : t("tour_got_it")} →
+              </span>
             </button>
           </>
         ) : isCenterStep ? (
           // Banner görünümü — modal'ın üstünde sade ipucu (form modal açıkken)
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ fontSize: 20, flexShrink: 0 }}>💡</div>
+            <div style={{
+              fontSize: 20, flexShrink: 0,
+              animation: "tourFloat 2.4s ease-in-out infinite",
+            }}>💡</div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 12.5, fontWeight: 700, color: "#34d399", marginBottom: 2 }}>
                 {t(step.title)}
@@ -410,30 +508,33 @@ export default function Tour({ active, onFinish, mode = "main" }) {
             </button>
           </div>
         ) : (
+          // ★ Standart hedef-bazlı tooltip — premium revize
           <>
             <div style={{
               display: "flex", justifyContent: "space-between", alignItems: "center",
-              marginBottom: 8,
+              marginBottom: 10,
             }}>
-              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                {STEPS.map((_, i) => (
-                  <div key={i} style={{
-                    width: i === stepIdx ? 18 : 5, height: 5,
-                    borderRadius: 3,
-                    background: i <= stepIdx ? "#34d399" : "rgba(255,255,255,0.18)",
-                    transition: "all 0.25s",
-                  }} />
-                ))}
+              <div style={{
+                fontSize: 9, fontWeight: 800,
+                color: "rgba(52,211,153,0.85)",
+                textTransform: "uppercase", letterSpacing: 1.5,
+                fontFamily: "'JetBrains Mono', monospace",
+                background: "rgba(52,211,153,0.1)",
+                border: "1px solid rgba(52,211,153,0.22)",
+                padding: "2.5px 7px",
+                borderRadius: 4,
+              }}>
+                {String(stepIdx + 1).padStart(2, "0")} / {String(STEPS.length).padStart(2, "0")}
               </div>
               <button
                 onClick={finish}
                 style={{
                   border: "none", background: "rgba(255,255,255,0.05)",
                   color: "rgba(255,255,255,0.55)",
-                  fontSize: 11, fontWeight: 600,
+                  fontSize: 10.5, fontWeight: 600,
                   cursor: "pointer",
-                  padding: "4px 10px",
-                  borderRadius: 6,
+                  padding: "3px 9px",
+                  borderRadius: 5,
                   fontFamily: "inherit",
                 }}
               >
@@ -442,16 +543,36 @@ export default function Tour({ active, onFinish, mode = "main" }) {
             </div>
 
             <div style={{
-              fontSize: 14, fontWeight: 700, color: "#34d399",
-              marginBottom: 4, letterSpacing: -0.2,
+              fontSize: 14.5, fontWeight: 800,
+              marginBottom: 5, letterSpacing: -0.2,
+              backgroundImage: "linear-gradient(180deg, #ffffff 0%, #34d399 100%)",
+              WebkitBackgroundClip: "text",
+              backgroundClip: "text",
+              WebkitTextFillColor: "transparent",
             }}>
               {t(step.title)}
             </div>
             <div style={{
-              fontSize: 12.5, lineHeight: 1.5,
-              color: "rgba(255,255,255,0.7)",
+              fontSize: 12.5, lineHeight: 1.55,
+              color: "rgba(255,255,255,0.72)",
             }}>
               {t(step.desc)}
+            </div>
+
+            {/* Yatay progress mini */}
+            <div style={{
+              height: 2, borderRadius: 1,
+              background: "rgba(255,255,255,0.07)",
+              overflow: "hidden",
+              marginTop: 12,
+            }}>
+              <div style={{
+                height: "100%",
+                width: `${((stepIdx + 1) / STEPS.length) * 100}%`,
+                background: "linear-gradient(90deg, #34d399, #10b981)",
+                borderRadius: 1,
+                transition: "width 0.4s cubic-bezier(.4,0,.2,1)",
+              }} />
             </div>
           </>
         )}
