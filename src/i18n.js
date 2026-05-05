@@ -439,7 +439,7 @@ const DICT = {
     rate_yes: "Rate 5 Stars ⭐",
     rate_later: "Later",
     rate_no: "Not Really",
-    mode_subtitle: "Football Tactics & Team Manager",
+    mode_subtitle: "Football Tactics & Team Management for 7-a-side",
     mode_myteam_title: "My Team",
     mode_myteam_sub: "Build one team, manage your squad, share the lineup",
     mode_myteam_detail: "7-player squad · 7 formations · Sharing",

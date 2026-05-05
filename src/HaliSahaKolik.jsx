@@ -12,6 +12,7 @@ import { Camera, CameraResultType, CameraSource } from "@capacitor/camera";
 import MatchResultModalNew from "./MatchResultModal";
 import MatchHistoryView from "./MatchHistory";
 import PlayerStatsView from "./PlayerStats";
+import ModeSelectScreen from "./ModeSelectScreen";
 import {
   generateDefaultAttributes,
   ensurePlayerAttributes,
@@ -23,6 +24,7 @@ import {
 } from "./playerAttributes";
 import SpiderChart from "./SpiderChart";
 import { getAllMatches, computePlayerStats } from "./matchHistoryStore";
+import LiveMatch from "./LiveMatch";
 
 // ─── SCREENSHOT & SHARE UTILITY ───
 const captureAndShare = async (element, filename = "halisaha-kolik.png") => {
@@ -483,40 +485,96 @@ const Pitch = ({ colA, colB, isMatch }) => (
 );
 
 // ─── FIELD PLAYER ───
-const FieldPlayer = ({ player, x, y, fieldRef, teamColor, isCaptain, onToggleCaptain, onRemove, isMatch, side, isGoalkeeper }) => {
+const FieldPlayer = ({
+  player, x, y, fieldRef, teamColor,
+  isCaptain, onToggleCaptain, onRemove,
+  isMatch, side, isGoalkeeper,
+  // ★ YENİ: slot takası için
+  slotIndex, slotPositions, onSlotChange,
+}) => {
   const [pos, setPos] = useState({ x, y });
   const [drag, setDrag] = useState(false);
   const [hover, setHover] = useState(false);
   const off = useRef({ x: 0, y: 0 });
+  const movedRef = useRef(false);  // ★ Sürükleme oldu mu?
 
   useEffect(() => { setPos({ x, y }); }, [x, y]);
 
   const clampY = useCallback((raw) => {
-    // ★ Kaleci y:92 ile uyumlu sınırlar — isim etiketi kesilmesin diye 94 max
-    if (!isMatch) return Math.max(8, Math.min(94, raw));
-    if (side === "A") return Math.max(54, Math.min(95, raw));
-    return Math.max(5, Math.min(46, raw));
-  }, [isMatch, side]);
+  const role = player?.position || "";
+  const isDef = /DEFANS|STOPER|BEK/.test(role);
+  const isMid = role === "ORTA SAHA";
+  const isFwd = role === "FORVET";
+
+  if (isMatch) {
+    if (side === "A") {
+      // A takımı, alt yarı (54-95). Rol bazlı tavan/taban:
+      const lo = isFwd ? 54 : isMid ? 58 : 70;   // forvet üstte (yarıya yakın), defans dipte
+      const hi = isDef ? 94 : isMid ? 86 : 74;
+      return Math.max(lo, Math.min(hi, raw));
+    }
+    // B takımı, üst yarı (5-46). Aynı mantık tersinden:
+    const lo = isDef ? 6  : isMid ? 14 : 26;
+    const hi = isFwd ? 46 : isMid ? 42 : 30;
+    return Math.max(lo, Math.min(hi, raw));
+  }
+
+  // Tek-takım modu (Kendi Takımım): tüm saha
+  const lo = isFwd ? 8  : isMid ? 22 : 50;
+  const hi = isDef ? 94 : isMid ? 80 : 50;
+  return Math.max(lo, Math.min(hi, raw));
+    }, [isMatch, side, player?.position]);
   const clampX = useCallback((raw) => Math.max(7, Math.min(93, raw)), []);
 
   const begin = (cx, cy) => {
-    if (isGoalkeeper) return; // ★ Kaleci sabit — taşınamaz
+    if (isGoalkeeper) return;
     const r = fieldRef.current?.getBoundingClientRect();
     if (!r) return;
     off.current = { x: (cx - r.left) / r.width * 100 - pos.x, y: (cy - r.top) / r.height * 100 - pos.y };
     setDrag(true);
     setHover(false);
+    movedRef.current = false;
   };
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const move = useCallback((cx, cy) => {
     if (!drag) return;
     const r = fieldRef.current?.getBoundingClientRect();
     if (!r) return;
-    setPos({ x: clampX((cx - r.left) / r.width * 100 - off.current.x), y: clampY((cy - r.top) / r.height * 100 - off.current.y) });
+    movedRef.current = true;
+    setPos({
+      x: clampX((cx - r.left) / r.width * 100 - off.current.x),
+      y: clampY((cy - r.top) / r.height * 100 - off.current.y),
+    });
   }, [drag, clampX, clampY, fieldRef]);
 
-  const stop = useCallback(() => setDrag(false), []);
+  // ★ Sürükleme bittiğinde: en yakın slot'u bul, takas tetikle veya snap-back
+  const stop = useCallback(() => {
+    setDrag(false);
+    if (!movedRef.current) return;  // tıklamaydı, sürükleme değil
+    movedRef.current = false;
+
+    if (!slotPositions || slotIndex == null || !onSlotChange) {
+      // Slot takası prop'ları yok → eski davranış: parent x,y'ye snap et
+      setPos({ x, y });
+      return;
+    }
+
+    // En yakın slotu bul
+    let bestIdx = slotIndex, bestDist = Infinity;
+    slotPositions.forEach((sp, i) => {
+      const d = Math.hypot(sp.x - pos.x, sp.y - pos.y);
+      if (d < bestDist) { bestDist = d; bestIdx = i; }
+    });
+
+    // Eşik: 12% mesafe içinde değilse veya kendi slotuna geri döndüyse → snap-back
+    if (bestIdx === slotIndex || bestDist > 14) {
+      setPos({ x, y });
+      return;
+    }
+
+    // Slot takası tetikle — parent state güncellenince useEffect ile pos yeni x,y'ye gelecek
+    onSlotChange(bestIdx);
+  }, [pos.x, pos.y, slotIndex, slotPositions, onSlotChange, x, y]);
 
   useEffect(() => {
     if (!drag) return;
@@ -526,7 +584,12 @@ const FieldPlayer = ({ player, x, y, fieldRef, teamColor, isCaptain, onToggleCap
     window.addEventListener("mouseup", stop);
     window.addEventListener("touchmove", tm, { passive: false });
     window.addEventListener("touchend", stop);
-    return () => { window.removeEventListener("mousemove", mm); window.removeEventListener("mouseup", stop); window.removeEventListener("touchmove", tm); window.removeEventListener("touchend", stop); };
+    return () => {
+      window.removeEventListener("mousemove", mm);
+      window.removeEventListener("mouseup", stop);
+      window.removeEventListener("touchmove", tm);
+      window.removeEventListener("touchend", stop);
+    };
   }, [drag, move, stop]);
 
   const rc = ratingColor(player?.rating || 50);
@@ -538,7 +601,14 @@ const FieldPlayer = ({ player, x, y, fieldRef, teamColor, isCaptain, onToggleCap
       onTouchStart={(e) => begin(e.touches[0].clientX, e.touches[0].clientY)}
       onMouseEnter={() => !drag && setHover(true)}
       onMouseLeave={() => setHover(false)}
-      style={{ position: "absolute", left: `${pos.x}%`, top: `${pos.y}%`, transform: "translate(-50%,-50%)", zIndex: drag || hover ? 100 : 10, cursor: isGoalkeeper ? "default" : (drag ? "grabbing" : "grab"), userSelect: "none", touchAction: "none", transition: drag ? "none" : "left 0.4s cubic-bezier(.4,0,.2,1), top 0.4s cubic-bezier(.4,0,.2,1)" }}
+      style={{
+        position: "absolute", left: `${pos.x}%`, top: `${pos.y}%`,
+        transform: "translate(-50%,-50%)",
+        zIndex: drag || hover ? 100 : 10,
+        cursor: isGoalkeeper ? "default" : (drag ? "grabbing" : "grab"),
+        userSelect: "none", touchAction: "none",
+        transition: drag ? "none" : "left 0.4s cubic-bezier(.4,0,.2,1), top 0.4s cubic-bezier(.4,0,.2,1)",
+      }}
     >
       {hover && !drag && (
         <div style={{ position: "absolute", [isBottom ? "bottom" : "top"]: "100%", left: "50%", transform: `translate(-50%, ${isBottom ? "-10px" : "10px"})`, background: "rgba(8,12,20,0.96)", border: `1px solid ${teamColor}55`, backdropFilter: "blur(12px)", padding: "7px 14px", borderRadius: 10, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, boxShadow: `0 10px 28px rgba(0,0,0,0.7), 0 0 14px ${teamColor}22`, zIndex: 110, whiteSpace: "nowrap", animation: "tooltipIn 0.18s ease-out" }}>
@@ -562,7 +632,6 @@ const FieldPlayer = ({ player, x, y, fieldRef, teamColor, isCaptain, onToggleCap
               <I.Crown /><span style={{ fontSize: 8.5, fontWeight: 900, color: "#78350f", letterSpacing: 0.6 }}>C</span>
             </div>
           )}
-          {/* ★ ANA YUVARLAK — 40px → 54px, daha kalın çerçeve, çift gölge */}
           <div onClick={(e) => { e.stopPropagation(); onToggleCaptain?.(); }} style={{
             width: 54, height: 54, borderRadius: "50%",
             background: player?.photo ? `url(${player.photo}) center/cover` : avatarColor(player?.id || "x"),
@@ -578,22 +647,19 @@ const FieldPlayer = ({ player, x, y, fieldRef, teamColor, isCaptain, onToggleCap
             position: "relative",
             overflow: "hidden",
           }}>
-            {/* ★ Forma üstüne hafif highlight (top-light) — 3D hissi */}
             {!player?.photo && (
               <div style={{ position: "absolute", inset: 0, borderRadius: "50%", background: "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, transparent 45%, transparent 60%, rgba(0,0,0,0.15) 100%)", pointerEvents: "none" }} />
             )}
             <span style={{ position: "relative", zIndex: 2, textShadow: "0 1px 3px rgba(0,0,0,0.5)", fontSize: (() => {
-              // ★ Önce forma numarası, yoksa initials fallback
               const display = player?.jerseyNumber ? String(player.jerseyNumber) : getInitials(player?.name, player?.surname);
               if (display === "⚽") return 22;
               if (display.length === 1) return 23;
-              if (display.length === 2) return 21;     // "10", "23" gibi 2 haneli numaralar
+              if (display.length === 2) return 21;
               return 19;
             })() }}>
               {!player?.photo && (player?.jerseyNumber || getInitials(player?.name, player?.surname))}
             </span>
           </div>
-          {/* ★ Rating badge — 13px line → 18px, daha okunaklı */}
           <div style={{
             position: "absolute", bottom: -4, right: -8,
             background: `linear-gradient(135deg, ${rc}, ${rc}dd)`,
@@ -604,7 +670,6 @@ const FieldPlayer = ({ player, x, y, fieldRef, teamColor, isCaptain, onToggleCap
             boxShadow: "0 3px 8px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.25)",
             minWidth: 22, textAlign: "center",
           }}>{player?.rating}</div>
-          {/* ★ Çıkar (×) butonu — 16px → 22px (touch target için kritik) */}
           <button data-screenshot-hide="true" onClick={(e) => { e.stopPropagation(); onRemove?.(); }} style={{
             position: "absolute", top: -7, right: -9,
             width: 22, height: 22, borderRadius: "50%",
@@ -618,7 +683,6 @@ const FieldPlayer = ({ player, x, y, fieldRef, teamColor, isCaptain, onToggleCap
           }}>×</button>
         </div>
         {!hover && (
-          // ★ İsim etiketi — 8.5px → 11px, daha geniş, daha premium
           <div style={{
             background: "linear-gradient(180deg, rgba(0,0,0,0.85), rgba(0,0,0,0.75))",
             color: "#fff", fontSize: 11, fontWeight: 700,
@@ -2085,13 +2149,27 @@ export default function LineupPro() {
     hapticMedium();
     const setter = side === "A" ? setTeamA : setTeamB;
     setter((tt) => {
-      if (tt.fieldPlayers.includes(id)) return tt;
-      const n = [...tt.fieldPlayers]; n[idx] = id;
-      // Kadro tamamlandı mı? (7 oyuncu sahada)
+      const n = [...tt.fieldPlayers];
+      const existingIdx = n.indexOf(id);
+      if (existingIdx === idx) return tt;        // aynı slot — değişiklik yok
+      if (existingIdx !== -1) n[existingIdx] = null;  // eski slotu temizle
+      n[idx] = id;
       if (n.filter(Boolean).length === 7 && !milestones.current.complete) {
         milestones.current.complete = true;
         setTimeout(() => { hapticSuccess(); toast_(t("t_squad_complete")); }, 250);
       }
+      return { ...tt, fieldPlayers: n };
+    });
+  };
+
+    // ★ YENİ — saha içi slot takası
+  const movePlayerOnField = (side, fromIdx, toIdx) => {
+    if (fromIdx === toIdx) return;
+    hapticMedium();
+    const setter = side === "A" ? setTeamA : setTeamB;
+    setter((tt) => {
+      const n = [...tt.fieldPlayers];
+      [n[fromIdx], n[toIdx]] = [n[toIdx], n[fromIdx]];
       return { ...tt, fieldPlayers: n };
     });
   };
@@ -2199,6 +2277,41 @@ const handleShareLineup = async () => {
   `;
 
   // ══════════════════════════════════════════════
+  // ══ ONLINE MODE — Canlı Halı Saha (Premium)
+  // ══════════════════════════════════════════════
+  if (mode === "online") {
+    return (
+      <>
+        <style>{globalCSS}</style>
+        <div style={{ position: "fixed", inset: 0, background: "#070a0f", display: "flex", flexDirection: "column", maxWidth: 480, margin: "0 auto", overflow: "hidden" }}>
+          {/* Üst bar — Geri butonu + başlık */}
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            padding: "calc(14px + env(safe-area-inset-top, 0px)) 16px 10px",
+            borderBottom: "1px solid rgba(255,255,255,0.05)",
+            background: "rgba(7,10,15,0.96)",
+            backdropFilter: "blur(16px)",
+            position: "sticky", top: 0, zIndex: 30,
+          }}>
+            <button onClick={() => { hapticLight(); setMode(null); }} style={{ ...S.mini, border: "none", background: "none", padding: 4 }}>
+              <I.Back />
+            </button>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#60a5fa" }}>⚡ Online Halı Saha</div>
+              <div style={{ fontSize: 8.5, color: "rgba(255,255,255,0.28)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>Beta · Premium yakında</div>
+            </div>
+            <div style={{ width: 28 }} />
+          </div>
+          {/* Tam ekran LiveMatch */}
+          <div style={{ flex: 1, overflow: "auto", WebkitOverflowScrolling: "touch" }}>
+            <LiveMatch />
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  // ══════════════════════════════════════════════
   // ══ HISTORY MODE — Geçmiş Maçlar / Oyuncu Profil
   // ══════════════════════════════════════════════
   if (mode === "history") {
@@ -2234,52 +2347,18 @@ const handleShareLineup = async () => {
   // ══════════════════════════════════════════════
   // ══ MODE SELECT SCREEN
   // ══════════════════════════════════════════════
-  if (!mode) return (
-    <div style={{ fontFamily: "'DM Sans','Segoe UI',sans-serif", background: "linear-gradient(160deg,#070a0f,#0c1117 45%,#0a1628)", color: "#e2e8f0", position: "fixed", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24, paddingTop: "calc(24px + env(safe-area-inset-top, 0px))", paddingBottom: "calc(24px + env(safe-area-inset-bottom, 0px))", textAlign: "center" }}>
-      <style>{globalCSS}</style>
-      <div style={{ position: "fixed", inset: 0, overflow: "hidden", pointerEvents: "none" }}>
-        <div style={{ position: "absolute", top: "15%", left: "10%", width: 180, height: 180, borderRadius: "50%", background: "radial-gradient(circle, rgba(5,150,105,0.08) 0%, transparent 70%)", animation: "pulseGlow 4s ease-in-out infinite" }} />
-        <div style={{ position: "absolute", bottom: "20%", right: "5%", width: 140, height: 140, borderRadius: "50%", background: "radial-gradient(circle, rgba(245,158,11,0.06) 0%, transparent 70%)", animation: "pulseGlow 5s ease-in-out infinite 1s" }} />
-      </div>
 
-      {/* ★ TOP BAR: Sadece dil seçici (sağ üst) */}
-      <div style={{ position: "absolute", top: "calc(14px + env(safe-area-inset-top, 0px))", right: 16, zIndex: 2 }}>
-        <LangToggle lang={lang} onChange={setLang} />
-      </div>
-
-      <div style={{ position: "relative", zIndex: 1 }}>
-        <img src={logo} alt="HalıSaha-Kolik" style={{ width: 72, height: 72, borderRadius: 18, objectFit: "cover", boxShadow: "0 12px 36px rgba(5,150,105,0.35), 0 0 60px rgba(5,150,105,0.15)", margin: "0 auto 18px", animation: "fadeUp 0.45s" }} />
-        <h1 style={{ fontSize: 30, fontWeight: 700, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 3, marginBottom: 4, animation: "fadeUp 0.45s 0.08s both" }}>HalıSaha-Kolik</h1>
-        <p style={{ color: "rgba(255,255,255,0.32)", fontSize: 13, marginBottom: 10, animation: "fadeUp 0.45s 0.16s both" }}>{t("mode_subtitle")}</p>
-        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.15)", fontWeight: 600, letterSpacing: 2, textTransform: "uppercase", marginBottom: 32, animation: "fadeUp 0.45s 0.2s both" }} />
-          <div style={{ display: "flex", flexDirection: "column", gap: 12, width: "100%", maxWidth: 360 }}>
-            {[
-              { key: "myteam",  icon: <I.Shield />,  col: "#34d399", bg: "rgba(5,150,105,0.12)",  bd: "rgba(52,211,153,0.2)",  title: t("mode_myteam_title"),  sub: t("mode_myteam_sub"),  detail: t("mode_myteam_detail") },
-              { key: "match",   icon: <I.Trophy />,  col: "#fbbf24", bg: "rgba(245,158,11,0.12)", bd: "rgba(251,191,36,0.2)",  title: t("mode_match_title"),   sub: t("mode_match_sub"),   detail: t("mode_match_detail") },
-              { key: "history", icon: <I.Stats />,   col: "#a78bfa", bg: "rgba(124,58,237,0.12)", bd: "rgba(167,139,250,0.22)", title: t("mode_history_title"), sub: t("mode_history_sub"), detail: t("mode_history_detail") },
-            ].map((m, i) => (
-              <button
-                key={m.key}
-                data-tour={m.key === "myteam" ? "mode-myteam" : undefined}
-                onClick={() => {
-                  if (m.key === "history") { hapticMedium(); setMode("history"); }
-                  else { handleModeSelect(m.key); }
-                }}
-                style={{ padding: "18px 20px", borderRadius: 16, background: m.bg, border: `1px solid ${m.bd}`, cursor: "pointer", display: "flex", alignItems: "center", gap: 14, textAlign: "left", animation: `fadeUp 0.45s ${0.24 + i * 0.08}s both`, transition: "transform 0.15s, box-shadow 0.15s" }}
-              >
-                <div style={{ width: 48, height: 48, borderRadius: 13, background: `${m.col}22`, display: "flex", alignItems: "center", justifyContent: "center", color: m.col, flexShrink: 0 }}>{m.icon}</div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ color: m.col, fontSize: 15, fontWeight: 700, marginBottom: 2 }}>{m.title}</div>
-                  <div style={{ color: "rgba(255,255,255,0.35)", fontSize: 12, lineHeight: 1.45 }}>{m.sub}</div>
-                  <div style={{ color: "rgba(255,255,255,0.18)", fontSize: 9, marginTop: 4, fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase" }}>{m.detail}</div>
-                </div>
-                <div style={{ color: m.col, opacity: 0.5, transform: "rotate(-90deg)" }}><I.Chevron /></div>
-              </button>
-            ))}
-          </div>
-      </div>
-    </div>
-  );
+    if (!mode) {
+      return (
+        <ModeSelectScreen
+          onSelectMode={(key) => {
+            if (key === "history") { hapticMedium(); setMode("history"); }
+            else if (key === "online") { hapticMedium(); setMode("online"); }
+            else { handleModeSelect(key); }   // myteam | match
+          }}
+        />
+      );
+    }
 
   // ══════════════════════════════════════════════
   // ══ MAIN UI
@@ -2427,13 +2506,33 @@ const handleShareLineup = async () => {
                       const pid = teamA.fieldPlayers[idx];
                       const p = pid ? teamA.players.find((x) => x.id === pid) : null;
                       return p
-                        ? (<FieldPlayer key={`a${idx}`} player={p} x={pos.x} y={pos.y} fieldRef={fieldRef} teamColor={teamA.color.secondary} isCaptain={teamA.captain === p.id} side="A" isMatch={isMatch} isGoalkeeper={pos.role === "KALECİ"} onToggleCaptain={() => toggleCaptain("A", p.id)} onRemove={() => removeFromField("A", idx)} />)
+                        ? (<FieldPlayer key={`a${idx}`} player={p} x={pos.x} y={pos.y} fieldRef={fieldRef} teamColor={teamA.color.secondary} isCaptain={teamA.captain === p.id} side="A" isMatch={isMatch} isGoalkeeper={pos.role === "KALECİ"} onToggleCaptain={() => toggleCaptain("A", p.id)} onRemove={() => removeFromField("A", idx)}
+                        slotIndex={idx} slotPositions={positions} onSlotChange={(newIdx) => movePlayerOnField("A", idx, newIdx)} />)
                         : (<EmptySlot key={`ae${idx}`} x={pos.x} y={pos.y} role={pos.role} teamColor={teamA.color.secondary} onDrop={(id) => placePlayer("A", idx, id)} onClickPlus={() => setQS({ side: "A", idx, role: pos.role })} tourTarget={idx === tourTargetIdx ? "empty-slot" : undefined} />);
                     });
                   })()}
 
                   {/* Team B */}
-                  {isMatch && getPositions("B").map((pos, idx) => { const pid = teamB.fieldPlayers[idx]; const p = pid ? teamB.players.find((x) => x.id === pid) : null; return p ? (<FieldPlayer key={`b${idx}`} player={p} x={pos.x} y={pos.y} fieldRef={fieldRef} teamColor={teamB.color.secondary} isCaptain={teamB.captain === p.id} side="B" isMatch={isMatch} isGoalkeeper={pos.role === "KALECİ"} onToggleCaptain={() => toggleCaptain("B", p.id)} onRemove={() => removeFromField("B", idx)} />) : (<EmptySlot key={`be${idx}`} x={pos.x} y={pos.y} role={pos.role} teamColor={teamB.color.secondary} onDrop={(id) => placePlayer("B", idx, id)} onClickPlus={() => setQS({ side: "B", idx, role: pos.role })} />); })}
+                  
+                  {isMatch && (() => {
+                    const bPositions = getPositions("B");
+                    return bPositions.map((pos, idx) => {
+                      const pid = teamB.fieldPlayers[idx];
+                      const p = pid ? teamB.players.find((x) => x.id === pid) : null;
+                      return p
+                        ? (<FieldPlayer key={`b${idx}`} player={p} x={pos.x} y={pos.y} fieldRef={fieldRef}
+                            teamColor={teamB.color.secondary} isCaptain={teamB.captain === p.id} side="B"
+                            isMatch={isMatch} isGoalkeeper={pos.role === "KALECİ"}
+                            onToggleCaptain={() => toggleCaptain("B", p.id)}
+                            onRemove={() => removeFromField("B", idx)}
+                            slotIndex={idx} slotPositions={bPositions}
+                            onSlotChange={(newIdx) => movePlayerOnField("B", idx, newIdx)} />)
+                        : (<EmptySlot key={`be${idx}`} x={pos.x} y={pos.y} role={pos.role}
+                            teamColor={teamB.color.secondary}
+                            onDrop={(id) => placePlayer("B", idx, id)}
+                            onClickPlus={() => setQS({ side: "B", idx, role: pos.role })} />);
+                    });
+                  })()}
 
                   {/* Labels */}
                   <div style={{ position: "absolute", bottom: 3, left: 7, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 4, height: 4, borderRadius: "50%", background: teamA.color.secondary }} /><span style={{ fontSize: 6.5, color: "rgba(255,255,255,0.2)", fontWeight: 700, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>{teamA.name}</span></div>
@@ -2476,8 +2575,8 @@ const handleShareLineup = async () => {
 
       {/* ★ TAB BAR — fixed bottom + safe-area-inset-bottom */}
       <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, background: "rgba(7,10,15,0.96)", backdropFilter: "blur(16px)", borderTop: "1px solid rgba(255,255,255,0.05)", display: "flex", zIndex: 50, paddingBottom: BOTTOM_SAFE }}>
-        {[{ id: "field", icon: <I.Field />, label: t("tab_field") }, { id: "players", icon: <I.Users />, label: t("tab_squad") }].map((t) => (
-          <button key={t.id} data-tour={t.id === "field" ? "tab-field" : "tab-squad"} onClick={() => { hapticSelection(); setTab(t.id); }} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "9px 0 7px", border: "none", cursor: "pointer", background: "transparent", color: tab === t.id ? tc : "rgba(255,255,255,0.28)", fontSize: 9.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 }}>{t.icon}{t.label}</button>
+        {[{ id: "field", icon: <I.Field />, label: t("tab_field") }, { id: "players", icon: <I.Users />, label: t("tab_squad") }].map((tb) => (
+          <button key={tb.id} data-tour={tb.id === "field" ? "tab-field" : tb.id === "players" ? "tab-squad" : undefined} onClick={() => { hapticSelection(); setTab(tb.id); }} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "9px 0 7px", border: "none", cursor: "pointer", background: "transparent", color: tab === tb.id ? tc : "rgba(255,255,255,0.28)", fontSize: 9.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 }}>{tb.icon}{tb.label}</button>
         ))}
       </div>
 
