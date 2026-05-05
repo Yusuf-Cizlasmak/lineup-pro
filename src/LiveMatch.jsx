@@ -2180,86 +2180,493 @@ export default function LiveMatch() {
     const canIRate = !ratingsSubmitted && session.status === 'finished';
     const mvp = session.mvp_device_id ? players.find(p => p.device_id === session.mvp_device_id) : null;
 
+    // ─── Maç istatistikleri ───
+    const goalEvents = events.filter(e => e.type === 'goal' || e.type === 'own_goal');
+    const totalGoals = goalEvents.length;
+
+    // Asistleri hesapla
+    const assistsByPlayer = {};
+    events.forEach(ev => {
+      if (ev.type === 'goal' && ev.assist_device_id) {
+        assistsByPlayer[ev.assist_device_id] = (assistsByPlayer[ev.assist_device_id] || 0) + 1;
+      }
+    });
+    const totalAssists = Object.values(assistsByPlayer).reduce((s, n) => s + n, 0);
+
+    // Gol kralı / asist kralı
+    const goalEntries = Object.entries(goalsByPlayer).sort((a, b) => b[1] - a[1]);
+    const topScorerId = goalEntries[0]?.[0];
+    const topScorer = topScorerId ? players.find(p => p.device_id === topScorerId) : null;
+    const topScorerGoals = goalEntries[0]?.[1] || 0;
+
+    const assistEntries = Object.entries(assistsByPlayer).sort((a, b) => b[1] - a[1]);
+    const topAssisterId = assistEntries[0]?.[0];
+    const topAssister = topAssisterId ? players.find(p => p.device_id === topAssisterId) : null;
+    const topAssistCount = assistEntries[0]?.[1] || 0;
+
+    // Hat-trick (3+ gol)
+    const hatTrickIds = Object.entries(goalsByPlayer).filter(([, n]) => n >= 3).map(([id]) => id);
+
+    // Galip
+    const aWin = (session.score_a || 0) > (session.score_b || 0);
+    const bWin = (session.score_b || 0) > (session.score_a || 0);
+    const draw = !aWin && !bWin;
+    const winnerColor = aWin ? colA : bWin ? colB : C.warn;
+    const resultText = aWin ? `${session.team_a_name} kazandı!`
+      : bWin ? `${session.team_b_name} kazandı!`
+      : 'Beraberlik';
+    const trophy = draw ? '🤝' : '🏆';
+
     return wrap(
-      <div style={{ padding: '60px 16px 20px' }}>
-        <div style={{ textAlign: 'center', marginBottom: 24 }}>
-          <div style={{ fontSize: 40 }}>🏁</div>
-          <h3 style={{ margin: '8px 0 4px', fontSize: 20, fontWeight: 800 }}>Maç Bitti!</h3>
-          <div style={{ fontSize: 28, fontWeight: 900, fontFamily: "'JetBrains Mono',monospace" }}>
-            <span style={{ color: colA }}>{session.score_a}</span>
-            <span style={{ color: C.muted }}> - </span>
-            <span style={{ color: colB }}>{session.score_b}</span>
+      <div style={{ padding: '20px 16px 20px' }}>
+        {/* ═══ HERO — CINEMATIC FİNAL SKOR ═══ */}
+        <div style={{
+          position: 'relative',
+          margin: '20px 0 18px',
+          padding: '24px 18px',
+          background: `linear-gradient(135deg, ${colA}10 0%, ${C.cardSoft} 50%, ${colB}10 100%)`,
+          borderRadius: 22,
+          border: `1px solid ${winnerColor}33`,
+          boxShadow: `0 18px 48px rgba(0,0,0,0.55), 0 0 36px ${winnerColor}22, inset 0 1px 0 rgba(255,255,255,0.04)`,
+          overflow: 'hidden',
+          animation: 'lmFadeUp 0.6s cubic-bezier(.34,1.56,.64,1)',
+        }}>
+          {/* Glow halo */}
+          <span aria-hidden style={{
+            position: 'absolute', top: -40, left: '50%', transform: 'translateX(-50%)',
+            width: 220, height: 80, borderRadius: '50%',
+            background: `radial-gradient(ellipse, ${winnerColor}40, transparent 70%)`,
+            filter: 'blur(24px)',
+            pointerEvents: 'none',
+          }} />
+
+          {/* Trophy + FT badge */}
+          <div style={{ textAlign: 'center', marginBottom: 14, position: 'relative' }}>
+            <div style={{ fontSize: 44, lineHeight: 1, filter: `drop-shadow(0 6px 12px ${winnerColor}55)` }}>
+              {trophy}
+            </div>
+            <div style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              marginTop: 8, padding: '3px 10px',
+              background: `${winnerColor}18`, border: `1px solid ${winnerColor}44`,
+              borderRadius: 999,
+              fontSize: 10, fontWeight: 800, color: winnerColor,
+              letterSpacing: 2, textTransform: 'uppercase',
+              fontFamily: "'JetBrains Mono',monospace",
+            }}>
+              <span style={{ width: 5, height: 5, borderRadius: '50%', background: winnerColor }} />
+              Maç Bitti · FT
+            </div>
           </div>
-          <div style={{ fontSize: 14, color: C.muted, marginTop: 4 }}>
-            {session.team_a_name} vs {session.team_b_name}
+
+          {/* Skor */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14, marginBottom: 12 }}>
+            {/* Team A */}
+            <div style={{ flex: 1, textAlign: 'right', minWidth: 0 }}>
+              <div style={{
+                fontSize: 11, color: colA, fontWeight: 800,
+                letterSpacing: 1, textTransform: 'uppercase',
+                marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>
+                {session.team_a_name}
+              </div>
+              <div style={{
+                fontSize: 56, fontWeight: 900,
+                color: aWin ? colA : C.text,
+                opacity: bWin ? 0.45 : 1,
+                fontFamily: "'JetBrains Mono',monospace",
+                lineHeight: 0.95,
+                textShadow: aWin ? `0 0 28px ${colA}77` : 'none',
+                fontVariantNumeric: 'tabular-nums',
+              }}>
+                {session.score_a || 0}
+              </div>
+            </div>
+
+            {/* Separator */}
+            <div style={{
+              fontSize: 28, color: C.muted, fontWeight: 200,
+              fontFamily: "'JetBrains Mono',monospace",
+              lineHeight: 0.95, paddingBottom: 4,
+            }}>:</div>
+
+            {/* Team B */}
+            <div style={{ flex: 1, textAlign: 'left', minWidth: 0 }}>
+              <div style={{
+                fontSize: 11, color: colB, fontWeight: 800,
+                letterSpacing: 1, textTransform: 'uppercase',
+                marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>
+                {session.team_b_name}
+              </div>
+              <div style={{
+                fontSize: 56, fontWeight: 900,
+                color: bWin ? colB : C.text,
+                opacity: aWin ? 0.45 : 1,
+                fontFamily: "'JetBrains Mono',monospace",
+                lineHeight: 0.95,
+                textShadow: bWin ? `0 0 28px ${colB}77` : 'none',
+                fontVariantNumeric: 'tabular-nums',
+              }}>
+                {session.score_b || 0}
+              </div>
+            </div>
+          </div>
+
+          {/* Sonuç metni + saha */}
+          <div style={{ textAlign: 'center', marginTop: 6 }}>
+            <div style={{
+              fontSize: 14, fontWeight: 800, color: winnerColor,
+              letterSpacing: 0.3,
+            }}>
+              {resultText}
+            </div>
+            {session.field_name && (
+              <div style={{ fontSize: 11, color: C.muted, marginTop: 4, fontFamily: "'DM Sans',sans-serif" }}>
+                📍 {session.field_name}
+              </div>
+            )}
           </div>
         </div>
 
-        {/* MVP kartı */}
-        <Card style={{
-          marginBottom: 16,
-          background: mvp
-            ? 'linear-gradient(135deg, rgba(251,191,36,0.18), rgba(251,191,36,0.04))'
-            : 'rgba(255,255,255,0.04)',
-          border: mvp ? '1px solid rgba(251,191,36,0.4)' : `1px solid ${C.border}`,
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{ fontSize: 28 }}>⭐</div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 10, color: C.warn, fontWeight: 800, letterSpacing: 1.5, textTransform: 'uppercase' }}>
-                MVP
+        {/* ═══ MVP SHOWCASE ═══ */}
+        {mvp ? (
+          <Card style={{
+            marginBottom: 14,
+            padding: '14px 14px',
+            background: 'linear-gradient(135deg, rgba(251,191,36,0.18), rgba(251,191,36,0.02))',
+            border: '1.5px solid rgba(251,191,36,0.45)',
+            boxShadow: '0 10px 30px rgba(251,191,36,0.15), 0 0 24px rgba(251,191,36,0.1)',
+            position: 'relative',
+            overflow: 'hidden',
+            animation: 'lmFadeUp 0.5s 0.1s both',
+          }}>
+            <span aria-hidden style={{
+              position: 'absolute', top: -40, right: -40,
+              width: 140, height: 140, borderRadius: '50%',
+              background: 'radial-gradient(circle, rgba(251,191,36,0.35), transparent 70%)',
+              filter: 'blur(18px)',
+              pointerEvents: 'none',
+            }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, position: 'relative' }}>
+              <div style={{
+                position: 'relative',
+                width: 64, height: 64, borderRadius: '50%',
+                background: `linear-gradient(135deg, ${mvp.team === 'A' ? colA : colB}, ${mvp.team === 'A' ? colA + 'cc' : colB + 'cc'})`,
+                border: '3px solid #fbbf24',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 28, fontWeight: 900, color: '#0a1628',
+                fontFamily: "'DM Sans',sans-serif",
+                boxShadow: '0 10px 28px rgba(251,191,36,0.45), inset 0 -3px 6px rgba(0,0,0,0.18)',
+                flexShrink: 0,
+              }}>
+                {(mvp.nickname || '?')[0].toUpperCase()}
+                <span style={{
+                  position: 'absolute', top: -10, right: -10,
+                  fontSize: 24, lineHeight: 1,
+                  filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.4))',
+                }}>⭐</span>
               </div>
-              <div style={{ fontSize: 16, fontWeight: 800, color: mvp ? C.text : C.muted }}>
-                {mvp ? mvp.nickname : 'Henüz seçilmedi'}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{
+                  fontSize: 9.5, fontWeight: 800, color: '#fbbf24',
+                  letterSpacing: 2, textTransform: 'uppercase',
+                  marginBottom: 2,
+                  fontFamily: "'JetBrains Mono',monospace",
+                }}>
+                  ⭐ Maçın Yıldızı
+                </div>
+                <div style={{
+                  fontSize: 18, fontWeight: 800, color: C.text,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>
+                  {mvp.nickname}
+                </div>
+                <div style={{ fontSize: 11, color: C.muted, marginTop: 3, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <span>{mvp.team === 'A' ? session.team_a_name : session.team_b_name}</span>
+                  {goalsByPlayer[mvp.device_id] > 0 && (
+                    <span style={{ color: C.warn }}>⚽ {goalsByPlayer[mvp.device_id]}</span>
+                  )}
+                  {assistsByPlayer[mvp.device_id] > 0 && (
+                    <span style={{ color: C.blue }}>🎯 {assistsByPlayer[mvp.device_id]}</span>
+                  )}
+                </div>
+              </div>
+              {amIFullPower && (
+                <button onClick={() => setShowMVPSheet(true)} style={{
+                  background: 'rgba(255,255,255,0.06)',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  color: C.text, borderRadius: 8, padding: '6px 12px',
+                  fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                  flexShrink: 0,
+                }}>Değiştir</button>
+              )}
+            </div>
+          </Card>
+        ) : amIFullPower ? (
+          <Card style={{
+            marginBottom: 14, textAlign: 'center', padding: '16px 14px',
+            background: 'rgba(251,191,36,0.05)',
+            border: '1px dashed rgba(251,191,36,0.35)',
+          }}>
+            <div style={{ fontSize: 28, marginBottom: 4 }}>⭐</div>
+            <div style={{ fontSize: 13, color: C.muted, marginBottom: 10 }}>
+              Henüz MVP seçilmedi
+            </div>
+            <Btn onClick={() => setShowMVPSheet(true)} color={C.warn} variant="solid" small style={{ width: 'auto', padding: '8px 18px', display: 'inline-block' }}>
+              ⭐ MVP Seç
+            </Btn>
+          </Card>
+        ) : null}
+
+        {/* ═══ TOP PERFORMERS GRID ═══ */}
+        {(topScorer || topAssister) && (
+          <div style={{
+            display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14,
+            animation: 'lmFadeUp 0.5s 0.18s both',
+          }}>
+            {topScorer ? (
+              <Card style={{
+                padding: '12px',
+                background: 'linear-gradient(135deg, rgba(251,191,36,0.10), rgba(251,191,36,0.02))',
+                border: '1px solid rgba(251,191,36,0.3)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 8 }}>
+                  <span style={{ fontSize: 13 }}>👑</span>
+                  <span style={{
+                    fontSize: 9, fontWeight: 800, color: C.warn,
+                    letterSpacing: 1.4, textTransform: 'uppercase',
+                    fontFamily: "'JetBrains Mono',monospace",
+                  }}>Gol Kralı</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <MiniAvatar player={topScorer} color={topScorer.team === 'A' ? colA : colB} size={28} isCaptain={topScorer.is_captain} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{
+                      fontSize: 12.5, fontWeight: 800,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>{topScorer.nickname}</div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 2, flexShrink: 0 }}>
+                    <span style={{
+                      fontSize: 22, fontWeight: 900, color: C.warn,
+                      fontFamily: "'JetBrains Mono',monospace", lineHeight: 1,
+                    }}>{topScorerGoals}</span>
+                    <span style={{ fontSize: 11, color: C.muted }}>⚽</span>
+                  </div>
+                </div>
+              </Card>
+            ) : <div />}
+            {topAssister ? (
+              <Card style={{
+                padding: '12px',
+                background: 'linear-gradient(135deg, rgba(96,165,250,0.10), rgba(96,165,250,0.02))',
+                border: '1px solid rgba(96,165,250,0.3)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 8 }}>
+                  <span style={{ fontSize: 13 }}>🎯</span>
+                  <span style={{
+                    fontSize: 9, fontWeight: 800, color: C.blue,
+                    letterSpacing: 1.4, textTransform: 'uppercase',
+                    fontFamily: "'JetBrains Mono',monospace",
+                  }}>Asist Kralı</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <MiniAvatar player={topAssister} color={topAssister.team === 'A' ? colA : colB} size={28} isCaptain={topAssister.is_captain} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{
+                      fontSize: 12.5, fontWeight: 800,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>{topAssister.nickname}</div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 2, flexShrink: 0 }}>
+                    <span style={{
+                      fontSize: 22, fontWeight: 900, color: C.blue,
+                      fontFamily: "'JetBrains Mono',monospace", lineHeight: 1,
+                    }}>{topAssistCount}</span>
+                    <span style={{ fontSize: 11, color: C.muted }}>🎯</span>
+                  </div>
+                </div>
+              </Card>
+            ) : <div />}
+          </div>
+        )}
+
+        {/* ═══ MAÇ TOPLAM ═══ */}
+        <div style={{
+          display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6,
+          marginBottom: 14,
+          animation: 'lmFadeUp 0.5s 0.24s both',
+        }}>
+          {[
+            { v: totalGoals, label: 'Gol', icon: '⚽', col: C.warn },
+            { v: totalAssists, label: 'Asist', icon: '🎯', col: C.blue },
+            { v: players.length, label: 'Oyuncu', icon: '👥', col: C.accent },
+          ].map((s, i) => (
+            <div key={i} style={{
+              padding: '10px 6px',
+              background: 'rgba(255,255,255,0.03)',
+              border: `1px solid ${C.border}`,
+              borderRadius: 10,
+              textAlign: 'center',
+            }}>
+              <div style={{
+                fontSize: 22, fontWeight: 900, color: s.col,
+                fontFamily: "'JetBrains Mono',monospace", lineHeight: 1,
+              }}>{s.v}</div>
+              <div style={{
+                fontSize: 9, color: C.muted, fontWeight: 700,
+                letterSpacing: 1, textTransform: 'uppercase',
+                marginTop: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3,
+              }}>
+                <span style={{ fontSize: 9 }}>{s.icon}</span> {s.label}
               </div>
             </div>
-            {amIFullPower && (
-              <button onClick={() => setShowMVPSheet(true)} style={inviteBtnStyle(C.warn)}>
-                {mvp ? 'Değiştir' : 'Seç'}
-              </button>
-            )}
-          </div>
-        </Card>
+          ))}
+        </div>
 
+        {/* ═══ GOL AKIŞI (TIMELINE) ═══ */}
+        {goalEvents.length > 0 && (
+          <Card style={{ marginBottom: 14, animation: 'lmFadeUp 0.5s 0.3s both' }}>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+              <span style={{ fontSize: 14, marginRight: 6 }}>📜</span>
+              <span style={{ fontSize: 13, fontWeight: 800 }}>Gol Akışı</span>
+              <span style={{
+                marginLeft: 'auto', fontSize: 10, color: C.muted, fontWeight: 700,
+                letterSpacing: 1, textTransform: 'uppercase',
+                fontFamily: "'JetBrains Mono',monospace",
+              }}>
+                {totalGoals} GOL
+              </span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {goalEvents.map((ev) => {
+                const teamColor = ev.team === 'A' ? colA : colB;
+                const teamName = ev.team === 'A' ? session.team_a_name : session.team_b_name;
+                const scorer = ev.device_id ? players.find(p => p.device_id === ev.device_id) : null;
+                const assister = ev.assist_device_id ? players.find(p => p.device_id === ev.assist_device_id) : null;
+                const goalIcon = ev.type === 'own_goal' ? '🥅'
+                  : ev.goal_type === 'penalty' ? '🎯'
+                  : ev.goal_type === 'freekick' ? '🦶'
+                  : ev.goal_type === 'header' ? '🤯'
+                  : '⚽';
+                const isHatTrick = scorer && hatTrickIds.includes(scorer.device_id);
+                return (
+                  <div key={ev.id} style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '8px 12px',
+                    background: `${teamColor}08`,
+                    borderRadius: 9,
+                    borderLeft: `3px solid ${teamColor}`,
+                  }}>
+                    <span style={{ fontSize: 17, flexShrink: 0 }}>{goalIcon}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <span style={{
+                          fontSize: 13, fontWeight: 800, color: C.text,
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          maxWidth: 140,
+                        }}>
+                          {scorer ? scorer.nickname : (ev.type === 'own_goal' ? 'Kendi kalesi' : '—')}
+                        </span>
+                        {isHatTrick && (
+                          <span style={{
+                            fontSize: 8.5, fontWeight: 900, color: C.warn,
+                            background: 'rgba(251,191,36,0.18)',
+                            border: '1px solid rgba(251,191,36,0.35)',
+                            padding: '1.5px 6px', borderRadius: 4,
+                            letterSpacing: 0.5, textTransform: 'uppercase',
+                            fontFamily: "'JetBrains Mono',monospace",
+                          }}>HAT-TRICK</span>
+                        )}
+                        {ev.type === 'own_goal' && (
+                          <span style={{
+                            fontSize: 8.5, fontWeight: 800, color: C.danger,
+                            background: 'rgba(239,68,68,0.15)',
+                            padding: '1.5px 6px', borderRadius: 4,
+                            letterSpacing: 0.5, textTransform: 'uppercase',
+                          }}>KK</span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 11, color: C.muted, marginTop: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ color: teamColor, fontWeight: 700 }}>{teamName}</span>
+                        {assister && (
+                          <>
+                            <span style={{ color: C.dim }}>·</span>
+                            <span>🎯 {assister.nickname}</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        )}
+
+        {/* ═══ PUANLAMA ═══ */}
         {canIRate && otherPlayers.length > 0 && (
-          <Card style={{ marginBottom: 16 }}>
-            <p style={{ margin: '0 0 16px', fontWeight: 800, fontSize: 15 }}>
-              ⭐ Takım arkadaşlarını puanla (1-10)
-            </p>
+          <Card style={{ marginBottom: 14, animation: 'lmFadeUp 0.5s 0.36s both' }}>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 14 }}>
+              <span style={{ fontSize: 14, marginRight: 6 }}>⭐</span>
+              <span style={{ fontSize: 13, fontWeight: 800 }}>Takım Arkadaşlarını Puanla</span>
+              <span style={{
+                marginLeft: 'auto', fontSize: 10, color: C.muted,
+                fontFamily: "'JetBrains Mono',monospace", fontWeight: 700,
+              }}>
+                {Object.keys(myRatings).filter(k => myRatings[k] > 0).length}/{otherPlayers.length}
+              </span>
+            </div>
             {otherPlayers.map(p => (
               <div key={p.device_id} style={{
-                marginBottom: 14, paddingBottom: 14,
+                marginBottom: 12, paddingBottom: 12,
                 borderBottom: `1px solid ${C.border}`,
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                   <MiniAvatar player={p} color={p.team === 'A' ? colA : colB} size={30} isCaptain={p.is_captain} />
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: 14 }}>{p.nickname}</div>
-                    <div style={{ fontSize: 11, color: C.muted }}>
-                      {p.team === 'A' ? session.team_a_name : session.team_b_name}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 800, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {p.nickname}
+                    </div>
+                    <div style={{ fontSize: 11, color: C.muted, display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <span>{p.team === 'A' ? session.team_a_name : session.team_b_name}</span>
+                      {goalsByPlayer[p.device_id] > 0 && (
+                        <span style={{ color: C.warn }}>· ⚽{goalsByPlayer[p.device_id]}</span>
+                      )}
+                      {assistsByPlayer[p.device_id] > 0 && (
+                        <span style={{ color: C.blue }}>· 🎯{assistsByPlayer[p.device_id]}</span>
+                      )}
                     </div>
                   </div>
                   {myRatings[p.device_id] > 0 && (
-                    <Pill style={{ marginLeft: 'auto' }}>{myRatings[p.device_id]}/10</Pill>
+                    <Pill style={{ fontSize: 10 }}>{myRatings[p.device_id]}/10</Pill>
                   )}
                 </div>
-                <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-                  {[1,2,3,4,5,6,7,8,9,10].map(n => (
-                    <button
-                      key={n}
-                      onClick={() => {
-                        hapticLight();
-                        setMyRatings(prev => ({ ...prev, [p.device_id]: n }));
-                      }}
-                      style={{
-                        width: 32, height: 32, borderRadius: 8,
-                        border: `1px solid ${myRatings[p.device_id] === n ? C.accent : 'rgba(255,255,255,0.1)'}`,
-                        background: myRatings[p.device_id] === n ? `${C.accent}33` : 'transparent',
-                        color: myRatings[p.device_id] === n ? C.accent : C.muted,
-                        fontWeight: 800, fontSize: 13, cursor: 'pointer',
-                      }}
-                    >{n}</button>
-                  ))}
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  {[1,2,3,4,5,6,7,8,9,10].map(n => {
+                    const active = myRatings[p.device_id] === n;
+                    const ratingCol = n >= 9 ? '#fbbf24' : n >= 7 ? C.accent : n >= 5 ? C.blue : n >= 3 ? '#fb923c' : C.danger;
+                    return (
+                      <button
+                        key={n}
+                        onClick={() => {
+                          hapticLight();
+                          setMyRatings(prev => ({ ...prev, [p.device_id]: n }));
+                        }}
+                        style={{
+                          flex: 1, minWidth: 26, height: 32, borderRadius: 7,
+                          border: `1px solid ${active ? ratingCol : 'rgba(255,255,255,0.08)'}`,
+                          background: active ? `${ratingCol}33` : 'rgba(255,255,255,0.02)',
+                          color: active ? ratingCol : 'rgba(255,255,255,0.45)',
+                          fontWeight: 800, fontSize: 12, cursor: 'pointer',
+                          fontFamily: "'JetBrains Mono',monospace",
+                          transition: 'all 0.12s',
+                          boxShadow: active ? `0 4px 10px ${ratingCol}33` : 'none',
+                        }}
+                      >{n}</button>
+                    );
+                  })}
                 </div>
               </div>
             ))}
@@ -2271,23 +2678,32 @@ export default function LiveMatch() {
         )}
 
         {ratingsSubmitted && (
-          <Card style={{ marginBottom: 16, textAlign: 'center' }}>
-            <div style={{ fontSize: 32 }}>✅</div>
-            <p style={{ fontWeight: 700, marginTop: 8 }}>Puanların kaydedildi!</p>
+          <Card style={{
+            marginBottom: 14, textAlign: 'center', padding: '16px',
+            background: 'linear-gradient(135deg, rgba(52,211,153,0.12), rgba(52,211,153,0.02))',
+            border: '1px solid rgba(52,211,153,0.35)',
+          }}>
+            <div style={{ fontSize: 32, marginBottom: 4 }}>✅</div>
+            <p style={{ fontWeight: 800, fontSize: 14, color: C.accent, margin: 0 }}>Puanların kaydedildi!</p>
           </Card>
         )}
 
+        {/* ═══ SIRALAMA TABLOSU ═══ */}
         {(amIFullPower || session.ratings_public) && ratings.length > 0 && (
-          <Card style={{ marginBottom: 16 }}>
+          <Card style={{ marginBottom: 14 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <p style={{ margin: 0, fontWeight: 800, fontSize: 15 }}>📊 Sonuç Sıralaması</p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 14 }}>📊</span>
+                <span style={{ fontSize: 13, fontWeight: 800 }}>Oyuncu Sıralaması</span>
+              </div>
               {amIFullPower && (
                 <button
                   onClick={() => setRatingsPublic(session.id, !session.ratings_public)}
                   style={{
-                    background: 'none', border: `1px solid ${C.muted}`,
+                    background: 'rgba(255,255,255,0.04)',
+                    border: '1px solid rgba(255,255,255,0.1)',
                     color: C.muted, borderRadius: 6, padding: '4px 10px',
-                    cursor: 'pointer', fontSize: 12,
+                    cursor: 'pointer', fontSize: 11, fontWeight: 700,
                   }}
                 >{session.ratings_public ? '🔒 Gizle' : '🔓 Aç'}</button>
               )}
@@ -2296,27 +2712,55 @@ export default function LiveMatch() {
               .map(p => ({ player: p, rating: avgRatings[p.device_id] }))
               .filter(x => x.rating)
               .sort((a, b) => parseFloat(b.rating.avg) - parseFloat(a.rating.avg))
-              .map(({ player, rating }, i) => (
-                <div key={player.device_id} style={{
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  padding: '8px 0', borderBottom: `1px solid ${C.border}`,
-                }}>
-                  <span style={{ color: C.muted, fontWeight: 700, fontSize: 13, width: 22 }}>
-                    {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`}
-                  </span>
-                  <span style={{ flex: 1, fontWeight: 700, fontSize: 14 }}>{player.nickname}</span>
-                  <span style={{ color: C.accent, fontWeight: 800, fontSize: 16, fontFamily: "'JetBrains Mono',monospace" }}>
-                    {rating.avg}
-                  </span>
-                  <span style={{ color: C.muted, fontSize: 11 }}>({rating.count} oy)</span>
-                </div>
-              ))
+              .map(({ player, rating }, i) => {
+                const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : null;
+                const medalCol = i === 0 ? '#fbbf24' : i === 1 ? '#cbd5e1' : i === 2 ? '#cd7f32' : C.muted;
+                const r = parseFloat(rating.avg);
+                const ratingCol = r >= 8.5 ? '#fbbf24' : r >= 7 ? C.accent : r >= 5 ? C.blue : C.muted;
+                return (
+                  <div key={player.device_id} style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '10px 8px',
+                    background: i < 3 ? `${medalCol}08` : 'transparent',
+                    borderRadius: 8,
+                    marginBottom: 4,
+                    border: i < 3 ? `1px solid ${medalCol}22` : '1px solid transparent',
+                  }}>
+                    <div style={{
+                      width: 24, textAlign: 'center', fontWeight: 800, fontSize: 13,
+                      color: medalCol,
+                    }}>
+                      {medal || `${i + 1}`}
+                    </div>
+                    <MiniAvatar player={player} color={player.team === 'A' ? colA : colB} size={26} isCaptain={player.is_captain} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{
+                        fontWeight: 700, fontSize: 13.5,
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}>{player.nickname}</div>
+                      <div style={{ fontSize: 10, color: C.muted }}>
+                        {player.team === 'A' ? session.team_a_name : session.team_b_name}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                      <div style={{
+                        color: ratingCol, fontWeight: 900, fontSize: 18,
+                        fontFamily: "'JetBrains Mono',monospace", lineHeight: 1,
+                      }}>{rating.avg}</div>
+                      <div style={{ color: C.dim, fontSize: 9, marginTop: 2 }}>{rating.count} oy</div>
+                    </div>
+                  </div>
+                );
+              })
             }
           </Card>
         )}
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-          <Btn onClick={handleShareResult} variant="ghost">📤 Sonucu Paylaş</Btn>
+        {/* ═══ AKSİYON BUTONLARI ═══ */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 6 }}>
+          <Btn onClick={handleShareResult} color={C.accent} variant="solid">
+            📤 Paylaş
+          </Btn>
           <Btn onClick={() => { setSession(null); setScreen('home'); loadMySessions(); }} variant="ghost">
             ← Ana Ekran
           </Btn>
@@ -2348,11 +2792,12 @@ export default function LiveMatch() {
                     }}
                   >
                     <MiniAvatar player={p} color={p.team === 'A' ? colA : colB} size={32} isCaptain={p.is_captain} />
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 700, fontSize: 14 }}>{p.nickname}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.nickname}</div>
                       <div style={{ fontSize: 11, color: C.muted }}>
                         {p.team === 'A' ? session.team_a_name : session.team_b_name}
                         {goalsByPlayer[p.device_id] > 0 && ` · ⚽${goalsByPlayer[p.device_id]}`}
+                        {assistsByPlayer[p.device_id] > 0 && ` · 🎯${assistsByPlayer[p.device_id]}`}
                       </div>
                     </div>
                     {session.mvp_device_id === p.device_id && <span style={{ fontSize: 18 }}>⭐</span>}
