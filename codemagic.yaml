@@ -18,6 +18,9 @@ workflows:
         DEVELOPMENT_TEAM: "Q3BH6457BX"
         BUNDLE_ID: "com.halisahakolik.app"
         GAD_APP_ID: "ca-app-pub-2886543552287006~5889085689"
+        # Marketing version — her store upload'unda mutlaka bump et.
+        # Apple aynı versiyonu iki kez kabul etmez (Error 90062 / 90186).
+        MARKETING_VERSION: "1.2"
         # App Store Connect'te bilinen en yüksek build numarası.
         # Yeni upload'larda otomatik tespit edersek bunu kullanmayız,
         # tespit başarısız olursa bu sayı taban olur.
@@ -115,11 +118,11 @@ workflows:
           echo "✅ NEW build number: $NEW_BUILD"
 
           # Marketing version — hem agvtool hem PlistBuddy ile çift güvence
-          agvtool new-marketing-version "1.1" || true
+          agvtool new-marketing-version "$MARKETING_VERSION" || true
           # agvtool Capacitor pbxproj yapısında bazen tutmaz; PlistBuddy ile garantiye al
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.1" "App/App/Info.plist" || \
-          /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 1.1" "App/App/Info.plist" || true
-          echo "✅ Marketing version: 1.1"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $MARKETING_VERSION" "App/App/Info.plist" || \
+          /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $MARKETING_VERSION" "App/App/Info.plist" || true
+          echo "✅ Marketing version: $MARKETING_VERSION"
           agvtool new-version -all "$NEW_BUILD"
 
           cd ../..
@@ -249,8 +252,8 @@ workflows:
             echo -n "CFBundleShortVersionString: "
             /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$ARCHIVE_PLIST" || true
             VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$ARCHIVE_PLIST" 2>/dev/null || echo "unknown")
-            if [ "$VERSION" != "1.1" ]; then
-              echo "HATA: CFBundleShortVersionString=$VERSION, beklenen 1.1"
+            if [ "$VERSION" != "$MARKETING_VERSION" ]; then
+              echo "HATA: CFBundleShortVersionString=$VERSION, beklenen $MARKETING_VERSION"
               exit 1
             fi
             echo "Version dogru: $VERSION"
