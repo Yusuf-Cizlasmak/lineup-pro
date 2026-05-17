@@ -43,6 +43,7 @@ import { t, tPos } from "./i18n";
 import { hapticLight, hapticMedium, hapticHeavy, hapticSuccess, hapticSelection } from "./haptics";
 import { saveMatch, buildMatch, newEvent } from "./matchHistoryStore";
 import { showInterstitial } from "./admob";
+import { useSubscription } from "./subscription";
 
 // ═══════════════════════════════════════════════════════════
 // HELPERS
@@ -1377,6 +1378,9 @@ export default function MatchResultModal({
                 acA={acA}
                 acB={acB}
               />
+
+              {/* ★ Watermark / Pro brand strip — paylaşım kartında görünür */}
+              <ShareWatermark />
             </div>
 
             {/* TAP-TO-SCORE: Takım strip */}
@@ -2154,5 +2158,43 @@ export default function MatchResultModal({
         </div>
       )}
     </>
+  );
+}
+// ═══════════════════════════════════════════════════════════
+// SHARE WATERMARK — Free=watermark, Pro=brand
+// ═══════════════════════════════════════════════════════════
+function ShareWatermark() {
+  const { isPremium } = useSubscription();
+  if (isPremium) {
+    return (
+      <div style={{
+        textAlign: "center",
+        marginTop: 12,
+        padding: "8px 12px",
+        fontSize: 9,
+        fontWeight: 800,
+        letterSpacing: 2.5,
+        color: "#fbbf24",
+        fontFamily: "'JetBrains Mono', monospace",
+        borderTop: "1px solid rgba(251,191,36,0.2)",
+      }}>
+        ★ HALI SAHA · PRO
+      </div>
+    );
+  }
+  return (
+    <div style={{
+      textAlign: "center",
+      marginTop: 12,
+      padding: "8px 12px",
+      fontSize: 9.5,
+      fontWeight: 700,
+      letterSpacing: 1,
+      color: "rgba(255,255,255,0.35)",
+      fontFamily: "'JetBrains Mono', monospace",
+      borderTop: "1px solid rgba(255,255,255,0.05)",
+    }}>
+      HALISAHA-KOLIK · <span style={{ color: "rgba(251,191,36,0.85)" }}>Pro ile watermark kalkar ★</span>
+    </div>
   );
 }

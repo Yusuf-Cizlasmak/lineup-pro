@@ -10,6 +10,7 @@ import {
   getAllMatches, deleteMatch,
   computeLeaderboards, summarizeMatch,
 } from "./matchHistoryStore";
+import ShareCard from "./ShareCard";
 
 // ─── Tarih formatla — detaylı ───
 const pad2 = (n) => String(n).padStart(2, "0");
@@ -402,6 +403,7 @@ export default function MatchHistoryView({ teamA, teamB, onBack, onOpenPlayerSta
   const [matches, setMatches] = useState(() => getAllMatches());
   const [selectedMatch, setSelectedMatch] = useState(null);
   const [filter, setFilter] = useState("all"); // all | wins | losses | draws | thisWeek | thisMonth
+  const [showSeasonShare, setShowSeasonShare] = useState(false);
 
   useEffect(() => {
     const refresh = () => setMatches(getAllMatches());
@@ -543,7 +545,21 @@ export default function MatchHistoryView({ teamA, teamB, onBack, onOpenPlayerSta
         <div style={{ fontSize: 14, fontWeight: 700 }}>
           📚 {t("history_title")}
         </div>
-        <div style={{ width: 32 }} />
+        <button
+          onClick={() => { hapticLight(); setShowSeasonShare(true); }}
+          disabled={matches.length === 0}
+          style={{
+            background: matches.length === 0 ? "rgba(255,255,255,0.04)" : "linear-gradient(135deg, #fbbf24, #d49a26)",
+            color: matches.length === 0 ? "rgba(255,255,255,0.3)" : "#0a0805",
+            border: "none", borderRadius: 8, padding: "6px 10px",
+            fontSize: 10, fontWeight: 800, letterSpacing: 0.5,
+            cursor: matches.length === 0 ? "not-allowed" : "pointer",
+            fontFamily: "inherit",
+            boxShadow: matches.length === 0 ? "none" : "0 4px 10px rgba(251,191,36,0.3)",
+          }}
+        >
+          📊 RAPOR
+        </button>
       </div>
 
       <div style={{
@@ -758,6 +774,15 @@ export default function MatchHistoryView({ teamA, teamB, onBack, onOpenPlayerSta
           </div>
         )}
       </div>
+
+      {/* ★ Sezon Raporu Paylaş */}
+      {showSeasonShare && (
+        <ShareCard
+          mode="season"
+          data={{ matches, leaderboards: { ...leaderboards, totalGoals } }}
+          onClose={() => setShowSeasonShare(false)}
+        />
+      )}
     </div>
   );
 }

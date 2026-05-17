@@ -12,6 +12,7 @@ import { Camera, CameraResultType, CameraSource } from "@capacitor/camera";
 import MatchResultModalNew from "./MatchResultModal";
 import MatchHistoryView from "./MatchHistory";
 import PlayerStatsView from "./PlayerStats";
+
 import ModeSelectScreen from "./ModeSelectScreen";
 import {
   generateDefaultAttributes,

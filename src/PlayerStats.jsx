@@ -3,7 +3,7 @@
 // + Form chart (son 10 maç) — saf SVG ile çizdik (recharts dependency yok)
 // + Spider Chart (yetenekler) + Form Gücü rozeti
 // ─────────────────────────────────────────────────────────────
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { t, tPos } from "./i18n";
 import { hapticLight } from "./haptics";
 import { getAllMatches, getPlayerStats } from "./matchHistoryStore";
@@ -14,6 +14,7 @@ import {
 } from "./playerAttributes";
 import SpiderChart from "./SpiderChart";
 import FormBadge from "./FormBadge";
+import ShareCard from "./ShareCard";
 
 const getInitials = (n, s) => {
   const name = (n || "").trim();
@@ -271,6 +272,7 @@ const FormChart = ({ matches, accent }) => {
 
 // ─── MAIN ───
 export default function PlayerStatsView({ player, accent = "#34d399", onBack }) {
+  const [showShare, setShowShare] = useState(false);
   const matches = useMemo(() => getAllMatches(), []);
   const { stat } = useMemo(() => getPlayerStats(player.id, matches), [player.id, matches]);
 
@@ -337,7 +339,17 @@ export default function PlayerStatsView({ player, accent = "#34d399", onBack }) 
           }}
         >‹</button>
         <div style={{ fontSize: 14, fontWeight: 700 }}>{t("player_profile")}</div>
-        <div style={{ width: 32 }} />
+        <button
+          onClick={() => { hapticLight(); setShowShare(true); }}
+          style={{
+            background: "linear-gradient(135deg, #fbbf24, #d49a26)",
+            color: "#0a0805", border: "none", borderRadius: 8,
+            padding: "6px 10px",
+            fontSize: 10, fontWeight: 800, letterSpacing: 0.5,
+            cursor: "pointer", fontFamily: "inherit",
+            boxShadow: "0 4px 10px rgba(251,191,36,0.3)",
+          }}
+        >📤 KART</button>
       </div>
 
       <div style={{
@@ -590,6 +602,15 @@ export default function PlayerStatsView({ player, accent = "#34d399", onBack }) 
           </>
         )}
       </div>
+
+      {/* ★ Oyuncu kartı paylaş */}
+      {showShare && (
+        <ShareCard
+          mode="player"
+          data={{ player: enrichedPlayer, stat }}
+          onClose={() => setShowShare(false)}
+        />
+      )}
     </div>
   );
 }

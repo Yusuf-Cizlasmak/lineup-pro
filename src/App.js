@@ -4,6 +4,8 @@ import HalisahaKolik from "./HaliSahaKolik";
 import Onboarding from "./Onboarding";
 import RatePrompt from "./RatePrompt";
 import Tour from "./Tour";
+import { PaywallProvider } from "./PaywallScreen";
+import { iap } from "./iap";
 
 // ─── ADMOB DEBUG PANEL ───────────────────────────────────────
 // Geçici: Mac olmadan iOS'ta AdMob loglarını ekranda görmek için.
@@ -109,6 +111,10 @@ export default function App() {
     const onboarded = localStorage.getItem(ONBOARDING_KEY) === "1";
     if (!onboarded) setShowOnboarding(true);
 
+    // ★ RevenueCat IAP — App boot'unda bir kez init et
+    //   Native değilse (web) no-op. PaywallScreen iap.js'i çağrır.
+    iap.init();
+
     let count = parseInt(localStorage.getItem(LAUNCH_COUNT_KEY) || "0", 10) || 0;
     count += 1;
     localStorage.setItem(LAUNCH_COUNT_KEY, String(count));
@@ -148,6 +154,7 @@ export default function App() {
     <PremiumProvider>
       <AdMobDebugPanel />
       <HalisahaKolik />
+      <PaywallProvider />  {/* ← BU SATIR, root seviyesinde, en altta */}
       {showOnboarding && <Onboarding onFinish={finishOnboarding} />}
       {showRate && <RatePrompt onClose={() => setShowRate(false)} />}
       <Tour active={tourActive} onFinish={() => setTourActive(false)} mode="main" />
