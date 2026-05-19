@@ -24,7 +24,7 @@ workflows:
         # App Store Connect'te bilinen en yüksek build numarası.
         # Yeni upload'larda otomatik tespit edersek bunu kullanmayız,
         # tespit başarısız olursa bu sayı taban olur.
-        MIN_BUILD_NUMBER: "80"
+        MIN_BUILD_NUMBER: "81"
 
     scripts:
 
