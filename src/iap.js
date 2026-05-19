@@ -36,8 +36,8 @@ import { TIER, activateSubscription, markTrialUsed } from "./subscription";
 // RevenueCat dashboard → Project Settings → API Keys
 // iOS ve Android için AYRI key var; yanlış key → sessiz fail.
 const REVENUECAT_API_KEY = {
-  ios:     "app836f235ec2",     // ★ DOLDUR
-  android: "appb556df2384", // ★ DOLDUR
+  ios:     "appl_YOUR_IOS_API_KEY_HERE",     // ★ DOLDUR
+  android: "goog_YOUR_ANDROID_API_KEY_HERE", // ★ DOLDUR
 };
 
 // ═══ Product / package identifier eşleştirmesi ═══
@@ -160,9 +160,30 @@ export const iap = {
       // ★ NATIVE PAYWALL ekranı buradan açılır ★
       const result = await Purchases.purchasePackage({ aPackage: pkg });
 
-      // Customer info güncellendi → listener otomatik subscription'ı set eder.
-      // Yine de defansif kontrol:
-      _syncSubscriptionFromCustomerInfo(result.customerInfo);
+      // Customer info güncellendi → primary sync (entitlement varsa kullanır)
+      // fallbackPlanId ile garanti aktivasyon — entitlement gelmemişse paket ID'sine göre aktive eder
+      const synced = _syncSubscriptionFromCustomerInfo(result.customerInfo, { fallbackPlanId: planId });
+
+      // Defansif: yine de sync olmadıysa direkt aktive et
+      if (!synced) {
+        console.warn("[IAP] Sync başarısız — DIRECT aktivasyon");
+        const expiresAt = Date.now() + (meta.durationDays || 365) * 86400000;
+        activateSubscription({
+          tier: TIER.PRO,
+          plan: planId,
+          expiresAt,
+        });
+      }
+
+      // Customer info'yu kısa süre sonra TEKRAR çek — RC bazen 1-2 sn gecikmeli geliyor
+      setTimeout(async () => {
+        try {
+          const { customerInfo } = await Purchases.getCustomerInfo();
+          _syncSubscriptionFromCustomerInfo(customerInfo, { fallbackPlanId: planId });
+        } catch (e) {
+          console.warn("[IAP] post-purchase recheck failed:", e);
+        }
+      }, 1500);
 
       // Trial ise mark et
       if (meta.isTrial) markTrialUsed();
@@ -184,13 +205,13 @@ export const iap = {
 
     try {
       const { customerInfo } = await Purchases.restorePurchases();
-      _syncSubscriptionFromCustomerInfo(customerInfo);
+      const synced = _syncSubscriptionFromCustomerInfo(customerInfo);
 
       const hasActive = _hasAnyActiveEntitlement(customerInfo);
       return {
         success: true,
-        restored: hasActive,
-        message: hasActive
+        restored: hasActive && synced,
+        message: (hasActive && synced)
           ? "Aboneliğin başarıyla geri yüklendi"
           : "Geri yüklenebilecek aktif abonelik bulunamadı",
       };
@@ -249,33 +270,68 @@ export const iap = {
 // INTERNAL — customer info → subscription state senkronu
 // ═══════════════════════════════════════════════════════════
 
-function _syncSubscriptionFromCustomerInfo(customerInfo) {
-  if (!customerInfo) return;
+function _syncSubscriptionFromCustomerInfo(customerInfo, opts = {}) {
+  if (!customerInfo) {
+    console.warn("[IAP] sync: customerInfo gelmedi");
+    return false;
+  }
   const ents = customerInfo.entitlements?.active || {};
+  const allEnts = customerInfo.entitlements?.all || {};
+  console.log("[IAP] active entitlements:", Object.keys(ents));
+  console.log("[IAP] all entitlements:", Object.keys(allEnts));
 
-  // RevenueCat dashboard'da "pro" entitlement'ı tanımlı olmalı:
-  //   "pro" → pro_monthly + pro_yearly paketleri verir
-  const proEnt = ents.pro;
+  // ★ CASE-INSENSITIVE arama — RC dashboard'da 'Pro', 'PRO', 'pro' yazılmış olabilir
+  const proKey = Object.keys(ents).find((k) => k.toLowerCase() === "pro");
+  let proEnt = proKey ? ents[proKey] : null;
 
-  if (!proEnt) {
-    // Aktif entitlement yok — local state subscription.js'in expire mantığı ile zaten temizlenir
-    return;
+  // Fallback 1: any active entitlement (RC'de farklı isim verilmişse)
+  if (!proEnt && Object.keys(ents).length > 0) {
+    const firstKey = Object.keys(ents)[0];
+    proEnt = ents[firstKey];
+    console.warn(`[IAP] 'pro' entitlement yok ama '${firstKey}' aktif — onu kullanıyorum`);
   }
 
-  const planId =
-    proEnt.productIdentifier?.includes("yearly")  ? "pro_yearly"
-    : proEnt.productIdentifier?.includes("monthly") ? "pro_monthly"
-    : proEnt.productIdentifier;
+  // Fallback 2: hiç entitlement yok ama az önce başarılı satın alma var → opts.fallbackPlanId
+  if (!proEnt && opts.fallbackPlanId) {
+    console.warn(`[IAP] entitlement gelmedi ama purchase başarılıydı — fallback ile aktive ediyorum: ${opts.fallbackPlanId}`);
+    const meta = PACKAGE_MAP[opts.fallbackPlanId] || PACKAGE_MAP.pro_yearly;
+    const expiresAt = Date.now() + (meta.durationDays || 365) * 86400000;
+    activateSubscription({
+      tier: TIER.PRO,
+      plan: opts.fallbackPlanId,
+      expiresAt,
+    });
+    return true;
+  }
+
+  if (!proEnt) {
+    console.log("[IAP] sync: aktif entitlement yok, değişiklik yapılmadı");
+    return false;
+  }
+
+  // Plan ID belirleme — productIdentifier'dan çıkar
+  const pid = (proEnt.productIdentifier || "").toLowerCase();
+  let planId = "pro_monthly";
+  if (pid.includes("year") || pid.includes("annual") || pid.includes("yearly")) {
+    planId = "pro_yearly";
+  } else if (pid.includes("month") || pid.includes("monthly")) {
+    planId = "pro_monthly";
+  } else if (opts.fallbackPlanId) {
+    planId = opts.fallbackPlanId;
+  }
 
   const expiresAt = proEnt.expirationDate
     ? new Date(proEnt.expirationDate).getTime()
-    : null;
+    : Date.now() + 30 * 86400000; // güvenlik için 30 gün default
+
+  console.log("[IAP] ✓ Pro aktive ediliyor:", { planId, expiresAt: new Date(expiresAt).toISOString() });
 
   activateSubscription({
     tier: TIER.PRO,
     plan: planId,
     expiresAt,
   });
+  return true;
 }
 
 function _hasAnyActiveEntitlement(customerInfo) {

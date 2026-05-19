@@ -3,22 +3,31 @@
   <head>
     <meta charset="utf-8" />
     <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
-    <!--
-      ★ KRİTİK: viewport-fit=cover olmadan env(safe-area-inset-*) çalışmaz!
-      iPhone 11 ve benzeri notch'lu cihazlarda saat/status bar ile
-      uygulama içeriğinin çakışmaması için bu meta tag şarttır.
-    -->
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no, maximum-scale=1" />
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- ★ CRITICAL: viewport-fit=cover — iPhone notch tam ekran için -->
+    <!-- Bu olmadan WebView ekranı doldurmaz, kenarlarda boşluk olur -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+
     <meta name="theme-color" content="#070a0f" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="description" content="HalıSaha-Kolik - Halı Saha Taktik & Takım Yönetimi" />
+    <meta name="mobile-web-app-capable" content="yes" />
+
+    <!-- iOS splash screen renkleri -->
+    <meta name="format-detection" content="telephone=no" />
+
     <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+
     <title>HalıSaha-Kolik</title>
   </head>
   <body>
-    <noscript>Bu uygulamayı çalıştırmak için JavaScript gereklidir.</noscript>
+    <noscript>JavaScript'i etkinleştirin.</noscript>
     <div id="root"></div>
   </body>
 </html>

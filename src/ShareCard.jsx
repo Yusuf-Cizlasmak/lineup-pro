@@ -15,24 +15,59 @@ import { Capacitor } from "@capacitor/core";
 import { useSubscription } from "./subscription";
 import { hapticMedium, hapticSuccess } from "./haptics";
 
-// HTML2Canvas dynamic import (paket yoksa fallback)
+// ─── Image capture — html-to-image (primary) → html2canvas (fallback) ───
+// html2canvas iOS WebView'da gradient/transform/filter ile sessizce başarısız oluyor.
+// html-to-image SVG foreignObject kullanır, modern WebView'da çok daha güvenilir.
 async function captureNode(node) {
-  const mod = await import("html2canvas").catch((e) => {
-    console.error("html2canvas import fail:", e);
-    throw new Error("MISSING_PACKAGE");
-  });
-  const html2canvas = mod.default || mod;
+  if (!node) throw new Error("NODE_MISSING");
+
+  // ── 1) Önce html-to-image dene (en güvenilir) ──
   try {
+    const mod = await import("html-to-image");
+    const toPng = mod.toPng || mod.default?.toPng;
+    if (toPng) {
+      const dataUrl = await toPng(node, {
+        backgroundColor: "#0a1018",
+        pixelRatio: 2,
+        cacheBust: true,
+        skipFonts: false,
+        // Style override — bazı problemli CSS'leri normalize et
+        style: {
+          transform: "scale(1)",
+          transformOrigin: "top left",
+        },
+      });
+      if (dataUrl && dataUrl.length > 1000) {
+        console.log("[ShareCard] capture OK (html-to-image)");
+        return dataUrl;
+      }
+    }
+  } catch (e) {
+    console.warn("[ShareCard] html-to-image failed, fallback to html2canvas:", e?.message || e);
+  }
+
+  // ── 2) Fallback: html2canvas ──
+  try {
+    const mod = await import("html2canvas");
+    const html2canvas = mod.default || mod;
     const canvas = await html2canvas(node, {
       backgroundColor: "#0a1018",
       scale: 2,
       useCORS: true,
       allowTaint: true,
       logging: false,
+      foreignObjectRendering: false,
+      imageTimeout: 15000,
+      removeContainer: true,
     });
-    return canvas.toDataURL("image/png");
+    const dataUrl = canvas.toDataURL("image/png");
+    if (dataUrl && dataUrl.length > 1000) {
+      console.log("[ShareCard] capture OK (html2canvas fallback)");
+      return dataUrl;
+    }
+    throw new Error("EMPTY_CANVAS");
   } catch (e) {
-    console.error("html2canvas runtime fail:", e);
+    console.error("[ShareCard] all capture methods failed:", e);
     throw new Error("CAPTURE_FAILED");
   }
 }
@@ -111,16 +146,93 @@ export default function ShareCard({ mode = "match", data = {}, onClose }) {
             {mode === "player" && <PlayerCard data={data} isPremium={isPremium} />}
             {mode === "season" && <SeasonCard data={data} isPremium={isPremium} />}
 
-            {/* Watermark (Free) veya Brand (Pro) */}
+            {/* ═══ MULTI-LAYER WATERMARK (kırpılamaz katmanlar) ═══ */}
             {!isPremium ? (
-              <div style={S.watermark}>
-                <span style={{ opacity: 0.7 }}>HalıSaha-Kolik</span>
-                <span style={S.wmCta}>★ Pro ile watermark kalkar</span>
-              </div>
+              <>
+                {/* DIAGONAL — kartın orta-arka planında */}
+                <div style={{
+                  position: "absolute",
+                  inset: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  pointerEvents: "none",
+                  overflow: "hidden",
+                  zIndex: 1,
+                }} aria-hidden>
+                  <div style={{
+                    fontFamily: "'Bebas Neue','Inter Tight',sans-serif",
+                    fontSize: 64,
+                    letterSpacing: 8,
+                    color: "rgba(255,255,255,0.055)",
+                    transform: "rotate(-32deg)",
+                    whiteSpace: "nowrap",
+                    textTransform: "uppercase",
+                    lineHeight: 0.85,
+                    textAlign: "center",
+                  }}>
+                    HALISAHA<br/>KOLIK
+                    <div style={{
+                      fontSize: 14,
+                      letterSpacing: 5,
+                      marginTop: 6,
+                      color: "rgba(251,191,36,0.10)",
+                      fontFamily: "'JetBrains Mono', monospace",
+                    }}>
+                      ★ FREE EDITION ★
+                    </div>
+                  </div>
+                </div>
+                {/* KÖŞE ROZETİ */}
+                <div style={{
+                  position: "absolute",
+                  top: 8, right: 10,
+                  zIndex: 4,
+                  padding: "3px 8px",
+                  background: "rgba(0,0,0,0.45)",
+                  border: "1px solid rgba(255,255,255,0.10)",
+                  borderRadius: 4,
+                  fontSize: 8,
+                  fontWeight: 800,
+                  letterSpacing: 1.5,
+                  color: "rgba(255,255,255,0.55)",
+                  fontFamily: "'JetBrains Mono', monospace",
+                  pointerEvents: "none",
+                }}>
+                  HK · FREE
+                </div>
+                {/* ALT STRIP */}
+                <div style={S.watermark}>
+                  <span style={{ opacity: 0.75, fontWeight: 700 }}>HALISAHA-KOLIK</span>
+                  <span style={S.wmCta}>★ PRO İLE KALDIR</span>
+                </div>
+              </>
             ) : (
-              <div style={S.brandStrip}>
-                <span style={{ color: "#fbbf24", fontWeight: 800, letterSpacing: 2 }}>★ HALI SAHA · PRO</span>
-              </div>
+              <>
+                {/* PRO köşe rozeti — prestij */}
+                <div style={{
+                  position: "absolute",
+                  top: 8, right: 10,
+                  zIndex: 4,
+                  fontSize: 8.5,
+                  fontWeight: 800,
+                  letterSpacing: 1.8,
+                  color: "#fbbf24",
+                  fontFamily: "'JetBrains Mono', monospace",
+                  padding: "3px 8px",
+                  background: "rgba(251,191,36,0.08)",
+                  border: "1px solid rgba(251,191,36,0.3)",
+                  borderRadius: 4,
+                  pointerEvents: "none",
+                  textShadow: "0 0 6px rgba(251,191,36,0.4)",
+                }}>
+                  ★ PRO
+                </div>
+                {/* Alt brand strip */}
+                <div style={S.brandStrip}>
+                  <span style={{ color: "#fbbf24", fontWeight: 800, letterSpacing: 2 }}>★ HALI SAHA · PRO</span>
+                </div>
+              </>
             )}
           </div>
         </div>

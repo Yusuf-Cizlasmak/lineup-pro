@@ -12,7 +12,6 @@ import { Camera, CameraResultType, CameraSource } from "@capacitor/camera";
 import MatchResultModalNew from "./MatchResultModal";
 import MatchHistoryView from "./MatchHistory";
 import PlayerStatsView from "./PlayerStats";
-
 import ModeSelectScreen from "./ModeSelectScreen";
 import {
   generateDefaultAttributes,
@@ -2268,9 +2267,29 @@ const handleShareLineup = async () => {
       to { opacity: 1; transform: translateX(0); }
     }
     * { box-sizing: border-box; margin: 0; padding: 0 }
-    html { height: 100%; overflow: hidden; }
-    body { height: 100%; overflow: hidden; position: fixed; width: 100%; }
-    #root { height: 100%; overflow: hidden; }
+    html, body, #root {
+      height: 100%;
+      width: 100%;
+      max-width: 100vw;
+      margin: 0;
+      padding: 0;
+      background: #070a0f;
+      overscroll-behavior: none;
+      overflow-x: hidden;
+      -webkit-tap-highlight-color: transparent;
+    }
+    body {
+      /* iOS Safari bounce'unu engelle ama touch scroll çalışsın */
+      position: fixed;
+      overflow: hidden;
+      /* iPhone safe area dahil tüm ekranı kapla */
+      top: 0; left: 0; right: 0; bottom: 0;
+    }
+    #root {
+      height: 100%;
+      overflow: hidden;
+      position: relative;
+    }
     ::-webkit-scrollbar { width: 3px }
     ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px }
     input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: #fff; border: 3px solid #22c55e; box-shadow: 0 3px 8px rgba(0,0,0,0.4); cursor: pointer; }
@@ -2351,13 +2370,26 @@ const handleShareLineup = async () => {
 
     if (!mode) {
       return (
-        <ModeSelectScreen
-          onSelectMode={(key) => {
-            if (key === "history") { hapticMedium(); setMode("history"); }
-            else if (key === "online") { hapticMedium(); setMode("online"); }
-            else { handleModeSelect(key); }   // myteam | match
-          }}
-        />
+        <div style={{
+          position: "absolute",
+          top: 0, right: 0, bottom: 0, left: 0,
+          maxWidth: 480,
+          margin: "0 auto",
+          overflowY: "auto",
+          overflowX: "hidden",
+          WebkitOverflowScrolling: "touch",
+          touchAction: "pan-y",
+          overscrollBehavior: "contain",
+        }}>
+          <style>{globalCSS}</style>
+          <ModeSelectScreen
+            onSelectMode={(key) => {
+              if (key === "history") { hapticMedium(); setMode("history"); }
+              else if (key === "online") { hapticMedium(); setMode("online"); }
+              else { handleModeSelect(key); }   // myteam | match
+            }}
+          />
+        </div>
       );
     }
 

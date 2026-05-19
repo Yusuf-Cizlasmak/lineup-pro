@@ -849,6 +849,7 @@ const S = {
     zIndex: 2,
     minHeight: "100%",
     width: "100%",
+    maxWidth: "100vw",
     paddingTop: "calc(8px + env(safe-area-inset-top, 0px))",
     paddingBottom: "calc(80px + env(safe-area-inset-bottom, 0px))",
     paddingLeft: 18,
@@ -858,6 +859,7 @@ const S = {
     display: "flex",
     flexDirection: "column",
     gap: 18,
+    overflowX: "hidden",
   },
 
   atmosphere: {
@@ -927,7 +929,9 @@ const S = {
     backdropFilter: "blur(8px)",
     WebkitBackdropFilter: "blur(8px)",
     transition: "all 0.2s ease",
-    maxWidth: "70%",
+    maxWidth: "60%",
+    minWidth: 0,
+    overflow: "hidden",
   },
   userAvatar: {
     width: 24, height: 24,
@@ -1059,7 +1063,7 @@ const S = {
   },
   brandTitle: {
     fontFamily: "'Bebas Neue','Oswald','Inter Tight',sans-serif",
-    fontSize: 38,
+    fontSize: "clamp(28px, 9vw, 42px)",
     fontWeight: 400,
     lineHeight: 0.95,
     letterSpacing: 1.2,
@@ -1068,6 +1072,9 @@ const S = {
     textTransform: "uppercase",
     textShadow: "0 1px 0 rgba(0,0,0,0.5)",
     textAlign: "center",
+    whiteSpace: "nowrap",
+    maxWidth: "100%",
+    overflow: "hidden",
   },
   brandTitleAccent: {
     color: C.primary,
@@ -1086,6 +1093,9 @@ const S = {
     backdropFilter: "blur(8px)",
     WebkitBackdropFilter: "blur(8px)",
     marginTop: 4,
+    maxWidth: "100%",
+    flexWrap: "nowrap",
+    overflow: "hidden",
   },
   statCell: {
     display: "inline-flex",
@@ -1121,6 +1131,8 @@ const S = {
     display: "flex",
     flexDirection: "column",
     gap: 4,
+    minWidth: 0,
+    width: "100%",
   },
   planStatusDot: {
     width: 7,

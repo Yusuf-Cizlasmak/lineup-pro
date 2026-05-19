@@ -24,7 +24,7 @@ workflows:
         # App Store Connect'te bilinen en yüksek build numarası.
         # Yeni upload'larda otomatik tespit edersek bunu kullanmayız,
         # tespit başarısız olursa bu sayı taban olur.
-        MIN_BUILD_NUMBER: "37"
+        MIN_BUILD_NUMBER: "80"
 
     scripts:
 
@@ -45,9 +45,12 @@ workflows:
             @capacitor/filesystem \
             @capacitor/haptics \
             @capacitor/browser \
+            @capacitor/status-bar \
+            @capacitor/keyboard \
             @capacitor-community/admob \
             @capacitor-community/in-app-review \
             @revenuecat/purchases-capacitor \
+            html-to-image \
             --save
 
           gem install xcodeproj --no-document

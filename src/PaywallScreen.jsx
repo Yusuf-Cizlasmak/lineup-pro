@@ -108,6 +108,16 @@ function PaywallScreen({ open, feature, onClose }) {
 
       hapticSuccess();
       setLoading(null);
+
+      // ★ Pro state'in yayılması için subscription change event'ini garanti tetikle.
+      // iap.purchase başarılı olduysa subscription.js zaten dispatch etti, ama
+      // bazı durumlarda race condition oluyor — explicit refresh sağlayalım.
+      try {
+        window.dispatchEvent(new CustomEvent("hk:subscription-changed"));
+      } catch {}
+
+      // Modal'ı bir an açık tut, kullanıcı "✓" feedback hissetsin
+      await new Promise(r => setTimeout(r, 400));
       onClose();
     } catch (err) {
       setLoading(null);

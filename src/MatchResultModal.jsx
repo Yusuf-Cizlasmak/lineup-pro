@@ -1258,6 +1258,9 @@ export default function MatchResultModal({
               position: "relative",
               overflow: "hidden",
             }}>
+              {/* ═══ MULTI-LAYER WATERMARK (Free için kırpılamaz) ═══ */}
+              <ShareWatermarkLayers />
+
               {/* Dekoratif gradient ışık halkası */}
               <div style={{
                 position: "absolute",
@@ -2161,7 +2164,108 @@ export default function MatchResultModal({
   );
 }
 // ═══════════════════════════════════════════════════════════
-// SHARE WATERMARK — Free=watermark, Pro=brand
+// ═══════════════════════════════════════════════════════════
+// SHARE WATERMARK LAYERS — Free için KIRPILAMAZ 3 katman:
+//   1. Diagonal merkez (kartın orta-arka planında, 45° dönmüş)
+//   2. Köşe rozeti (sağ üst köşede subtle)
+//   3. Alt brand strip (ShareWatermark fonksiyonunun döndürdüğü)
+// Kullanıcı altı kırparsa diagonal görünür; diagonal'i çıkarsa
+// köşe görünür → Pro almadan watermark'sız paylaşım imkânsız.
+// ═══════════════════════════════════════════════════════════
+function ShareWatermarkLayers() {
+  const { isPremium } = useSubscription();
+
+  // Pro: hiçbir katman gözükmesin (köşede minik prestij rozeti)
+  if (isPremium) {
+    return (
+      <div style={{
+        position: "absolute",
+        top: 8,
+        right: 10,
+        fontSize: 8.5,
+        fontWeight: 800,
+        letterSpacing: 1.8,
+        color: "#fbbf24",
+        fontFamily: "'JetBrains Mono', monospace",
+        padding: "3px 8px",
+        background: "rgba(251,191,36,0.08)",
+        border: "1px solid rgba(251,191,36,0.3)",
+        borderRadius: 4,
+        pointerEvents: "none",
+        zIndex: 5,
+        textShadow: "0 0 6px rgba(251,191,36,0.4)",
+      }}>
+        ★ PRO
+      </div>
+    );
+  }
+
+  // Free: 2 katman (3'üncüsü zaten ShareWatermark olarak ayrı render)
+  return (
+    <>
+      {/* ── 1) DIAGONAL ORTA WATERMARK (kart genelinde, çapraz) ── */}
+      <div style={{
+        position: "absolute",
+        inset: 0,
+        pointerEvents: "none",
+        overflow: "hidden",
+        zIndex: 1,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }} aria-hidden>
+        <div style={{
+          fontFamily: "'Bebas Neue', 'Inter Tight', sans-serif",
+          fontSize: 56,
+          fontWeight: 400,
+          letterSpacing: 6,
+          color: "rgba(255,255,255,0.045)",
+          transform: "rotate(-32deg)",
+          whiteSpace: "nowrap",
+          textTransform: "uppercase",
+          userSelect: "none",
+          lineHeight: 0.9,
+          textAlign: "center",
+        }}>
+          HALISAHA<br/>KOLIK
+          <div style={{
+            fontSize: 16,
+            letterSpacing: 4,
+            marginTop: 6,
+            color: "rgba(251,191,36,0.10)",
+            fontFamily: "'JetBrains Mono', monospace",
+          }}>
+            ★ FREE EDITION ★
+          </div>
+        </div>
+      </div>
+
+      {/* ── 2) KÖŞE ROZETİ (sağ üst, kart kırpılırsa görünür kalır) ── */}
+      <div style={{
+        position: "absolute",
+        top: 8,
+        right: 10,
+        zIndex: 4,
+        padding: "3px 8px",
+        background: "rgba(0,0,0,0.45)",
+        border: "1px solid rgba(255,255,255,0.10)",
+        borderRadius: 4,
+        fontSize: 8,
+        fontWeight: 800,
+        letterSpacing: 1.5,
+        color: "rgba(255,255,255,0.55)",
+        fontFamily: "'JetBrains Mono', monospace",
+        pointerEvents: "none",
+      }}>
+        HK · FREE
+      </div>
+    </>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// SHARE WATERMARK — Free=alt strip (3. katman), Pro=brand strip
+// Yukarıdaki ShareWatermarkLayers ile birlikte çalışır.
 // ═══════════════════════════════════════════════════════════
 function ShareWatermark() {
   const { isPremium } = useSubscription();
@@ -2186,15 +2290,27 @@ function ShareWatermark() {
     <div style={{
       textAlign: "center",
       marginTop: 12,
-      padding: "8px 12px",
+      padding: "10px 12px 8px",
       fontSize: 9.5,
       fontWeight: 700,
-      letterSpacing: 1,
-      color: "rgba(255,255,255,0.35)",
+      letterSpacing: 1.2,
+      color: "rgba(255,255,255,0.45)",
       fontFamily: "'JetBrains Mono', monospace",
-      borderTop: "1px solid rgba(255,255,255,0.05)",
+      borderTop: "1px solid rgba(255,255,255,0.08)",
+      background: "linear-gradient(180deg, transparent, rgba(0,0,0,0.25))",
     }}>
-      HALISAHA-KOLIK · <span style={{ color: "rgba(251,191,36,0.85)" }}>Pro ile watermark kalkar ★</span>
+      <div style={{ marginBottom: 3 }}>
+        HALISAHA-KOLIK <span style={{ color: "rgba(255,255,255,0.30)" }}>·</span> halisahakolik.com
+      </div>
+      <div style={{
+        fontSize: 8.5,
+        fontWeight: 800,
+        letterSpacing: 2,
+        color: "rgba(251,191,36,0.95)",
+        textShadow: "0 0 8px rgba(251,191,36,0.35)",
+      }}>
+        ★ PRO İLE WATERMARK KALKAR
+      </div>
     </div>
   );
 }

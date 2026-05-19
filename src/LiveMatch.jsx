@@ -1269,9 +1269,20 @@ export default function LiveMatch() {
     <>
       <style>{lmCSS}</style>
       <div style={{
-        minHeight: '100vh', background: C.bg,
+        // ★ FIX: parent overflow:hidden olduğu için kendi scroll alanını oluştur
+        position: 'absolute',
+        top: 0, right: 0, bottom: 0, left: 0,
+        background: C.bg,
         fontFamily: "'DM Sans','Segoe UI',sans-serif",
-        color: C.text, paddingBottom: 80,
+        color: C.text,
+        // Scroll properties — iOS/Android touch scroll için kritik
+        overflowY: 'auto',
+        overflowX: 'hidden',
+        WebkitOverflowScrolling: 'touch',
+        touchAction: 'pan-y',
+        overscrollBehavior: 'contain',
+        // İçerik için padding (safe-area dahil)
+        paddingBottom: 'calc(80px + env(safe-area-inset-bottom, 0px))',
       }}>
         {children}
         {toast && (
