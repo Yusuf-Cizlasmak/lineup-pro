@@ -245,7 +245,7 @@ export default function ModeSelectScreen({ onSelectMode }) {
 
           <div style={S.heroEyebrow}>
             <span style={S.eyebrowDash} />
-            <span>PROFESSIONAL · v1.0</span>
+            <span>· PROFESSIONAL · </span>
             <span style={S.eyebrowDash} />
           </div>
 
@@ -342,7 +342,7 @@ export default function ModeSelectScreen({ onSelectMode }) {
         {/* ═══ FOOTER ═══ */}
         <footer style={S.footer}>
           <span style={S.footerDot} />
-          <span style={S.footerText}>HALISAHA-KOLIK · BUILD 1.0 · © 2025</span>
+          <span style={S.footerText}>HALISAHA-KOLIK · © 2026</span>
           <span style={S.footerDot} />
         </footer>
 
