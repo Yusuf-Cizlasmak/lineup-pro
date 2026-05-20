@@ -69,9 +69,37 @@ const lmCSS = `
 @keyframes lmDanger  { 0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.55)} 50%{box-shadow:0 0 0 6px rgba(239,68,68,0)} }
 @keyframes lmShimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
 @keyframes lmGoal    { 0%{transform:scale(1)} 30%{transform:scale(1.18)} 100%{transform:scale(1)} }
+@keyframes lmScreenIn{ from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:translateY(0)} }
 .lm-empty-slot:hover { transform:translate(-50%,-50%) scale(1.12); }
 .lm-selecting        { animation:lmPulse 1.2s infinite; }
 input::placeholder   { color:#475569; }
+
+/* Profesyonel scroll davranışı — momentum + smooth + temiz scrollbar */
+.lm-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  overscroll-behavior: contain;
+  scroll-behavior: smooth;
+}
+.lm-scroll::-webkit-scrollbar { width: 0; }   /* mobile: scrollbar gizli */
+.lm-scroll { scrollbar-width: none; }         /* Firefox */
+
+.lm-screen { animation: lmScreenIn 0.28s cubic-bezier(.2,.85,.3,1) both; }
+.lm-back-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.78);
+  cursor: pointer; font-size: 13px; font-weight: 600;
+  padding: 7px 12px 7px 10px; border-radius: 10px;
+  font-family: 'DM Sans',sans-serif;
+  transition: background 0.18s ease, border-color 0.18s ease, transform 0.12s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.lm-back-btn:hover  { background: rgba(255,255,255,0.07); border-color: rgba(255,255,255,0.14); }
+.lm-back-btn:active { transform: scale(0.96); }
 `;
 
 // ═══════════════════════════════════════════════════════════
@@ -1268,23 +1296,27 @@ export default function LiveMatch() {
   const wrap = (children) => (
     <>
       <style>{lmCSS}</style>
-      <div style={{
-        // ★ FIX: parent overflow:hidden olduğu için kendi scroll alanını oluştur
-        position: 'absolute',
-        top: 0, right: 0, bottom: 0, left: 0,
-        background: C.bg,
-        fontFamily: "'DM Sans','Segoe UI',sans-serif",
-        color: C.text,
-        // Scroll properties — iOS/Android touch scroll için kritik
-        overflowY: 'auto',
-        overflowX: 'hidden',
-        WebkitOverflowScrolling: 'touch',
-        touchAction: 'pan-y',
-        overscrollBehavior: 'contain',
-        // İçerik için padding (safe-area dahil)
-        paddingBottom: 'calc(80px + env(safe-area-inset-bottom, 0px))',
-      }}>
-        {children}
+      <div
+        className="lm-scroll"
+        style={{
+          // Parent (HaliSahaKolik online div'i) position:relative + overflow:hidden;
+          // burada absolute ile o div'i doldurup tek scroll alanı yaratıyoruz.
+          position: 'absolute',
+          top: 0, right: 0, bottom: 0, left: 0,
+          background: C.bg,
+          fontFamily: "'DM Sans','Segoe UI',sans-serif",
+          color: C.text,
+          // Alt safe-area + ad banner için nefes payı
+          paddingBottom: 'calc(80px + env(safe-area-inset-bottom, 0px))',
+          // iOS'ta scroll'u kasmasın — kompositöre devredilen layer
+          transform: 'translateZ(0)',
+          willChange: 'scroll-position',
+          contain: 'layout paint',
+        }}
+      >
+        <div className="lm-screen" style={{ minHeight: '100%' }}>
+          {children}
+        </div>
         {toast && (
           <div style={{
             position: 'fixed', bottom: 'calc(20px + env(safe-area-inset-bottom, 0px))',
@@ -1305,11 +1337,17 @@ export default function LiveMatch() {
   // ═══ NICKNAME ═══
   if (!nicknameSet) {
     return wrap(
-      <div style={{ padding: '60px 20px 20px' }}>
-        <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <div style={{ fontSize: 48 }}>⚽</div>
-          <h2 style={{ margin: '12px 0 6px', fontSize: 22, fontWeight: 800 }}>Canlı Saha</h2>
-          <p style={{ color: C.muted, fontSize: 14 }}>Önce bir takma ad belirle</p>
+      <div style={{ padding: '40px 20px 20px' }}>
+        <div style={{ textAlign: 'center', marginBottom: 28 }}>
+          <div style={{
+            fontSize: 44, lineHeight: 1,
+            filter: 'drop-shadow(0 4px 16px rgba(52,211,153,0.25))',
+          }}>⚽</div>
+          <h2 style={{
+            margin: '14px 0 6px', fontSize: 22, fontWeight: 800,
+            letterSpacing: -0.4,
+          }}>Hoş geldin</h2>
+          <p style={{ color: C.muted, fontSize: 13.5 }}>Önce bir takma ad belirle</p>
         </div>
         <Input value={myNickname} onChange={setMyNickname} placeholder="Takma adın (örn: Mehmet)" maxLength={20} />
         {error && <p style={{ color: C.danger, fontSize: 13, marginTop: 8 }}>{error}</p>}
@@ -1323,15 +1361,36 @@ export default function LiveMatch() {
   // ═══ HOME ═══
   if (screen === 'home') {
     return wrap(
-      <div style={{ padding: '60px 16px 20px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800 }}>⚽ Canlı Saha</h2>
-            <p style={{ margin: '2px 0 0', color: C.muted, fontSize: 13 }}>Merhaba, {getNickname()}</p>
+      <div style={{ padding: '18px 16px 20px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{
+              fontSize: 10.5, color: 'rgba(148,163,184,0.7)',
+              fontWeight: 700, letterSpacing: 1.4, textTransform: 'uppercase',
+              fontFamily: "'JetBrains Mono','SF Mono',monospace",
+              marginBottom: 4,
+            }}>Hoş geldin</div>
+            <div style={{
+              fontSize: 19, fontWeight: 800, letterSpacing: -0.3,
+              color: C.text,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>{getNickname()}</div>
           </div>
-          <button onClick={() => setNicknameSet(false)} style={{
-            background: 'none', border: 'none', color: C.muted, fontSize: 12, cursor: 'pointer',
-          }}>✏️ İsim</button>
+          <button
+            onClick={() => setNicknameSet(false)}
+            style={{
+              flexShrink: 0,
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(255,255,255,0.08)',
+              color: 'rgba(255,255,255,0.65)',
+              fontSize: 12, fontWeight: 600,
+              padding: '7px 11px', borderRadius: 9,
+              cursor: 'pointer',
+              fontFamily: "'DM Sans',sans-serif",
+              transition: 'all 0.18s ease',
+              WebkitTapHighlightColor: 'transparent',
+            }}
+          >Düzenle</button>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 24 }}>
@@ -1349,7 +1408,7 @@ export default function LiveMatch() {
 
         {activeSessions.length > 0 && (
           <div style={{ marginBottom: 20 }}>
-            <p style={{ fontSize: 12, color: C.muted, fontWeight: 700, marginBottom: 8, textTransform: 'uppercase' }}>Devam Eden</p>
+            <p style={{ fontSize: 11, color: C.muted, fontWeight: 700, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1.2 }}>Devam Eden</p>
             {activeSessions.map(s => (
               <Card key={s.id} style={{ marginBottom: 8, cursor: 'pointer' }} onClick={() => connectToSession(s)}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1368,7 +1427,7 @@ export default function LiveMatch() {
 
         {finishedSessions.length > 0 && (
           <div>
-            <p style={{ fontSize: 12, color: C.muted, fontWeight: 700, marginBottom: 8, textTransform: 'uppercase' }}>Geçmiş Maçlar</p>
+            <p style={{ fontSize: 11, color: C.muted, fontWeight: 700, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1.2 }}>Geçmiş Maçlar</p>
             {finishedSessions.slice(0, 5).map(s => (
               <Card key={s.id} style={{ marginBottom: 8, cursor: 'pointer', opacity: 0.75 }} onClick={() => connectToSession(s)}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1398,10 +1457,15 @@ export default function LiveMatch() {
   // ═══ CREATE ═══
   if (screen === 'create') {
     return wrap(
-      <div style={{ padding: '60px 16px 20px' }}>
-        <BackBtn onClick={() => setScreen('home')} />
-        <h3 style={{ marginBottom: 20, fontSize: 18, fontWeight: 800 }}>🏟️ Yeni Maç Kur</h3>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ padding: '14px 16px 20px' }}>
+        <button onClick={() => { hapticLight && hapticLight(); setScreen('home'); }} className="lm-back-btn" style={{ marginBottom: 18 }}>
+          ← Geri
+        </button>
+        <div style={{ marginBottom: 22 }}>
+          <h3 style={{ margin: 0, fontSize: 20, fontWeight: 800, letterSpacing: -0.3 }}>Yeni Maç</h3>
+          <p style={{ margin: '4px 0 0', color: C.muted, fontSize: 13 }}>Detayları belirle, davet kodu oluştur</p>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div>
             <label style={lbl}>Saha</label>
             <Input value={fieldName} onChange={setFieldName} placeholder="Saha adı (zorunlu)" />
@@ -1429,20 +1493,22 @@ export default function LiveMatch() {
             <div style={{ display: 'flex', gap: 6 }}>
               {[30, 45, 60, 90].map(d => (
                 <button key={d} onClick={() => setDuration(d)} style={{
-                  flex: 1, padding: '10px', borderRadius: 8,
+                  flex: 1, padding: '10px', borderRadius: 10,
                   background: duration === d ? `${C.accent}22` : 'rgba(255,255,255,0.04)',
                   border: `1px solid ${duration === d ? `${C.accent}66` : 'rgba(255,255,255,0.1)'}`,
                   color: duration === d ? C.accent : C.text,
                   fontSize: 13, fontWeight: 700, cursor: 'pointer',
                   fontFamily: "'DM Sans',sans-serif",
+                  transition: 'all 0.18s ease',
+                  WebkitTapHighlightColor: 'transparent',
                 }}>{d}'</button>
               ))}
             </div>
           </div>
 
           {error && <p style={{ color: C.danger, fontSize: 13 }}>{error}</p>}
-          <Btn onClick={handleCreate} disabled={loading}>
-            {loading ? 'Oluşturuluyor...' : '🚀 Maçı Oluştur'}
+          <Btn onClick={handleCreate} disabled={loading} style={{ marginTop: 4 }}>
+            {loading ? 'Oluşturuluyor...' : 'Maçı Oluştur →'}
           </Btn>
         </div>
       </div>
@@ -1452,17 +1518,21 @@ export default function LiveMatch() {
   // ═══ JOIN ═══
   if (screen === 'join') {
     return wrap(
-      <div style={{ padding: '60px 16px 20px' }}>
-        <BackBtn onClick={() => setScreen('home')} />
-        <h3 style={{ marginBottom: 8, fontSize: 18, fontWeight: 800 }}>🔗 Maça Katıl</h3>
-        <p style={{ color: C.muted, fontSize: 14, marginBottom: 20 }}>Admin'in sana gönderdiği kodu gir</p>
+      <div style={{ padding: '14px 16px 20px' }}>
+        <button onClick={() => { hapticLight && hapticLight(); setScreen('home'); }} className="lm-back-btn" style={{ marginBottom: 18 }}>
+          ← Geri
+        </button>
+        <div style={{ marginBottom: 22 }}>
+          <h3 style={{ margin: 0, fontSize: 20, fontWeight: 800, letterSpacing: -0.3 }}>Maça Katıl</h3>
+          <p style={{ margin: '4px 0 0', color: C.muted, fontSize: 13 }}>Admin'in gönderdiği davet kodunu gir</p>
+        </div>
         <Input
           value={joinCode}
           onChange={v => setJoinCode(v.toUpperCase())}
           placeholder="HK-XXXX"
-          style={{ fontSize: 22, textAlign: 'center', letterSpacing: 4, fontFamily: "'JetBrains Mono',monospace" }}
+          style={{ fontSize: 24, textAlign: 'center', letterSpacing: 5, fontFamily: "'JetBrains Mono',monospace", padding: '16px 14px' }}
         />
-        {error && <p style={{ color: C.danger, fontSize: 13, marginTop: 8 }}>{error}</p>}
+        {error && <p style={{ color: C.danger, fontSize: 13, marginTop: 10 }}>{error}</p>}
         <Btn onClick={handleJoin} disabled={loading || !joinCode.trim()} style={{ marginTop: 16 }}>
           {loading ? 'Bağlanıyor...' : 'Katıl →'}
         </Btn>
@@ -1476,7 +1546,19 @@ export default function LiveMatch() {
   // ═══ RATE ═══
   if (screen === 'rate' && session) return renderRateView();
 
-  return wrap(<div style={{ padding: 40, textAlign: 'center', color: C.muted }}>Yükleniyor...</div>);
+  return wrap(
+    <div style={{ padding: '80px 40px', textAlign: 'center', color: C.muted }}>
+      <div style={{
+        width: 32, height: 32, margin: '0 auto 14px',
+        border: `2.5px solid ${C.accent}33`,
+        borderTopColor: C.accent,
+        borderRadius: '50%',
+        animation: 'lmFadeIn 0.4s, lmSpin 0.8s linear infinite',
+      }} />
+      <div style={{ fontSize: 13, fontWeight: 600 }}>Yükleniyor…</div>
+      <style>{`@keyframes lmSpin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
 
   // ═══════════════════════════════════════════════════════════
   // PITCH VIEW & RATE VIEW — aşağıdaki dosyaya inlined
@@ -1522,7 +1604,7 @@ export default function LiveMatch() {
     const readyCount = players.filter(p => p.is_ready).length;
 
     return wrap(
-      <div style={{ padding: '50px 0 0' }}>
+      <div style={{ padding: '10px 0 0' }}>
         {/* ═══ ÜST BAR ═══ */}
         <div style={{
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -2070,12 +2152,25 @@ export default function LiveMatch() {
           const candidates = players.filter(p => !p.slot_index || p.slot_index !== slotIdx || p.team !== team);
 
           return (
-            <div onClick={() => setAdminSlotPicker(null)} style={modalBackdrop}>
+            <div onClick={() => setAdminSlotPicker(null)} style={{
+              ...modalBackdrop,
+              alignItems: 'center', justifyContent: 'center',
+              padding: '20px',
+              animation: 'lmFadeIn 0.22s ease-out',
+            }}>
               <div onClick={e => e.stopPropagation()} style={{
-                ...modalSheet, maxHeight: '78vh', overflowY: 'auto',
+                background: C.surface,
+                width: '100%', maxWidth: 380,
+                maxHeight: '72vh',
+                overflowY: 'auto',
+                WebkitOverflowScrolling: 'touch',
+                padding: '18px 16px calc(16px + env(safe-area-inset-bottom, 0px))',
+                borderRadius: 18,
+                border: `1px solid ${C.border}`,
+                boxShadow: '0 24px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.04) inset',
+                animation: 'lmFadeUp 0.32s cubic-bezier(.22,1,.36,1)',
               }}>
-                <div style={modalGrabber} />
-                <p style={{ margin: '0 0 4px', fontWeight: 800, fontSize: 16, textAlign: 'center' }}>
+                <p style={{ margin: '0 0 4px', fontWeight: 800, fontSize: 16, textAlign: 'center', letterSpacing: -0.2 }}>
                   {teamName} — {POS_SHORT[role] || role}
                 </p>
                 <p style={{ margin: '0 0 14px', fontSize: 11, color: C.muted, textAlign: 'center' }}>
@@ -2097,11 +2192,13 @@ export default function LiveMatch() {
                         onClick={() => handleAdminPlaceInSlot(p.device_id)}
                         style={{
                           display: 'flex', alignItems: 'center', gap: 10,
-                          padding: '8px 10px', borderRadius: 10,
-                          background: 'rgba(255,255,255,0.03)',
-                          border: '1px solid rgba(255,255,255,0.06)',
+                          padding: '10px 12px', borderRadius: 11,
+                          background: 'rgba(255,255,255,0.035)',
+                          border: '1px solid rgba(255,255,255,0.07)',
                           color: C.text, cursor: 'pointer',
                           fontFamily: 'inherit', textAlign: 'left',
+                          transition: 'background 0.15s ease, border-color 0.15s ease',
+                          WebkitTapHighlightColor: 'transparent',
                         }}
                       >
                         <MiniAvatar player={p}

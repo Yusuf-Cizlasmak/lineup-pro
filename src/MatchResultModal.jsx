@@ -41,9 +41,10 @@
 import React, { useState, useRef, useMemo, useEffect, useCallback, useLayoutEffect } from "react";
 import { t, tPos } from "./i18n";
 import { hapticLight, hapticMedium, hapticHeavy, hapticSuccess, hapticSelection } from "./haptics";
-import { saveMatch, buildMatch, newEvent } from "./matchHistoryStore";
+import { saveMatch, buildMatch, newEvent, getAllMatches } from "./matchHistoryStore";
 import { showInterstitial } from "./admob";
 import { useSubscription } from "./subscription";
+import MatchInsightsPanel from "./MatchInsightsPanel";
 
 // ═══════════════════════════════════════════════════════════
 // HELPERS
@@ -795,6 +796,7 @@ export default function MatchResultModal({
   const [saved, setSaved] = useState(false);
   const [showSuccessPopup, setShowSuccessPopup] = useState(false);
   const [savedSummary, setSavedSummary] = useState(null);
+  const [savedMatchObj, setSavedMatchObj] = useState(null); // insights için tam match objesi
   const [showSaveReminder, setShowSaveReminder] = useState(false);
 
   // ★ Capture state — true iken animasyon ve overlay'ler donar
@@ -1044,6 +1046,7 @@ export default function MatchResultModal({
     });
     saveMatch(match);
     setSaved(true);
+    setSavedMatchObj(match); // insights paneli bu objeden besleniyor
 
     setSavedSummary({
       scoreA, scoreB,
@@ -2030,7 +2033,7 @@ export default function MatchResultModal({
             position: "fixed", inset: 0, zIndex: 1400,
             background: "rgba(0,0,0,0.88)", backdropFilter: "blur(16px)",
             display: "flex", alignItems: "center", justifyContent: "center",
-            padding: 20,
+            padding: 16,
             animation: "mrm_fadeIn 0.25s",
           }}
         >
@@ -2040,11 +2043,15 @@ export default function MatchResultModal({
               borderRadius: 22,
               border: "1px solid rgba(52,211,153,0.4)",
               padding: "26px 22px 22px",
-              maxWidth: 380, width: "100%",
+              maxWidth: 420, width: "100%",
+              maxHeight: "92vh",
+              overflowY: "auto",
+              overflowX: "hidden",
+              WebkitOverflowScrolling: "touch",
               textAlign: "center",
               animation: "mrm_successPopIn 0.5s cubic-bezier(.34,1.56,.64,1)",
               boxShadow: "0 20px 80px rgba(0,0,0,0.7), 0 0 60px rgba(52,211,153,0.2)",
-              position: "relative", overflow: "hidden",
+              position: "relative",
             }}
           >
             <div style={{
@@ -2119,6 +2126,23 @@ export default function MatchResultModal({
                 </div>
               )}
             </div>
+
+            {/* ═══ INSIGHTS PANEL — rule-based maç raporu ═══ */}
+            {/* savedMatchObj olduğunda, geçmiş + bu maçtan içgörü üret */}
+            {savedMatchObj && (
+              <div style={{
+                position: "relative",
+                marginBottom: 18,
+                textAlign: "left",
+              }}>
+                <MatchInsightsPanel
+                  match={savedMatchObj}
+                  history={getAllMatches()}
+                  compact={true}
+                  maxPerCategory={3}
+                />
+              </div>
+            )}
 
             <div style={{ display: "flex", gap: 8, position: "relative" }}>
               <button

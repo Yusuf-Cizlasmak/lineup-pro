@@ -355,9 +355,9 @@ function PaywallScreen({ open, feature, onClose }) {
               name="Pro"
               tagline="Bireysel premium"
               badge="EN POPÜLER"
-              price={period === "yearly" ? 399 : 59}
+              price={period === "yearly" ? 199 : 29}
               unit={period === "yearly" ? "/yıl" : "/ay"}
-              subPrice={period === "yearly" ? "₺33/ay (yıllık ödeme)" : "her ay yenilenir"}
+              subPrice={period === "yearly" ? "₺17/ay (yıllık ödeme)" : "her ay yenilenir"}
               features={[
                 { icon: "⚡", text: "Sınırsız oda kurma + maça katılma" },
                 { icon: "🚫", text: "Reklamsız deneyim" },
@@ -402,8 +402,8 @@ function ManageSubscription({ tier, plan, until, isTrial, daysLeft, onCancel, on
     : plan === "pro_yearly"  ? "PRO YILLIK"
     : "PRO";
 
-  const planPrice = plan === "pro_monthly" ? "₺59/ay"
-    : plan === "pro_yearly"  ? "₺399/yıl"
+  const planPrice = plan === "pro_monthly" ? "₺29/ay"
+    : plan === "pro_yearly"  ? "₺199/yıl"
     : isTrial ? "Ücretsiz" : "—";
 
   const renewDate = until ? new Date(until).toLocaleDateString("tr-TR", {

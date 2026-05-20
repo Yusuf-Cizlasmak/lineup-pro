@@ -23,13 +23,14 @@
 // ─────────────────────────────────────────────────────────────
 import React, { useEffect, useMemo, useState } from "react";
 import logo from "./ssssss.png";
-import { t, useLang, setLang } from "./i18n";
-import { LangToggle } from "./Onboarding";
+import { t, useLang } from "./i18n";
+// (LangToggle ve setLang artık burada kullanılmıyor; dil ayarı Settings sheet'te.)
 import { hapticLight, hapticMedium, hapticSelection, hapticSuccess } from "./haptics";
 import { getAllMatches, computePlayerStats } from "./matchHistoryStore";
 import { getNickname, setNickname, registerDevice, getMyActiveSessions } from "./LiveMatchService";
 import { hideBanner, showBanner } from "./admob";
-import { useSubscription } from "./subscription";
+import { useSubscription, canCreateOnlineMatch } from "./subscription";
+import LockedPreview from "./LockedPreview";
 
 // ═══════════════════════════════════════════════════════════
 // BRAND — Onboarding ile birebir aynı palet
@@ -103,7 +104,7 @@ const buildModes = (T) => [
 // ═══════════════════════════════════════════════════════════
 // MAIN
 // ═══════════════════════════════════════════════════════════
-export default function ModeSelectScreen({ onSelectMode }) {
+export default function ModeSelectScreen({ onSelectMode, onOpenSettings }) {
   const { isPremium, isTrial, daysLeft, openPaywall } = useSubscription();
   const [lang] = useLang();
   const modes = useMemo(() => buildModes(t), [lang]);
@@ -113,6 +114,18 @@ export default function ModeSelectScreen({ onSelectMode }) {
   const [stats, setStats] = useState(null);
   const [lastMatches, setLastMatches] = useState([]);
   const [activeOnline, setActiveOnline] = useState(null);
+
+  // Hoş geldin kartı dismiss durumu — localStorage'da kalıcı
+  const [welcomeDismissed, setWelcomeDismissed] = useState(() => {
+    try { return localStorage.getItem("halisaha_welcome_dismissed") === "1"; }
+    catch { return false; }
+  });
+
+  const dismissWelcome = () => {
+    try { localStorage.setItem("halisaha_welcome_dismissed", "1"); } catch {}
+    setWelcomeDismissed(true);
+    hapticLight();
+  };
 
   useEffect(() => {
     try {
@@ -137,6 +150,18 @@ export default function ModeSelectScreen({ onSelectMode }) {
         if (sessions && sessions.length > 0) setActiveOnline(sessions[0]);
       } catch {}
     })();
+  }, []);
+
+  // ★ Tour başlarken "Hoş Geldin" kartını otomatik kapat —
+  // aksi halde tour tooltip'i welcome card'la çakışıyor (acemi görünüm)
+  useEffect(() => {
+    const onTourStart = () => {
+      setWelcomeDismissed(true);
+      // NOT: localStorage'a yazmıyoruz — tour bitince kullanıcı isterse
+      // welcome card'ı tekrar görebilsin (sadece geçici gizleme)
+    };
+    window.addEventListener("halisaha:start-tour", onTourStart);
+    return () => window.removeEventListener("halisaha:start-tour", onTourStart);
   }, []);
 
   const handleSelect = (m) => { hapticMedium(); onSelectMode?.(m.key); };
@@ -212,7 +237,16 @@ export default function ModeSelectScreen({ onSelectMode }) {
               </>
             )}
           </button>
-          <LangToggle lang={lang} onChange={setLang} accent={C.primary} />
+          <button
+            onClick={() => { hapticLight(); onOpenSettings?.(); }}
+            style={S.settingsBtn}
+            aria-label="Ayarlar"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+          </button>
         </header>
 
         {/* ═══ AKTİF MAÇ ŞERİDİ ═══ */}
@@ -268,28 +302,17 @@ export default function ModeSelectScreen({ onSelectMode }) {
 
         </section>
 
-        {/* ═══ PLANIM ═══ */}
-        <section style={S.planSection}>
-          <div style={S.sectionHeader}>
-            <span style={S.sectionDash} />
-            <span style={S.sectionLabel}>PLANIM</span>
-            <span style={S.sectionDashFlex} />
-            <span style={{
-              ...S.planStatusDot,
-              background: isPremium ? C.gold : C.inkFaint,
-              boxShadow: isPremium ? `0 0 8px ${C.gold}` : "none",
-            }} />
-          </div>
-          <PlanCard
-            isPremium={isPremium}
-            isTrial={isTrial}
-            daysLeft={daysLeft}
-            onOpen={() => {
-              hapticLight();
-              openPaywall(isPremium ? "manage" : "general");
-            }}
+        {/* ═══ PLANIM kaldırıldı — artık ⚙️ Ayarlar > Plan & Üyelik üzerinden erişiliyor ═══ */}
+
+        {/* ═══ EMPTY STATE — ilk kez giren kullanıcı için 3-adımlık onboarding ═══ */}
+        {/* Dismiss edilmediyse VE hiç veri yoksa göster */}
+        {!welcomeDismissed && stats === null && lastMatches.length === 0 && !activeOnline && (
+          <EmptyStateWelcome
+            onQuickStart={() => { hapticMedium(); onSelectMode?.("match"); }}
+            onMyTeam={() => { hapticLight(); onSelectMode?.("myteam"); }}
+            onDismiss={dismissWelcome}
           />
-        </section>
+        )}
 
         {/* ═══ MODES ═══ */}
         <section style={S.modesWrap}>
@@ -302,14 +325,38 @@ export default function ModeSelectScreen({ onSelectMode }) {
             </span>
           </div>
           <div style={S.modes}>
-            {modes.map((m, i) => (
-              <ModeCard
-                key={m.key}
-                mode={m}
-                delay={0.16 + i * 0.07}
-                onSelect={() => handleSelect(m)}
-              />
-            ))}
+            {modes.map((m, i) => {
+              // Online mod kartı — Free kullanıcı 1 hayatta-bir hakkını kullandıysa lock göster
+              // Pro/Trial veya henüz hakkı varsa normal render → ilk deneyim ücretsiz kalsın
+              const isOnlineExhausted =
+                m.key === "online" &&
+                !isPremium &&
+                !canCreateOnlineMatch().allowed;
+
+              const card = (
+                <ModeCard
+                  mode={m}
+                  delay={0.16 + i * 0.07}
+                  onSelect={() => handleSelect(m)}
+                />
+              );
+
+              return isOnlineExhausted ? (
+                <LockedPreview
+                  key={m.key}
+                  feature="unlimited_online"
+                  blur="soft"
+                  title="1 hakkını kullandın"
+                  subtitle="Pro ile sınırsız oda kur · Sınırsız maça katıl"
+                  ctaLabel="Pro'ya Geç"
+                  style={{ borderRadius: 16 }}
+                >
+                  {card}
+                </LockedPreview>
+              ) : (
+                <React.Fragment key={m.key}>{card}</React.Fragment>
+              );
+            })}
           </div>
         </section>
 
@@ -359,6 +406,292 @@ export default function ModeSelectScreen({ onSelectMode }) {
 }
 
 // ═══════════════════════════════════════════════════════════
+// EMPTY STATE WELCOME — yeni kullanıcı, 3 adımlık intro
+// ═══════════════════════════════════════════════════════════
+// stats === null && lastMatches.length === 0 && !activeOnline iken render edilir
+// Amaç: kullanıcıyı ilk maça götürmek (D1 retention için kritik)
+function EmptyStateWelcome({ onQuickStart, onMyTeam, onDismiss }) {
+  const steps = [
+    { n: "01", title: "Takımını oluştur", sub: "Oyuncuları ekle, formayı seç" },
+    { n: "02", title: "Maçı başlat",      sub: "Saha üzerinde sürükle-bırak" },
+    { n: "03", title: "İstatistiği gör",  sub: "Gol, asist, MVP — her şey kayıt" },
+  ];
+
+  return (
+    <section style={ES.wrap}>
+      {/* Sol kenar şerit — diğer kartlarla görsel tutarlılık */}
+      <span aria-hidden style={ES.rib} />
+
+      {/* ★ Kapatma butonu — sağ üst köşe; 36x36 touch target, kalın ×, iOS-safe */}
+      {onDismiss && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onDismiss();
+          }}
+          onTouchEnd={(e) => {
+            // iOS WebView fallback — bazen click fire etmiyor
+            e.preventDefault();
+            e.stopPropagation();
+            onDismiss();
+          }}
+          aria-label="Hoş geldin mesajını kapat"
+          style={ES.closeBtn}
+        >
+          <span style={ES.closeBtnGlyph}>×</span>
+        </button>
+      )}
+
+      {/* Üst aksanlı çubuk */}
+      <div style={ES.eyebrow}>
+        <span style={ES.eyebrowDot} />
+        <span style={ES.eyebrowText}>HOŞ GELDİN</span>
+        <span style={ES.eyebrowFlexLine} />
+      </div>
+
+      {/* Ana başlık */}
+      <h2 style={ES.title}>
+        İlk maçını kuralım
+      </h2>
+      <p style={ES.sub}>
+        3 adımda kaptanın olabilirsin. Tüm verilerin telefonunda kalır.
+      </p>
+
+      {/* 3 adım listesi */}
+      <div style={ES.stepList}>
+        {steps.map((s, i) => (
+          <div key={s.n} style={{ ...ES.stepRow, animationDelay: `${0.08 + i * 0.06}s` }}>
+            <span style={ES.stepNum}>{s.n}</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={ES.stepTitle}>{s.title}</div>
+              <div style={ES.stepSub}>{s.sub}</div>
+            </div>
+            <span style={ES.stepArrow}>›</span>
+          </div>
+        ))}
+      </div>
+
+      {/* CTA — birincil ve ikincil */}
+      <div style={ES.ctaRow}>
+        <button onClick={onQuickStart} style={ES.ctaPrimary}>
+          <span style={ES.ctaPrimaryIcon}>▶</span>
+          <span>Hemen Başla</span>
+        </button>
+        <button onClick={onMyTeam} style={ES.ctaSecondary}>
+          Önce Takım Kur
+        </button>
+      </div>
+
+      {/* Microcopy — güven inşası */}
+      <div style={ES.trust}>
+        <span style={ES.trustDot} />
+        <span>Kayıt gerekmez · İnternet zorunlu değil · Tamamen ücretsiz başla</span>
+      </div>
+    </section>
+  );
+}
+
+// EmptyState style'ları — diğerlerinden ayrı tutuyoruz, kolay maintain
+const ES = {
+  wrap: {
+    position: "relative",
+    padding: "18px 18px 16px 22px",
+    background: "linear-gradient(135deg, rgba(16,185,129,0.06) 0%, rgba(13,22,32,0.85) 60%, rgba(96,165,250,0.04) 100%)",
+    border: "1px solid rgba(16,185,129,0.18)",
+    borderRadius: 16,
+    marginBottom: 18,
+    overflow: "hidden",
+    animation: "msCardIn 0.55s cubic-bezier(.2,.85,.3,1) both",
+    boxShadow: "0 14px 36px rgba(0,0,0,0.45), 0 0 28px rgba(16,185,129,0.08)",
+  },
+  rib: {
+    position: "absolute",
+    left: 0,
+    top: "16%",
+    bottom: "16%",
+    width: 3,
+    background: "linear-gradient(180deg, #10b981, #34d39955 50%, #10b981)",
+    boxShadow: "0 0 14px #10b98188",
+    borderRadius: "0 2px 2px 0",
+  },
+  closeBtn: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    width: 36,
+    height: 36,
+    padding: 0,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "rgba(255,255,255,0.06)",
+    border: "1px solid rgba(255,255,255,0.12)",
+    borderRadius: 999,
+    color: "rgba(244,244,245,0.85)",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    transition: "all 0.18s ease",
+    zIndex: 10,
+    WebkitTapHighlightColor: "transparent",
+    touchAction: "manipulation",
+    // iOS WebView'da default button styling'i bastır
+    appearance: "none",
+    WebkitAppearance: "none",
+  },
+  closeBtnGlyph: {
+    fontSize: 22,
+    lineHeight: 1,
+    fontWeight: 300,
+    color: "inherit",
+    pointerEvents: "none", // glyph üstüne tıklasa bile event button'a gitsin
+    marginTop: -3,         // × glyph optik olarak biraz aşağıda görünüyor — yukarı çek
+    fontFamily: "system-ui, -apple-system, sans-serif",
+  },
+  eyebrow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 12,
+  },
+  eyebrowDot: {
+    width: 6,
+    height: 6,
+    borderRadius: "50%",
+    background: "#10b981",
+    boxShadow: "0 0 8px #10b981",
+  },
+  eyebrowText: {
+    fontSize: 9.5,
+    fontWeight: 800,
+    letterSpacing: 2.4,
+    color: "#10b981",
+    fontFamily: "'JetBrains Mono','SF Mono',monospace",
+  },
+  eyebrowFlexLine: {
+    flex: 1,
+    height: 1,
+    background: "rgba(16,185,129,0.18)",
+  },
+  title: {
+    margin: 0,
+    fontSize: 26,
+    fontWeight: 800,
+    color: "#f4f4f5",
+    letterSpacing: -0.4,
+    lineHeight: 1.05,
+    fontFamily: "'Bebas Neue','Oswald','Inter Tight',sans-serif",
+  },
+  sub: {
+    margin: "6px 0 14px",
+    fontSize: 13,
+    color: "rgba(244,244,245,0.6)",
+    lineHeight: 1.5,
+  },
+  stepList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+    marginBottom: 14,
+  },
+  stepRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    padding: "10px 11px",
+    background: "rgba(255,255,255,0.02)",
+    border: "1px solid rgba(255,255,255,0.05)",
+    borderRadius: 10,
+    animation: "msCardIn 0.45s cubic-bezier(.2,.85,.3,1) both",
+  },
+  stepNum: {
+    fontSize: 14,
+    fontWeight: 900,
+    color: "#10b981",
+    fontFamily: "'JetBrains Mono','SF Mono',monospace",
+    letterSpacing: 0.5,
+    width: 22,
+    flexShrink: 0,
+  },
+  stepTitle: {
+    fontSize: 13.5,
+    fontWeight: 700,
+    color: "#f4f4f5",
+    letterSpacing: 0.1,
+    lineHeight: 1.2,
+  },
+  stepSub: {
+    fontSize: 11,
+    color: "rgba(244,244,245,0.45)",
+    marginTop: 1,
+    lineHeight: 1.3,
+  },
+  stepArrow: {
+    fontSize: 16,
+    color: "rgba(244,244,245,0.25)",
+    flexShrink: 0,
+  },
+  ctaRow: {
+    display: "grid",
+    gridTemplateColumns: "1fr auto",
+    gap: 8,
+    marginBottom: 10,
+  },
+  ctaPrimary: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    padding: "12px 16px",
+    background: "linear-gradient(135deg, #10b981, #059669)",
+    color: "#0a1410",
+    border: "none",
+    borderRadius: 11,
+    fontSize: 13,
+    fontWeight: 800,
+    letterSpacing: 0.3,
+    fontFamily: "inherit",
+    cursor: "pointer",
+    boxShadow: "0 8px 22px rgba(16,185,129,0.30), inset 0 1px 0 rgba(255,255,255,0.18)",
+    textTransform: "uppercase",
+  },
+  ctaPrimaryIcon: {
+    fontSize: 10,
+    lineHeight: 1,
+  },
+  ctaSecondary: {
+    padding: "12px 14px",
+    background: "rgba(255,255,255,0.03)",
+    color: "rgba(244,244,245,0.85)",
+    border: "1px solid rgba(255,255,255,0.10)",
+    borderRadius: 11,
+    fontSize: 12,
+    fontWeight: 700,
+    fontFamily: "inherit",
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  },
+  trust: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    fontSize: 10.5,
+    color: "rgba(244,244,245,0.4)",
+    fontWeight: 500,
+    paddingTop: 4,
+  },
+  trustDot: {
+    width: 4,
+    height: 4,
+    borderRadius: "50%",
+    background: "#10b981",
+    boxShadow: "0 0 6px #10b981",
+    flexShrink: 0,
+  },
+};
+
+// ═══════════════════════════════════════════════════════════
 // STAT CELL — editorial number display
 // ═══════════════════════════════════════════════════════════
 function StatCell({ label, value, accent }) {
@@ -381,6 +714,7 @@ function ModeCard({ mode, onSelect, delay }) {
   return (
     <button
       onClick={onSelect}
+      data-tour={`mode-${mode.key}`}
       onTouchStart={() => { setPressed(true); hapticSelection(); }}
       onTouchEnd={() => setPressed(false)}
       onMouseDown={() => setPressed(true)}
@@ -966,6 +1300,26 @@ const S = {
     padding: "2px 6px",
     borderRadius: 4,
     fontFamily: "'JetBrains Mono','SF Mono',monospace",
+  },
+
+  // ⚙️ Settings button — header sağ üst, dairesel ikon buton
+  settingsBtn: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: 36,
+    height: 36,
+    padding: 0,
+    background: "rgba(255,255,255,0.025)",
+    border: `1px solid ${C.line}`,
+    borderRadius: 999,
+    color: C.inkDim,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    backdropFilter: "blur(8px)",
+    WebkitBackdropFilter: "blur(8px)",
+    transition: "all 0.18s ease",
+    flexShrink: 0,
   },
 
   activeBanner: {

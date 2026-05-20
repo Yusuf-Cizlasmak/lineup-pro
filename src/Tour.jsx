@@ -89,6 +89,25 @@ export default function Tour({ active, onFinish, mode = "main" }) {
     });
   }, [step]);
 
+  // Step değişince ilk iş: target ekran içinde mi? Değilse smooth scroll ile getir.
+  useEffect(() => {
+    if (!active || !step || !step.target) return;
+    const tryScroll = () => {
+      const el = document.querySelector(`[data-tour="${step.target}"]`);
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const vh = window.innerHeight;
+      const margin = 80; // üst/alt nefes payı
+      // Sadece görünür alanın dışındaysa kaydır
+      if (r.top < margin || r.bottom > vh - margin) {
+        el.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+      }
+    };
+    // DOM hazır olana kadar birkaç deneme — ekran/modal geçişleri için
+    const timers = [0, 120, 300].map(ms => setTimeout(tryScroll, ms));
+    return () => timers.forEach(clearTimeout);
+  }, [active, stepIdx, step]);
+
   // Step değişince + DOM güncellemesinden sonra ölç
   useEffect(() => {
     if (!active || !step) return;
@@ -242,12 +261,28 @@ export default function Tour({ active, onFinish, mode = "main" }) {
           0%, 100% { transform: translateY(0); }
           50%      { transform: translateY(-3px); }
         }
+        /* ★ Spotlight'ın step'ler arası akıcı geçişi —
+           ring & panel position/size değişimi cubic-bezier ile yumuşatılır */
+        .tour-panel, .tour-ring-outer, .tour-ring-inner, .tour-halo {
+          transition: left 0.42s cubic-bezier(.22,1,.36,1),
+                      top 0.42s cubic-bezier(.22,1,.36,1),
+                      width 0.42s cubic-bezier(.22,1,.36,1),
+                      height 0.42s cubic-bezier(.22,1,.36,1),
+                      opacity 0.3s ease;
+        }
+        .tour-tip {
+          transition: top 0.42s cubic-bezier(.22,1,.36,1),
+                      bottom 0.42s cubic-bezier(.22,1,.36,1),
+                      left 0.42s cubic-bezier(.22,1,.36,1),
+                      transform 0.42s cubic-bezier(.22,1,.36,1);
+        }
       `}</style>
 
       {/* 4-panel karartma — pointer-events:none, hiçbir şeyi engelleme */}
       {panels.map((p, i) => (
         <div
           key={i}
+          className="tour-panel"
           style={{
             position: "fixed",
             left: p.left, top: p.top,
@@ -277,6 +312,7 @@ export default function Tour({ active, onFinish, mode = "main" }) {
       {/* Spotlight halo — hedefin etrafında soft glow */}
       {hole && !isCenterStep && (
         <div
+          className="tour-halo"
           style={{
             position: "fixed",
             left: hole.x - 24, top: hole.y - 24,
@@ -293,6 +329,7 @@ export default function Tour({ active, onFinish, mode = "main" }) {
       {/* Outer pulsing ring — yayılan halka */}
       {hole && (
         <div
+          className="tour-ring-outer"
           style={{
             position: "fixed",
             left: hole.x - 4, top: hole.y - 4,
@@ -309,6 +346,7 @@ export default function Tour({ active, onFinish, mode = "main" }) {
       {/* Inner pulsing ring around target */}
       {hole && (
         <div
+          className="tour-ring-inner"
           style={{
             position: "fixed",
             left: hole.x, top: hole.y,
@@ -325,6 +363,7 @@ export default function Tour({ active, onFinish, mode = "main" }) {
 
       {/* Tooltip — pointerEvents:auto */}
       <div
+        className="tour-tip"
         style={{
           position: "fixed",
           ...tipStyle,

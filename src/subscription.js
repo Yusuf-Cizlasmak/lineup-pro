@@ -192,13 +192,36 @@ export function useSubscription() {
 
   useEffect(() => {
     const refresh = () => setSub(readSub());
-    // Subscription değiştiğinde tüm bileşenler güncellensin
+
+    // 1) Bizim custom event — activateSubscription/clearSubscription dispatch'liyor
     window.addEventListener("hk:subscription-changed", refresh);
-    // Tab değiştiğinde de refresh (storage değişimi)
+
+    // 2) Başka tab değişimi — storage event (aynı tab'da fire etmez, sadece diğer tab'lar)
     window.addEventListener("storage", refresh);
+
+    // 3) ★ App foreground'a döndü — native paywall'dan dönüş sonrası kritik
+    //    iOS'ta App Store paywall kapanıp app aktif olduğunda focus event tetiklenir
+    //    Android'de Play Store paywall sonrası benzer şekilde çalışır
+    window.addEventListener("focus", refresh);
+
+    // 4) ★ Sayfa visibility değişti — webview pause/resume sonrası state tazele
+    //    RC entitlement bazen 1-2 sn gecikir; visibility refresh bu race'i yakalar
+    const onVis = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    document.addEventListener("visibilitychange", onVis);
+
+    // 5) ★ Pageshow event — iOS BFCache'den dönüşte gerekli
+    //    (focus her zaman tetiklenmeyebilir)
+    const onPageShow = (e) => { if (e.persisted) refresh(); };
+    window.addEventListener("pageshow", onPageShow);
+
     return () => {
       window.removeEventListener("hk:subscription-changed", refresh);
       window.removeEventListener("storage", refresh);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("pageshow", onPageShow);
     };
   }, []);
 

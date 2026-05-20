@@ -153,6 +153,9 @@ const DICT = {
     t_first_player: "İlk oyuncun eklendi! 🎉",
     t_squad_complete: "Kadro hazır! 7 oyuncu sahada ✓",
     t_first_match: "İlk maçın için bol şans! ⚽",
+    // Boş kadro / boş slot rehberlikleri
+    t_add_first_player: "Önce kadrona oyuncu ekle 👥",
+    t_no_candidates: "Bu pozisyon için müsait oyuncu yok — yeni oyuncu ekle",
     // Settings menu (yeni eklenen)
     settings_title: "Ayarlar",
     settings_show_intro: "Tanıtımı tekrar göster",
@@ -535,6 +538,8 @@ const DICT = {
     t_first_player: "Your first player added! 🎉",
     t_squad_complete: "Squad ready! 7 players on pitch ✓",
     t_first_match: "Good luck with your first match! ⚽",
+    t_add_first_player: "Add players to your squad first 👥",
+    t_no_candidates: "No player available for this slot — create a new one",
     // Settings menu
     settings_title: "Settings",
     settings_show_intro: "Replay intro",

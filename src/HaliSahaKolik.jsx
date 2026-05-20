@@ -14,6 +14,14 @@ import MatchHistoryView from "./MatchHistory";
 import PlayerStatsView from "./PlayerStats";
 import ModeSelectScreen from "./ModeSelectScreen";
 import {
+  getSubscription,
+  canCreateOnlineMatch,
+  canJoinOnlineMatch,
+  getOnlineMatchCount,
+  getOnlineJoinCount,
+  FREE_LIMITS,
+} from "./subscription";
+import {
   generateDefaultAttributes,
   ensurePlayerAttributes,
   computeOverallFromAttributes,
@@ -1763,8 +1771,364 @@ const TeamStatsCard = ({ team, accent }) => {
 };
 
 
+// ─── PLAN SETTINGS CARD ─────────────────────────────────────────────
+// Banka uygulaması "hesap özeti" tarzı zengin plan kartı.
+// Pro: yenileme tarihi, kalan süre, aylık değer, avantaj çipleri.
+// Free: gerçek kullanım sayaçları + progress bar + Pro preview + CTA.
+// ─────────────────────────────────────────────────────────────────────
+const PlanSettingsCard = ({ onOpenPlan }) => {
+  const s = getSubscription();
+  const isPro = s.tier === "pro";
+  const isTrial = s.plan === "trial_7d";
+  const daysLeft = s.until ? Math.max(0, Math.ceil((s.until - Date.now()) / 86400000)) : null;
+
+  // Plan adı + fiyat metni
+  const planLabel = isTrial ? "PRO · Deneme"
+    : s.plan === "pro_yearly"  ? "PRO · Yıllık"
+    : s.plan === "pro_monthly" ? "PRO · Aylık"
+    : isPro                    ? "PRO · Aktif"
+    : "FREE Plan";
+
+  const planPriceText = s.plan === "pro_yearly"  ? "₺399/yıl  ·  ₺33/ay değer"
+    : s.plan === "pro_monthly" ? "₺59/ay"
+    : isTrial                   ? "Ücretsiz deneme"
+    : "Ücretsiz";
+
+  const renewDate = s.until ? new Date(s.until).toLocaleDateString("tr-TR", {
+    day: "numeric", month: "long", year: "numeric",
+  }) : null;
+
+  // Trial son 3 gün → uyarı tonu
+  const trialUrgent = isTrial && daysLeft != null && daysLeft <= 3;
+
+  // ═══ FREE — kullanım sayaçları ═══
+  const onlineCreated = getOnlineMatchCount().count;
+  const onlineJoined  = getOnlineJoinCount().count;
+  // history limit free için ilk N maçtan oluşur — getAllMatches()'ı saysın (sadece count için ucuz)
+  let historyUsed = 0;
+  try { historyUsed = getAllMatches().length; } catch {}
+
+  // ═══ STYLE TOKENS ═══
+  const accent = isPro ? "#fbbf24" : "#10b981";
+  const accentDim = isPro ? "#f59e0b" : "#059669";
+  const accentSoft = isPro ? "rgba(251,191,36,0.10)" : "rgba(16,185,129,0.08)";
+  const accentBorder = isPro ? "rgba(251,191,36,0.32)" : "rgba(16,185,129,0.26)";
+  const accentGlow = isPro ? "rgba(251,191,36,0.20)" : "rgba(16,185,129,0.18)";
+
+  // Mini stat row helper (sol etiket, sağ değer, mono)
+  const InfoRow = ({ label, value, valueColor }) => (
+    <div style={{
+      display: "flex", justifyContent: "space-between", alignItems: "center",
+      padding: "6px 0",
+    }}>
+      <span style={{
+        fontSize: 11, color: "rgba(255,255,255,0.45)",
+        letterSpacing: 0.3,
+      }}>{label}</span>
+      <span style={{
+        fontSize: 11.5, fontWeight: 700,
+        color: valueColor || "#e2e8f0",
+        fontFamily: "'JetBrains Mono','SF Mono',monospace",
+        letterSpacing: 0.4,
+      }}>{value}</span>
+    </div>
+  );
+
+  // Progress bar (yüzde değil, kullanılan/toplam görselleştirme)
+  const UsageBar = ({ label, used, limit }) => {
+    const isLifetime = limit === FREE_LIMITS.ONLINE_MATCHES_LIFETIME || limit === FREE_LIMITS.ONLINE_JOINS_LIFETIME;
+    const cap = isLifetime ? limit : limit;
+    const pct = Math.min(100, (used / cap) * 100);
+    const exhausted = used >= cap;
+    return (
+      <div style={{ marginBottom: 9 }}>
+        <div style={{
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+          marginBottom: 5,
+        }}>
+          <span style={{ fontSize: 11, color: "rgba(255,255,255,0.6)" }}>{label}</span>
+          <span style={{
+            fontSize: 10, fontWeight: 700,
+            color: exhausted ? "#f87171" : "rgba(255,255,255,0.7)",
+            fontFamily: "'JetBrains Mono',monospace",
+            letterSpacing: 0.4,
+          }}>{used}/{cap}{isLifetime ? "  (toplam)" : ""}</span>
+        </div>
+        <div style={{
+          height: 4, width: "100%",
+          background: "rgba(255,255,255,0.05)",
+          borderRadius: 2, overflow: "hidden",
+        }}>
+          <div style={{
+            height: "100%", width: `${pct}%`,
+            background: exhausted
+              ? "linear-gradient(90deg, #f87171, #ef4444)"
+              : `linear-gradient(90deg, ${accent}, ${accentDim})`,
+            transition: "width 0.4s ease",
+            boxShadow: exhausted ? "0 0 8px rgba(239,68,68,0.4)" : `0 0 6px ${accentGlow}`,
+          }} />
+        </div>
+      </div>
+    );
+  };
+
+  // Avantaj çipi
+  const BenefitChip = ({ icon, text, active }) => (
+    <div style={{
+      display: "inline-flex", alignItems: "center", gap: 6,
+      padding: "5px 9px",
+      background: active ? `${accent}14` : "rgba(255,255,255,0.025)",
+      border: `1px solid ${active ? `${accent}44` : "rgba(255,255,255,0.06)"}`,
+      borderRadius: 7,
+      fontSize: 10.5, fontWeight: 600,
+      color: active ? accent : "rgba(255,255,255,0.55)",
+      whiteSpace: "nowrap",
+    }}>
+      <span style={{ fontSize: 11 }}>{icon}</span>
+      <span>{text}</span>
+    </div>
+  );
+
+  return (
+    <div
+      onClick={() => onOpenPlan?.()}
+      role="button"
+      tabIndex={0}
+      style={{
+        position: "relative",
+        padding: "16px 16px 14px",
+        background: `linear-gradient(160deg, ${accentSoft} 0%, rgba(13,22,32,0.85) 65%)`,
+        border: `1px solid ${accentBorder}`,
+        borderRadius: 14,
+        cursor: "pointer",
+        textAlign: "left",
+        fontFamily: "inherit",
+        boxShadow: `0 0 20px ${accentGlow}, inset 0 1px 0 rgba(255,255,255,0.04)`,
+        overflow: "hidden",
+        marginBottom: 4,
+      }}
+    >
+      {/* Halo decoration — sol üst köşeden yumuşak ışıma */}
+      <span aria-hidden style={{
+        position: "absolute",
+        top: -30, left: -20,
+        width: 140, height: 80,
+        background: `radial-gradient(ellipse, ${accentGlow}, transparent 65%)`,
+        filter: "blur(20px)", pointerEvents: "none",
+      }} />
+
+      {/* ═══ HEADER ROW ═══ */}
+      <div style={{
+        position: "relative",
+        display: "flex", alignItems: "center", gap: 12,
+        marginBottom: 12,
+      }}>
+        {/* Plan ikonu (gold/green gradient avatar) */}
+        <div style={{
+          width: 42, height: 42, borderRadius: 11,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          background: `linear-gradient(135deg, ${accent}, ${accentDim})`,
+          fontSize: 21, flexShrink: 0,
+          boxShadow: `0 6px 16px ${accentGlow}, inset 0 1px 0 rgba(255,255,255,0.25)`,
+        }}>
+          {isPro ? "👑" : "⚡"}
+        </div>
+
+        {/* Sol bilgi */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            fontSize: 9.5, fontWeight: 800, letterSpacing: 2.2,
+            color: accent,
+            fontFamily: "'JetBrains Mono','SF Mono',monospace",
+            textTransform: "uppercase",
+            marginBottom: 3,
+          }}>
+            Mevcut Plan
+          </div>
+          <div style={{
+            display: "flex", alignItems: "center", gap: 6,
+            fontSize: 15, fontWeight: 800, color: "#fff",
+            letterSpacing: 0.2,
+          }}>
+            <span>{planLabel}</span>
+            {isPro && (
+              <span style={{
+                fontSize: 8.5, fontWeight: 900, letterSpacing: 1.4,
+                color: "#0a0805",
+                background: trialUrgent
+                  ? "linear-gradient(135deg, #f87171, #ef4444)"
+                  : `linear-gradient(135deg, ${accent}, ${accentDim})`,
+                padding: "2px 6px", borderRadius: 4,
+                fontFamily: "'JetBrains Mono','SF Mono',monospace",
+                color: trialUrgent ? "#fff" : "#0a0805",
+                animation: trialUrgent ? "pulse 1.4s ease-in-out infinite" : "none",
+              }}>
+                {isTrial ? `${daysLeft}G KALDI` : "AKTİF"}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Chevron — taple-to-manage hinti */}
+        <span style={{
+          fontSize: 22, color: "rgba(255,255,255,0.32)",
+          flexShrink: 0, marginRight: -3,
+        }}>›</span>
+      </div>
+
+      {/* ═══ BODY — Pro vs Free ayrımı ═══ */}
+      {isPro ? (
+        // ─── PRO BODY ───
+        <>
+          {/* Bilgi grid'i */}
+          <div style={{
+            borderTop: "1px solid rgba(255,255,255,0.06)",
+            paddingTop: 10, marginBottom: 12,
+          }}>
+            {renewDate && (
+              <InfoRow label="Yenileme tarihi" value={renewDate} />
+            )}
+            {daysLeft != null && (
+              <InfoRow
+                label="Kalan süre"
+                value={`${daysLeft} gün`}
+                valueColor={trialUrgent ? "#f87171" : (daysLeft < 30 ? "#fbbf24" : "#34d399")}
+              />
+            )}
+            <InfoRow label="Plan" value={planPriceText} />
+          </div>
+
+          {/* Aktif avantaj çipleri */}
+          <div style={{
+            display: "flex", flexWrap: "wrap", gap: 5,
+            paddingTop: 10,
+            borderTop: "1px solid rgba(255,255,255,0.06)",
+          }}>
+            <BenefitChip icon="⚡" text="Sınırsız oda"  active />
+            <BenefitChip icon="🚫" text="Reklamsız"    active />
+            <BenefitChip icon="☁️" text="Cloud sync"   active />
+            <BenefitChip icon="📊" text="Sınırsız geçmiş" active />
+          </div>
+
+          {/* Mini hint metni */}
+          <div style={{
+            marginTop: 10, paddingTop: 10,
+            borderTop: "1px solid rgba(255,255,255,0.04)",
+            fontSize: 10, color: "rgba(255,255,255,0.4)",
+            textAlign: "center",
+            letterSpacing: 0.3,
+          }}>
+            Aboneliği yönetmek için dokunun
+          </div>
+        </>
+      ) : (
+        // ─── FREE BODY ───
+        <>
+          {/* KULLANIM bölümü */}
+          <div style={{
+            paddingTop: 10,
+            borderTop: "1px solid rgba(255,255,255,0.06)",
+            marginBottom: 12,
+          }}>
+            <div style={{
+              fontSize: 9, fontWeight: 800, letterSpacing: 2.2,
+              color: "rgba(255,255,255,0.4)",
+              fontFamily: "'JetBrains Mono','SF Mono',monospace",
+              marginBottom: 10,
+            }}>
+              KULLANIM
+            </div>
+
+            <UsageBar
+              label="Online oda kurma"
+              used={onlineCreated}
+              limit={FREE_LIMITS.ONLINE_MATCHES_LIFETIME}
+            />
+            <UsageBar
+              label="Online maça katılma"
+              used={onlineJoined}
+              limit={FREE_LIMITS.ONLINE_JOINS_LIFETIME}
+            />
+
+            {/* Geçmiş satırı: bir bar değil, bir bilgi satırı — kullanıcı 5+ maç oynayabilir,
+                sadece görünür olan son 5 maç. Yanıltıcı progress yerine düz bilgi gösterelim. */}
+            <div style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              marginTop: 2,
+            }}>
+              <span style={{ fontSize: 11, color: "rgba(255,255,255,0.6)" }}>
+                Görünür maç geçmişi
+              </span>
+              <span style={{
+                fontSize: 10, fontWeight: 700,
+                color: historyUsed > FREE_LIMITS.HISTORY_LIMIT ? "#fbbf24" : "rgba(255,255,255,0.7)",
+                fontFamily: "'JetBrains Mono',monospace",
+                letterSpacing: 0.4,
+              }}>
+                {historyUsed > FREE_LIMITS.HISTORY_LIMIT
+                  ? `Son ${FREE_LIMITS.HISTORY_LIMIT}/${historyUsed} maç`
+                  : `Son ${FREE_LIMITS.HISTORY_LIMIT} maç`}
+              </span>
+            </div>
+          </div>
+
+          {/* PRO ile gelir — avantaj çipleri */}
+          <div style={{
+            paddingTop: 10,
+            borderTop: "1px solid rgba(255,255,255,0.06)",
+            marginBottom: 12,
+          }}>
+            <div style={{
+              fontSize: 9, fontWeight: 800, letterSpacing: 2.2,
+              color: accent,
+              fontFamily: "'JetBrains Mono','SF Mono',monospace",
+              marginBottom: 9,
+            }}>
+              PRO İLE AÇILIR
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+              <BenefitChip icon="⚡" text="Sınırsız oda"  active={false} />
+              <BenefitChip icon="🚫" text="Reklamsız"    active={false} />
+              <BenefitChip icon="☁️" text="Cloud sync"   active={false} />
+              <BenefitChip icon="📊" text="Sınırsız geçmiş" active={false} />
+            </div>
+          </div>
+
+          {/* CTA — büyük, prominent */}
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "center",
+            gap: 8, padding: "11px 14px",
+            background: `linear-gradient(135deg, ${accent}, ${accentDim})`,
+            borderRadius: 10,
+            boxShadow: `0 8px 20px ${accentGlow}, inset 0 1px 0 rgba(255,255,255,0.25)`,
+          }}>
+            <span style={{
+              fontSize: 12, fontWeight: 800, color: "#0a1410",
+              letterSpacing: 0.4,
+              textTransform: "uppercase",
+              fontFamily: "'DM Sans',sans-serif",
+            }}>
+              Pro'ya Geç
+            </span>
+            <span style={{
+              fontSize: 8.5, fontWeight: 900, letterSpacing: 1.3,
+              padding: "2px 7px", borderRadius: 4,
+              background: "rgba(10,20,16,0.25)",
+              color: "#0a1410",
+              fontFamily: "'JetBrains Mono','SF Mono',monospace",
+            }}>
+              7 GÜN ÜCRETSİZ
+            </span>
+            <span style={{ fontSize: 15, color: "#0a1410", marginLeft: 2 }}>→</span>
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
 // ─── APP SETTINGS MODAL (Genel ayarlar — Tanıtım, dil, haptik, takım) ───
-const AppSettingsModal = ({ open, onClose, onReplayOnboarding, onReplayTour, onOpenTeamSettings, hapticsOn, onToggleHaptics, lang }) => {
+const AppSettingsModal = ({ open, onClose, onReplayOnboarding, onReplayTour, onOpenTeamSettings, onOpenPlan, hapticsOn, onToggleHaptics, lang }) => {
   if (!open) return null;
   const Row = ({ icon, title, sub, right, onClick }) => (
     <div
@@ -1819,6 +2183,11 @@ const AppSettingsModal = ({ open, onClose, onReplayOnboarding, onReplayTour, onO
           <button onClick={onClose} style={{ ...S.mini, border: "none", background: "none" }}><I.X /></button>
         </div>
         <div style={{ padding: "8px 18px 18px", display: "flex", flexDirection: "column", gap: 8 }}>
+          {/* ═══ Plan & Üyelik — banka uygulaması tarzı hesap özeti kartı ═══ */}
+          <PlanSettingsCard
+            onOpenPlan={() => { hapticLight(); onClose(); setTimeout(() => onOpenPlan?.(), 220); }}
+          />
+
           {/* Dil */}
           <Row
             icon="🌐"
@@ -2036,6 +2405,49 @@ export default function LineupPro() {
 
   const toast_ = (m) => { setToast({ show: true, msg: m }); setTimeout(() => setToast({ show: false, msg: "" }), 1800); };
 
+  // ★ Mod değişim takibi — boş kadroyla mod'a girince kadro tab'ına yumuşak yönlendir
+  const prevModeRef = useRef(null);
+  // Squad tab'a yönlendirme anında "+ Oyuncu Ekle" butonunu pulse'la (kısa süre)
+  const [highlightAddBtn, setHighlightAddBtn] = useState(false);
+
+  useEffect(() => {
+    // Sadece null → bir moda geçişte çalışsın
+    if (mode && !prevModeRef.current) {
+      const activeT = activeTeam === "A" ? teamA : teamB;
+      if (activeT.players.length === 0) {
+        setTab("players");
+        setHighlightAddBtn(true);
+        setTimeout(() => setHighlightAddBtn(false), 2400);
+        setTimeout(() => toast_(t("t_add_first_player")), 380);
+      }
+    }
+    prevModeRef.current = mode;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+
+  // ★ Boş slot tıklandığında: müsait oyuncu varsa QuickSelect, yoksa kadro tab'ına YUMUŞAK geç
+  const handleEmptySlotTap = (side, idx, role) => {
+    const targetTeam = side === "A" ? teamA : teamB;
+    const onFieldSet = new Set(targetTeam.fieldPlayers.filter(Boolean));
+    const availableCount = targetTeam.players.filter(p => !onFieldSet.has(p.id)).length;
+
+    if (availableCount === 0) {
+      // Hiç müsait oyuncu yok → kadro tab'a yumuşak geçiş
+      // NOT: setSP(true) artık YOK — kullanıcı yıkıcı bir modal görmesin,
+      // squad tab'ın doğal empty-state'i + pulse'lanan "+ Oyuncu Ekle" yeterli rehber.
+      hapticMedium();
+      setAT(side);
+      setTab("players");
+      setHighlightAddBtn(true);
+      setTimeout(() => setHighlightAddBtn(false), 2400);
+      toast_(t("t_no_candidates"));
+      return;
+    }
+
+    // Normal akış — müsait oyuncular var, QuickSelect modal'ı aç
+    setQS({ side, idx, role });
+  };
+
   const getPositions = (side) => FORMATIONS[(side === "A" ? teamA : teamB).formation].positions.map((p) => mapPos(p, side, isMatch));
 
   const savePlayer = (p) => {
@@ -2233,6 +2645,17 @@ const handleShareLineup = async () => {
     @keyframes tooltipIn { from { opacity: 0; transform: translate(-50%, -4px) scale(0.95) } to { opacity: 1; transform: translate(-50%, 0) scale(1) } }
     @keyframes pulseGlow { 0%,100% { opacity: 0.5 } 50% { opacity: 1 } }
     @keyframes pulse { 0%,100% { opacity: 0.6 } 50% { opacity: 1 } }
+
+    /* ★ Tab içeriği yumuşak geçişi — tab değişince content fade+slide */
+    @keyframes tabContentIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    /* ★ CTA pulse — kullanıcı bir tab'a yönlendirildikten sonra hedef butonu vurgulamak için */
+    @keyframes ctaPulse {
+      0%, 100% { box-shadow: 0 4px 14px rgba(16,185,129,0.35), 0 0 0 0 rgba(16,185,129,0.6); transform: scale(1); }
+      50%      { box-shadow: 0 6px 22px rgba(16,185,129,0.55), 0 0 0 8px rgba(16,185,129,0); transform: scale(1.04); }
+    }
     @keyframes matchEndPulse {
       0%, 100% { box-shadow: 0 4px 14px rgba(220,38,38,0.45), 0 0 0 0 rgba(248,113,113,0.6); }
       50% { box-shadow: 0 6px 22px rgba(220,38,38,0.7), 0 0 0 8px rgba(248,113,113,0); }
@@ -2303,27 +2726,86 @@ const handleShareLineup = async () => {
     return (
       <>
         <style>{globalCSS}</style>
+        <style>{`
+          @keyframes onlineLivePulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(52,211,153,0.55); }
+            50%      { box-shadow: 0 0 0 5px rgba(52,211,153,0); }
+          }
+          @keyframes onlineScreenIn {
+            from { opacity: 0; transform: translateY(6px); }
+            to   { opacity: 1; transform: translateY(0); }
+          }
+          .online-back-btn {
+            display: flex; align-items: center; justify-content: center;
+            width: 38px; height: 38px;
+            background: rgba(255,255,255,0.035);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 11px;
+            color: rgba(255,255,255,0.82);
+            cursor: pointer;
+            transition: background 0.18s ease, border-color 0.18s ease, transform 0.12s ease;
+            -webkit-tap-highlight-color: transparent;
+          }
+          .online-back-btn:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.14); }
+          .online-back-btn:active { transform: scale(0.92); background: rgba(255,255,255,0.08); }
+        `}</style>
         <div style={{ position: "fixed", inset: 0, background: "#070a0f", display: "flex", flexDirection: "column", maxWidth: 480, margin: "0 auto", overflow: "hidden" }}>
-          {/* Üst bar — Geri butonu + başlık */}
+          {/* ═══ PREMIUM TOP BAR ═══ */}
           <div style={{
             display: "flex", alignItems: "center", justifyContent: "space-between",
-            padding: "calc(14px + env(safe-area-inset-top, 0px)) 16px 10px",
-            borderBottom: "1px solid rgba(255,255,255,0.05)",
-            background: "rgba(7,10,15,0.96)",
-            backdropFilter: "blur(16px)",
-            position: "sticky", top: 0, zIndex: 30,
+            padding: "calc(12px + env(safe-area-inset-top, 0px)) 14px 12px",
+            background: "linear-gradient(180deg, rgba(10,14,20,0.96) 0%, rgba(7,10,15,0.92) 100%)",
+            backdropFilter: "blur(20px)",
+            WebkitBackdropFilter: "blur(20px)",
+            position: "relative", zIndex: 30,
+            flexShrink: 0,
           }}>
-            <button onClick={() => { hapticLight(); setMode(null); }} style={{ ...S.mini, border: "none", background: "none", padding: 4 }}>
+            <button
+              onClick={() => { hapticLight(); setMode(null); }}
+              className="online-back-btn"
+              aria-label="Geri"
+            >
               <I.Back />
             </button>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#60a5fa" }}>⚡ Online Halı Saha</div>
-              <div style={{ fontSize: 8.5, color: "rgba(255,255,255,0.28)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>Beta · Premium yakında</div>
+
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, lineHeight: 1 }}>
+              <div style={{
+                fontSize: 15.5, fontWeight: 700, color: "#f1f5f9",
+                letterSpacing: -0.2,
+                fontFamily: "'DM Sans', system-ui, sans-serif",
+              }}>Canlı Saha</div>
+              <div style={{
+                display: "inline-flex", alignItems: "center", gap: 5,
+                fontSize: 9, color: "rgba(148,163,184,0.85)",
+                fontWeight: 700, letterSpacing: 1.6, textTransform: "uppercase",
+                fontFamily: "'JetBrains Mono','SF Mono',monospace",
+              }}>
+                <span style={{
+                  width: 5, height: 5, borderRadius: "50%",
+                  background: "#34d399",
+                  animation: "onlineLivePulse 2.2s ease-in-out infinite",
+                }} />
+                <span>Online</span>
+              </div>
             </div>
-            <div style={{ width: 28 }} />
+
+            <div style={{ width: 38 }} />
+
+            {/* Alt çizgi — sade gradient ayraç */}
+            <div style={{
+              position: "absolute", left: 0, right: 0, bottom: 0, height: 1,
+              background: "linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.08) 20%, rgba(255,255,255,0.08) 80%, transparent 100%)",
+              pointerEvents: "none",
+            }} />
           </div>
-          {/* Tam ekran LiveMatch */}
-          <div style={{ flex: 1, overflow: "auto", WebkitOverflowScrolling: "touch" }}>
+
+          {/* ═══ LIVEMATCH KONTEYNERİ ═══
+              kendi scroll'u var (position:absolute + overflowY:auto),
+              dış konteyner sadece "positioned parent" görevi görür:
+              - position:relative ⇒ LiveMatch'in absolute pozisyonu BU div'e tutunur (header'ın arkasına geçmez)
+              - overflow:hidden    ⇒ çift scroll bug'unu engeller (iç+dış nested scroll yok)
+              - minHeight:0        ⇒ flex child'ın overflow ile shrink edebilmesi için şart */}
+          <div style={{ flex: 1, position: "relative", overflow: "hidden", minHeight: 0 }}>
             <LiveMatch />
           </div>
         </div>
@@ -2370,26 +2852,41 @@ const handleShareLineup = async () => {
 
     if (!mode) {
       return (
-        <div style={{
-          position: "absolute",
-          top: 0, right: 0, bottom: 0, left: 0,
-          maxWidth: 480,
-          margin: "0 auto",
-          overflowY: "auto",
-          overflowX: "hidden",
-          WebkitOverflowScrolling: "touch",
-          touchAction: "pan-y",
-          overscrollBehavior: "contain",
-        }}>
-          <style>{globalCSS}</style>
-          <ModeSelectScreen
-            onSelectMode={(key) => {
-              if (key === "history") { hapticMedium(); setMode("history"); }
-              else if (key === "online") { hapticMedium(); setMode("online"); }
-              else { handleModeSelect(key); }   // myteam | match
-            }}
+        <>
+          <div style={{
+            position: "absolute",
+            top: 0, right: 0, bottom: 0, left: 0,
+            maxWidth: 480,
+            margin: "0 auto",
+            overflowY: "auto",
+            overflowX: "hidden",
+            WebkitOverflowScrolling: "touch",
+            touchAction: "pan-y",
+            overscrollBehavior: "contain",
+          }}>
+            <style>{globalCSS}</style>
+            <ModeSelectScreen
+              onSelectMode={(key) => {
+                if (key === "history") { hapticMedium(); setMode("history"); }
+                else if (key === "online") { hapticMedium(); setMode("online"); }
+                else { handleModeSelect(key); }   // myteam | match
+              }}
+              onOpenSettings={() => { hapticLight(); setShowAppSettings(true); }}
+            />
+          </div>
+          {/* ★ AppSettingsModal — ana ekran branch'inde de mount edilmeli, yoksa ⚙️ butonu hiçbir şey açmaz */}
+          <AppSettingsModal
+            open={showAppSettings}
+            onClose={() => setShowAppSettings(false)}
+            onReplayOnboarding={() => { window.dispatchEvent(new CustomEvent("halisaha:replay-onboarding")); }}
+            onReplayTour={() => { resetTour(); setMode(null); setTimeout(() => window.dispatchEvent(new CustomEvent("halisaha:start-tour")), 300); }}
+            onOpenTeamSettings={() => setSS(activeTeam)}
+            onOpenPlan={() => { window.dispatchEvent(new CustomEvent("hk:open-paywall", { detail: { feature: "manage" } })); }}
+            hapticsOn={hapticsOn}
+            onToggleHaptics={(v) => { setHapticsEnabled(v); setHapticsOnState(v); }}
+            lang={lang}
           />
-        </div>
+        </>
       );
     }
 
@@ -2463,7 +2960,7 @@ const handleShareLineup = async () => {
       {/* ★ CONTENT — paddingBottom artırıldı: tab bar + safe area + boşluk */}
       <div style={{ flex: 1, overflow: "auto", paddingBottom: `calc(${TAB_BAR_HEIGHT}px + ${BOTTOM_SAFE} + 8px)` }}>
         {tab === "field" ? (
-          <div style={{ animation: "fadeIn 0.25s" }}>
+          <div key="field" style={{ animation: "tabContentIn 0.32s cubic-bezier(.22,.85,.32,1) both" }}>
             {/* Formation bar */}
             <div style={{ padding: "5px 13px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
               <div style={{ display: "flex", gap: 4 }}>
@@ -2541,7 +3038,7 @@ const handleShareLineup = async () => {
                       return p
                         ? (<FieldPlayer key={`a${idx}`} player={p} x={pos.x} y={pos.y} fieldRef={fieldRef} teamColor={teamA.color.secondary} isCaptain={teamA.captain === p.id} side="A" isMatch={isMatch} isGoalkeeper={pos.role === "KALECİ"} onToggleCaptain={() => toggleCaptain("A", p.id)} onRemove={() => removeFromField("A", idx)}
                         slotIndex={idx} slotPositions={positions} onSlotChange={(newIdx) => movePlayerOnField("A", idx, newIdx)} />)
-                        : (<EmptySlot key={`ae${idx}`} x={pos.x} y={pos.y} role={pos.role} teamColor={teamA.color.secondary} onDrop={(id) => placePlayer("A", idx, id)} onClickPlus={() => setQS({ side: "A", idx, role: pos.role })} tourTarget={idx === tourTargetIdx ? "empty-slot" : undefined} />);
+                        : (<EmptySlot key={`ae${idx}`} x={pos.x} y={pos.y} role={pos.role} teamColor={teamA.color.secondary} onDrop={(id) => placePlayer("A", idx, id)} onClickPlus={() => handleEmptySlotTap("A", idx, pos.role)} tourTarget={idx === tourTargetIdx ? "empty-slot" : undefined} />);
                     });
                   })()}
 
@@ -2563,7 +3060,7 @@ const handleShareLineup = async () => {
                         : (<EmptySlot key={`be${idx}`} x={pos.x} y={pos.y} role={pos.role}
                             teamColor={teamB.color.secondary}
                             onDrop={(id) => placePlayer("B", idx, id)}
-                            onClickPlus={() => setQS({ side: "B", idx, role: pos.role })} />);
+                            onClickPlus={() => handleEmptySlotTap("B", idx, pos.role)} />);
                     });
                   })()}
 
@@ -2586,10 +3083,24 @@ const handleShareLineup = async () => {
           </div>
         ) : (
           /* PLAYERS TAB */
-          <div style={{ animation: "fadeIn 0.25s", padding: "11px 13px" }}>
+          <div key="players" style={{ animation: "tabContentIn 0.32s cubic-bezier(.22,.85,.32,1) both", padding: "11px 13px" }}>
             <div style={{ display: "flex", gap: 7, marginBottom: 11 }}>
               <input style={{ ...S.input, flex: 1 }} placeholder={t("search_player")} value={search} onChange={(e) => setSearch(e.target.value)} />
-              <button data-tour="btn-add-player" onClick={() => { setEP(null); setSP(true); }} style={{ ...S.btn, width: "auto", padding: "10px 13px", borderRadius: 8, background: `linear-gradient(135deg,${team.color.primary},${team.color.secondary})` }}><I.Plus /></button>
+              <button
+                data-tour="btn-add-player"
+                onClick={() => { setEP(null); setSP(true); }}
+                style={{
+                  ...S.btn,
+                  width: "auto",
+                  padding: "10px 13px",
+                  borderRadius: 8,
+                  background: `linear-gradient(135deg,${team.color.primary},${team.color.secondary})`,
+                  // ★ Redirect sonrası kullanıcı bu butona bakacak — kısa pulse animasyonu
+                  ...(highlightAddBtn ? {
+                    animation: "ctaPulse 1.0s ease-in-out 0s 2 both",
+                  } : {}),
+                }}
+              ><I.Plus /></button>
             </div>
             <button onClick={async () => { showInterstitial(); setSC(true); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: "rgba(251,191,36,0.06)", borderRadius: 10, marginBottom: 10, border: "1px solid rgba(251,191,36,0.15)", cursor: "pointer", width: "100%" }}>
               <div style={{ fontSize: 16 }}>👑</div>
@@ -2599,7 +3110,11 @@ const handleShareLineup = async () => {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 9 }}><span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontWeight: 600 }}>{t("players_count", {n: filtered.length})}</span><span style={{ fontSize: 10, color: "rgba(255,255,255,0.22)" }}>{t("on_field", {n: onFieldIds.size})}</span></div>
             <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
               {filtered.map((p) => (<PlayerCard key={p.id} player={p} isOnField={onFieldIds.has(p.id)} teamColor={tc} isCaptain={team.captain === p.id} onToggleCaptain={(id) => toggleCaptain(activeTeam, id)} onEdit={(pl) => { setEP(pl); setSP(true); }} onDelete={deletePlayer} onShowStats={(pl) => { setHistoryPlayer(pl); setMode("history"); }} onTransfer={isMatch ? (pl) => setTransferRequest({ player: pl, fromSide: activeTeam }) : undefined} formDelta={formDeltaMap[p.id]} />))}
-              {filtered.length === 0 && (<div style={{ textAlign: "center", padding: 38, color: "rgba(255,255,255,0.18)" }}><div style={{ fontSize: 30, marginBottom: 7 }}>⚽</div><div style={{ fontSize: 13, marginBottom: 11 }}>{t("no_player_found")}</div><button onClick={() => { setSearch(""); setEP(null); setSP(true); }} style={{ ...S.btn, width: "auto", padding: "7px 18px", fontSize: 12, display: "inline-flex", background: `linear-gradient(135deg,${team.color.primary},${team.color.secondary})` }}><I.Plus /> {t("add_player")}</button></div>)}
+              {filtered.length === 0 && (<div style={{ textAlign: "center", padding: 38, color: "rgba(255,255,255,0.18)" }}><div style={{ fontSize: 30, marginBottom: 7 }}>⚽</div><div style={{ fontSize: 13, marginBottom: 11 }}>{t("no_player_found")}</div><button onClick={() => { setSearch(""); setEP(null); setSP(true); }} style={{
+                ...S.btn, width: "auto", padding: "9px 22px", fontSize: 13, display: "inline-flex",
+                background: `linear-gradient(135deg,${team.color.primary},${team.color.secondary})`,
+                ...(highlightAddBtn ? { animation: "ctaPulse 1.0s ease-in-out 0s 2 both" } : {}),
+              }}><I.Plus /> {t("add_player")}</button></div>)}
             </div>
             <div style={{ marginTop: 14 }}><TeamStatsCard team={team} accent={tc} /></div>
           </div>
@@ -2745,6 +3260,7 @@ const handleShareLineup = async () => {
         onReplayOnboarding={() => { window.dispatchEvent(new CustomEvent("halisaha:replay-onboarding")); }}
         onReplayTour={() => { resetTour(); setMode(null); setTimeout(() => window.dispatchEvent(new CustomEvent("halisaha:start-tour")), 300); }}
         onOpenTeamSettings={() => setSS(activeTeam)}
+        onOpenPlan={() => { window.dispatchEvent(new CustomEvent("hk:open-paywall", { detail: { feature: "manage" } })); }}
         hapticsOn={hapticsOn}
         onToggleHaptics={(v) => { setHapticsEnabled(v); setHapticsOnState(v); }}
         lang={lang}
