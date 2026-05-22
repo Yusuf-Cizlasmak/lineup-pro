@@ -1743,13 +1743,35 @@ const CaptainSelector = ({ team, onSelect, accent }) => {
 };
 
 // ─── TEAM STATS CARD ───
-const TeamStatsCard = ({ team, accent }) => {
+const TeamStatsCard = ({ team, accent, onClick }) => {
   const avgRating = team.players.length ? Math.round(team.players.reduce((a, p) => a + p.rating, 0) / team.players.length) : 0;
   const onField = team.fieldPlayers.filter(Boolean).length;
   const topPlayer = [...team.players].sort((a, b) => b.rating - a.rating)[0];
   return (
-    <div style={{ background: "rgba(255,255,255,0.03)", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}><I.Stats /><span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>{t("team_stats")}</span></div>
+    <div
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      style={{
+        background: "rgba(255,255,255,0.03)", borderRadius: 12,
+        border: `1px solid ${onClick ? "rgba(52,211,153,0.18)" : "rgba(255,255,255,0.06)"}`,
+        padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10,
+        cursor: onClick ? "pointer" : "default",
+        WebkitTapHighlightColor: "transparent",
+        transition: "border-color 0.18s, background 0.18s",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <I.Stats />
+          <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>{t("team_stats")}</span>
+        </div>
+        {onClick && (
+          <span style={{ fontSize: 11, color: "rgba(52,211,153,0.55)", fontWeight: 700 }}>
+            Geçmişe bak ›
+          </span>
+        )}
+      </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
         {[{ label: t("stat_squad"), value: team.players.length, icon: "👥" }, { label: t("stat_field"), value: `${onField}/7`, icon: "⚽" }, { label: t("stat_avg"), value: avgRating, icon: "⭐" }].map((s) => (
           <div key={s.label} style={{ background: "rgba(255,255,255,0.03)", borderRadius: 8, padding: "8px 6px", textAlign: "center" }}>
@@ -3116,7 +3138,13 @@ const handleShareLineup = async () => {
                 ...(highlightAddBtn ? { animation: "ctaPulse 1.0s ease-in-out 0s 2 both" } : {}),
               }}><I.Plus /> {t("add_player")}</button></div>)}
             </div>
-            <div style={{ marginTop: 14 }}><TeamStatsCard team={team} accent={tc} /></div>
+            <div style={{ marginTop: 14 }}>
+              <TeamStatsCard
+                team={team}
+                accent={tc}
+                onClick={() => { hapticLight(); setMode("history"); }}
+              />
+            </div>
           </div>
         )}
       </div>

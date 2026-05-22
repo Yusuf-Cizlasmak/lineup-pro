@@ -30,6 +30,11 @@ import {
   setMVP, togglePlayerReady,
 } from './LiveMatchService';
 import { hapticMedium, hapticHeavy, hapticSuccess, hapticLight, hapticSelection } from './haptics';
+import {
+  canCreateOnlineMatch, canJoinOnlineMatch,
+  incrementOnlineMatchCount, incrementOnlineJoinCount,
+  isPremium, openPaywall,
+} from './subscription';
 import SpiderChart from './SpiderChart';
 import {
   getAttrKeys, generateDefaultAttributes, computeOverallFromAttributes,
@@ -74,17 +79,50 @@ const lmCSS = `
 .lm-selecting        { animation:lmPulse 1.2s infinite; }
 input::placeholder   { color:#475569; }
 
-/* Profesyonel scroll davranışı — momentum + smooth + temiz scrollbar */
+/* ── Profesyonel scroll — iOS momentum + GPU compositing ── */
 .lm-scroll {
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
-  touch-action: pan-y;
-  overscroll-behavior: contain;
+  touch-action: pan-y pinch-zoom;
+  overscroll-behavior-y: contain;
+  overscroll-behavior-x: none;
   scroll-behavior: smooth;
+  -webkit-transform: translate3d(0, 0, 0);
+  transform: translate3d(0, 0, 0);
 }
-.lm-scroll::-webkit-scrollbar { width: 0; }   /* mobile: scrollbar gizli */
-.lm-scroll { scrollbar-width: none; }         /* Firefox */
+/* Scrollbar tamamen gizle — tüm tarayıcılar */
+.lm-scroll::-webkit-scrollbar { display: none; width: 0; height: 0; }
+.lm-scroll { scrollbar-width: none; -ms-overflow-style: none; }
+
+/* Kart giriş animasyonu */
+@keyframes lmCardIn {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to   { opacity: 1; transform: translateY(0)    scale(1); }
+}
+.lm-card-anim { animation: lmCardIn 0.26s cubic-bezier(.22,.85,.32,1) both; }
+
+/* Scroll progress bar — üstte ince yeşil şerit */
+.lm-scroll-progress {
+  position: sticky;
+  top: 0; left: 0;
+  height: 2px;
+  background: linear-gradient(90deg, #34d399, #60a5fa);
+  transform-origin: left center;
+  z-index: 999;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  border-radius: 0 1px 1px 0;
+}
+.lm-scroll-progress.visible { opacity: 1; }
+
+/* Hazır rozeti pulse */
+@keyframes lmReadyPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(52,211,153,0.7); }
+  50%       { box-shadow: 0 0 0 7px rgba(52,211,153,0); }
+}
+.lm-ready-ring { animation: lmReadyPulse 1.5s ease-out 3; }
 
 .lm-screen { animation: lmScreenIn 0.28s cubic-bezier(.2,.85,.3,1) both; }
 .lm-back-btn {
@@ -491,6 +529,20 @@ const FieldAvatar = ({
             ⚽{goalCount}
           </div>
         )}
+
+        {/* Hazır rozeti — lobby'de yeşil ✓ */}
+        {player.is_ready && !goalCount && (
+          <div style={{
+            position: 'absolute', bottom: -4, right: -4,
+            width: 16, height: 16, borderRadius: '50%',
+            background: '#34d399',
+            border: '2px solid #070a0f',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 8, fontWeight: 900, color: '#000',
+            zIndex: 5,
+            boxShadow: '0 0 6px rgba(52,211,153,0.6)',
+          }} title="Hazır">✓</div>
+        )}
       </div>
 
       {/* Name plate */}
@@ -790,6 +842,12 @@ export default function LiveMatch() {
   const screenRef = useRef(screen);
   const fieldRef = useRef(null);
   const historySavedRef = useRef(false);
+  // Hazır bildirim için: önceki ready set'i + bildirim izni
+  const prevReadyRef = useRef(new Set());
+  const notifPermRef = useRef(false);
+  // Scroll progress bar için
+  const scrollRef = useRef(null);
+  const progressRef = useRef(null);
   useEffect(() => { screenRef.current = screen; }, [screen]);
 
   // ─── Yardımcılar ───
@@ -857,6 +915,28 @@ export default function LiveMatch() {
   }, []);
   useEffect(() => { loadMySessions(); }, [loadMySessions]);
 
+  // ─── Deep link auto-join: ?join=KOD URL param veya custom event ───
+  useEffect(() => {
+    if (!nicknameSet) return;
+    try {
+      const url = new URL(window.location.href);
+      const code = url.searchParams.get('join');
+      if (code && screen === 'home') {
+        setJoinCode(code.toUpperCase().trim());
+        setScreen('join');
+        url.searchParams.delete('join');
+        window.history.replaceState({}, '', url.toString());
+      }
+    } catch {}
+    const onCode = (e) => {
+      const code = e.detail?.code;
+      if (code) { setJoinCode(code.toUpperCase().trim()); setScreen('join'); }
+    };
+    window.addEventListener('halisaha:join-code', onCode);
+    return () => window.removeEventListener('halisaha:join-code', onCode);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nicknameSet]);
+
   // ─── Connect & realtime ───
   const connectToSession = useCallback(async (sess) => {
     setSession(sess);
@@ -877,6 +957,28 @@ export default function LiveMatch() {
         setEvents(e);
         setRatings(r);
         setConnStatus('live');
+
+        // ─── Admin/Co-admin: yeni hazır olan oyuncuları yakala, bildir ───
+        if (isAdmin(s) || isCoAdmin(s)) {
+          const nowReady = new Set(p.filter(pp => pp.is_ready).map(pp => pp.device_id));
+          p.forEach(pp => {
+            if (pp.is_ready && !prevReadyRef.current.has(pp.device_id) && pp.device_id !== deviceId) {
+              setToast(`✅ ${pp.nickname} hazır!`);
+              setTimeout(() => setToast(''), 3500);
+              try { hapticSuccess(); } catch {}
+              try {
+                if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+                  new Notification('⚽ Oyuncu Hazır', {
+                    body: `${pp.nickname} maça hazır olduğunu bildirdi!`,
+                    icon: '/icon-192.png',
+                    tag: `lm-ready-${pp.device_id}`,
+                  });
+                }
+              } catch {}
+            }
+          });
+          prevReadyRef.current = nowReady;
+        }
 
         const cur = screenRef.current;
         if (s.status === 'active' && (cur === 'lobby' || cur === 'home')) setScreen('match');
@@ -927,12 +1029,28 @@ export default function LiveMatch() {
 
   const handleCreate = async () => {
     if (!fieldName.trim()) { setError('Saha adı gir.'); return; }
+
+    // ★ FREE TIER QUOTA: kullanıcının oda kurma hakkı kaldı mı?
+    if (!isPremium()) {
+      const quota = canCreateOnlineMatch();
+      if (!quota.allowed) {
+        setError(`Free üyelikte ${quota.limit} oda kurma hakkın var. Pro'ya geç, sınırsız oyna.`);
+        // Kısa bir gecikme ile paywall'ı aç — kullanıcı errored UI'ı görsün
+        setTimeout(() => openPaywall('unlimited_online'), 600);
+        return;
+      }
+    }
+
     setLoading(true); setError('');
     try {
       const sess = await createSession({
         fieldName, location, teamAName, teamBName,
         teamAColor, teamBColor, durationMinutes: duration,
       });
+      // ★ Free user sayacını artır (Premium kullanıcılar etkilenmez — yine de say, sorun değil)
+      if (!isPremium()) {
+        incrementOnlineMatchCount();
+      }
       await connectToSession(sess);
       hapticSuccess();
     } catch (e) { setError(e.message); }
@@ -941,9 +1059,24 @@ export default function LiveMatch() {
 
   const handleJoin = async () => {
     if (!joinCode.trim()) { setError('Kodu gir.'); return; }
+
+    // ★ FREE TIER QUOTA: maça katılma hakkı kaldı mı?
+    if (!isPremium()) {
+      const quota = canJoinOnlineMatch();
+      if (!quota.allowed) {
+        setError(`Free üyelikte ${quota.limit} maça katılma hakkın var. Pro'ya geç, sınırsız oyna.`);
+        setTimeout(() => openPaywall('unlimited_online'), 600);
+        return;
+      }
+    }
+
     setLoading(true); setError('');
     try {
       const sess = await joinSessionByCode(joinCode);
+      // ★ Free user katılma sayacını artır
+      if (!isPremium()) {
+        incrementOnlineJoinCount();
+      }
       await connectToSession(sess);
       hapticMedium();
     } catch (e) { setError(e.message); }
@@ -1189,9 +1322,23 @@ export default function LiveMatch() {
 
   const handleToggleReady = async () => {
     if (!session || !me) return;
+    const newReady = !me.is_ready;
     try {
-      await togglePlayerReady(session.id, !me.is_ready);
-      hapticLight();
+      await togglePlayerReady(session.id, newReady);
+      if (newReady) {
+        hapticSuccess();
+        showToast('✅ Hazır olduğun işaretlendi!');
+        // Bildirim izni iste — admin alabilsin
+        if (!notifPermRef.current && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+          try {
+            const perm = await Notification.requestPermission();
+            notifPermRef.current = perm === 'granted';
+          } catch {}
+        }
+      } else {
+        hapticLight();
+        showToast('🔄 Hazır işareti kaldırıldı');
+      }
     } catch (e) {}
   };
 
@@ -1248,12 +1395,26 @@ export default function LiveMatch() {
   const handleShareInvite = async () => {
     if (!session) return;
     const code = session.join_code;
-    const text = `⚽ Halı Saha maçıma katıl!\n\nKod: ${code}\n\nUygulamayı aç → "Online Halı Saha" → "Maça Katıl" → kodu yapıştır.`;
+    // Deep link — uygulama açıksa direkt odaya girer, değilse tarayıcıdan açar
+    const base = window.location.origin + (window.location.pathname.replace(/\/[^/]*$/, '') || '');
+    const deepLink = `${base}?join=${code}`;
+    const fieldInfo = session.field_name ? `📍 ${session.field_name}\n` : '';
+    const shareText = `⚽ Halı Saha maçıma katıl!\n\n${fieldInfo}🔑 Kod: ${code}\n\n👇 Tek tıkla katıl:\n${deepLink}`;
     if (navigator.share) {
-      try { await navigator.share({ title: 'Halı Saha Maçı', text }); } catch {}
+      try {
+        await navigator.share({
+          title: `${session.team_a_name} vs ${session.team_b_name}`,
+          text: shareText,
+          url: deepLink,
+        });
+      } catch (e) {
+        if (!/cancel/i.test(e?.message || '')) {
+          try { await navigator.clipboard?.writeText(deepLink); showToast('🔗 Link kopyalandı'); } catch {}
+        }
+      }
     } else if (navigator.clipboard) {
-      navigator.clipboard.writeText(text);
-      showToast('📋 Davet metni kopyalandı');
+      await navigator.clipboard.writeText(shareText);
+      showToast('📋 Davet bağlantısı kopyalandı');
     }
   };
 
@@ -1290,6 +1451,18 @@ export default function LiveMatch() {
     }
   };
 
+  // ─── Scroll progress ───
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    const bar = progressRef.current;
+    if (!el || !bar) return;
+    const max = el.scrollHeight - el.clientHeight;
+    if (max <= 0) { bar.classList.remove('visible'); return; }
+    const ratio = Math.min(1, el.scrollTop / max);
+    bar.style.transform = `scaleX(${ratio})`;
+    bar.classList.toggle('visible', el.scrollTop > 30);
+  }, []);
+
   // ═══════════════════════════════════════════════════════════
   // RENDER WRAPPER
   // ═══════════════════════════════════════════════════════════
@@ -1297,6 +1470,8 @@ export default function LiveMatch() {
     <>
       <style>{lmCSS}</style>
       <div
+        ref={scrollRef}
+        onScroll={handleScroll}
         className="lm-scroll"
         style={{
           // Parent (HaliSahaKolik online div'i) position:relative + overflow:hidden;
@@ -1314,6 +1489,12 @@ export default function LiveMatch() {
           contain: 'layout paint',
         }}
       >
+        {/* Scroll progress bar — üstte ince yeşil şerit */}
+        <div
+          ref={progressRef}
+          className="lm-scroll-progress"
+          style={{ transform: 'scaleX(0)' }}
+        />
         <div className="lm-screen" style={{ minHeight: '100%' }}>
           {children}
         </div>
@@ -1328,6 +1509,8 @@ export default function LiveMatch() {
             zIndex: 9999, boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
             backdropFilter: 'blur(8px)',
             animation: 'lmFadeUp 0.3s ease-out',
+            whiteSpace: 'nowrap', maxWidth: 'calc(100vw - 32px)',
+            textAlign: 'center',
           }}>{toast}</div>
         )}
       </div>
@@ -2042,20 +2225,47 @@ export default function LiveMatch() {
         {/* ═══ HAZIR TOGGLE (lobby, oyuncu) ═══ */}
         {isLobby && me && (
           <div style={{ padding: '12px 16px 0' }}>
-            <button onClick={handleToggleReady} style={{
-              width: '100%',
-              padding: '12px',
-              borderRadius: 10,
-              border: `1px solid ${me.is_ready ? C.accent : 'rgba(255,255,255,0.12)'}`,
-              background: me.is_ready ? `${C.accent}1a` : 'rgba(255,255,255,0.04)',
-              color: me.is_ready ? C.accent : C.text,
-              fontSize: 14, fontWeight: 800,
-              cursor: 'pointer',
-              fontFamily: "'DM Sans',sans-serif",
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-            }}>
-              {me.is_ready ? '✓ Hazırım' : '✋ Hazır olduğumu işaretle'}
+            <button
+              onClick={handleToggleReady}
+              className={me.is_ready ? 'lm-ready-ring' : ''}
+              style={{
+                width: '100%',
+                padding: '14px 16px',
+                borderRadius: 12,
+                border: `1.5px solid ${me.is_ready ? C.accent : 'rgba(255,255,255,0.12)'}`,
+                background: me.is_ready
+                  ? `linear-gradient(135deg, ${C.accent}22, ${C.accent}0a)`
+                  : 'rgba(255,255,255,0.04)',
+                color: me.is_ready ? C.accent : C.text,
+                fontSize: 15, fontWeight: 800,
+                cursor: 'pointer',
+                fontFamily: "'DM Sans',sans-serif",
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+                transition: 'all 0.22s cubic-bezier(.22,.85,.32,1)',
+                boxShadow: me.is_ready ? `0 4px 20px ${C.accent}30` : 'none',
+                letterSpacing: 0.2,
+              }}
+            >
+              <span style={{
+                width: 24, height: 24, borderRadius: '50%',
+                background: me.is_ready ? C.accent : 'rgba(255,255,255,0.08)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 13, color: me.is_ready ? '#000' : 'rgba(255,255,255,0.35)',
+                fontWeight: 900, transition: 'all 0.2s', flexShrink: 0,
+              }}>{me.is_ready ? '✓' : '?'}</span>
+              <span>{me.is_ready ? 'Hazırım — maç başlasın! 🚀' : 'Hazır olduğumu işaretle'}</span>
             </button>
+            {readyCount > 0 && (
+              <p style={{
+                marginTop: 6, textAlign: 'center',
+                fontSize: 11.5, fontWeight: 700,
+                color: readyCount === players.length && players.length > 1 ? C.accent : C.muted,
+                animation: 'lmFadeUp 0.3s ease-out',
+              }}>
+                {readyCount} / {players.length} hazır
+                {readyCount === players.length && players.length > 1 && ' 🎉 Herkes hazır!'}
+              </p>
+            )}
           </div>
         )}
 

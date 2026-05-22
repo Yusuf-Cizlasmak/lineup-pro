@@ -289,7 +289,20 @@ export default function ModeSelectScreen({ onSelectMode, onOpenSettings }) {
 
           {/* ═══ STAT BLOCK — editorial cluster ═══ */}
           {stats && stats.matches > 0 && (
-            <div style={S.statBlock}>
+            <button
+              onClick={() => { hapticLight(); onSelectMode?.("history"); }}
+              style={{
+                ...S.statBlock,
+                cursor: "pointer",
+                border: "none",
+                background: "transparent",
+                padding: 0,
+                width: "100%",
+                WebkitTapHighlightColor: "transparent",
+                position: "relative",
+              }}
+              title="Geçmiş maçları gör"
+            >
               <StatCell label="MAÇ"       value={stats.matches} />
               <span style={S.statDivider} />
               <StatCell label="GOL"       value={stats.goals}   accent={C.primary} />
@@ -297,7 +310,13 @@ export default function ModeSelectScreen({ onSelectMode, onOpenSettings }) {
               <StatCell label="ASİST"     value={stats.assists} accent={C.blue} />
               <span style={S.statDivider} />
               <StatCell label="GALİBİYET" value={stats.wins}    accent={C.gold} />
-            </div>
+              <span style={{
+                position: "absolute", right: 0, top: "50%",
+                transform: "translateY(-50%)",
+                fontSize: 16, color: C.inkFaint, pointerEvents: "none",
+                lineHeight: 1,
+              }}>›</span>
+            </button>
           )}
 
         </section>

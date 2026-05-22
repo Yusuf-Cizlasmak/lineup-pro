@@ -135,6 +135,46 @@ function PaywallScreen({ open, feature, onClose }) {
         });
         return;
       }
+      // ★ Yapılandırma eksik (API key yok vb.)
+      if (err.code === "NOT_CONFIGURED") {
+        hapticMedium();
+        setError({
+          title: "Satın alma şu an kullanılamıyor",
+          message: "Uygulama bakımda. Lütfen daha sonra tekrar deneyin.",
+          retry: null,
+        });
+        return;
+      }
+      // ★ Mağaza bağlantısı yok / init başarısız
+      if (err.code === "NOT_READY") {
+        hapticMedium();
+        setError({
+          title: "Mağaza bağlantısı yok",
+          message: err.message || "İnternet bağlantını kontrol et ve tekrar dene.",
+          retry: () => handlePurchase(planId),
+        });
+        return;
+      }
+      // ★ RevenueCat dashboard'da Current Offering yok
+      if (err.code === "NO_OFFERINGS") {
+        hapticMedium();
+        setError({
+          title: "Ürünler yüklenemedi",
+          message: err.message || "Birkaç dakika sonra tekrar dene.",
+          retry: () => handlePurchase(planId),
+        });
+        return;
+      }
+      // ★ Paket dashboard'da yok / yanlış yapılandırma
+      if (err.code === "INVALID_PACKAGE") {
+        hapticMedium();
+        setError({
+          title: "Bu paket şu an mevcut değil",
+          message: err.message || "Lütfen daha sonra tekrar dene.",
+          retry: null,
+        });
+        return;
+      }
       // Gerçek hata: kullanıcıya açıkça göster + tekrar dene
       hapticMedium();
       setError({
@@ -169,6 +209,42 @@ function PaywallScreen({ open, feature, onClose }) {
         setError({
           title: "Deneme sadece mobil cihazda",
           message: "7 günlük ücretsiz denemeyi başlatmak için uygulamayı App Store veya Google Play'den indirin.",
+          retry: null,
+        });
+        return;
+      }
+      if (err.code === "NOT_CONFIGURED") {
+        hapticMedium();
+        setError({
+          title: "Deneme şu an kullanılamıyor",
+          message: "Uygulama bakımda. Lütfen daha sonra tekrar deneyin.",
+          retry: null,
+        });
+        return;
+      }
+      if (err.code === "NOT_READY") {
+        hapticMedium();
+        setError({
+          title: "Mağaza bağlantısı yok",
+          message: err.message || "İnternet bağlantını kontrol et ve tekrar dene.",
+          retry: () => handleStartTrial(),
+        });
+        return;
+      }
+      if (err.code === "NO_OFFERINGS") {
+        hapticMedium();
+        setError({
+          title: "Ürünler yüklenemedi",
+          message: err.message || "Birkaç dakika sonra tekrar dene.",
+          retry: () => handleStartTrial(),
+        });
+        return;
+      }
+      if (err.code === "INVALID_PACKAGE") {
+        hapticMedium();
+        setError({
+          title: "Bu paket şu an mevcut değil",
+          message: err.message || "Lütfen daha sonra tekrar dene.",
           retry: null,
         });
         return;

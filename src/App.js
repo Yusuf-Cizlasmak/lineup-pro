@@ -7,10 +7,16 @@ import Tour from "./Tour";
 import { PaywallProvider } from "./PaywallScreen";
 import { iap } from "./iap";
 
-// ─── ADMOB DEBUG PANEL ───────────────────────────────────────
-// Geçici: Mac olmadan iOS'ta AdMob loglarını ekranda görmek için.
-// Test bittikten sonra ADMOB_DEBUG = false yap veya tüm bloğu sil.
-const ADMOB_DEBUG = false;
+// ─── ADMOB / IAP DEBUG PANEL ─────────────────────────────────
+// Default KAPALI — production'da görünmesin.
+// Geliştirici test ederken açmak için:
+//   Chrome DevTools console'da:  localStorage.setItem('hk_debug', '1')
+// Sonra app'i tekrar başlat, panel açılır. Kapatmak için:
+//   localStorage.removeItem('hk_debug')
+const ADMOB_DEBUG = (() => {
+  try { return localStorage.getItem('hk_debug') === '1'; }
+  catch { return false; }
+})();
 
 function AdMobDebugPanel() {
   const [logs, setLogs] = useState([]);
@@ -32,7 +38,7 @@ function AdMobDebugPanel() {
     console.log = (...args) => {
       origLog(...args);
       const s = args.join(" ");
-      if (/(admob|gad|banner|interstitial|rewarded|consent|att|tracking|canshow|npa|initialized|platform)/i.test(s)) {
+      if (/(admob|gad|banner|interstitial|rewarded|consent|att|tracking|canshow|npa|initialized|platform|iap|revenuecat|offerings|paket|purchase|entitlement|customerinfo)/i.test(s)) {
         add("ℹ️", s);
       }
     };
@@ -115,6 +121,28 @@ export default function App() {
     //   Native değilse (web) no-op. PaywallScreen iap.js'i çağrır.
     iap.init();
 
+    // ─── Deep link — ?join=KOD URL param ───
+    // Paylaşılan bağlantıya tıklanınca uygulama direkt odaya yönlendirir
+    try {
+      const url = new URL(window.location.href);
+      const joinCode = url.searchParams.get('join');
+      if (joinCode?.trim()) {
+        const dispatch = () => window.dispatchEvent(
+          new CustomEvent('halisaha:join-code', { detail: { code: joinCode.trim().toUpperCase() } })
+        );
+        if (onboarded) {
+          // Uygulama yüklendikten biraz sonra gönder (LiveMatch mount edilsin)
+          setTimeout(dispatch, 1200);
+        } else {
+          // Onboarding bitince gönder
+          window.addEventListener('halisaha:onboarded', dispatch, { once: true });
+        }
+        // URL'yi temizle — tekrar tetiklenmesin
+        url.searchParams.delete('join');
+        window.history.replaceState({}, '', url.toString());
+      }
+    } catch {}
+
     let count = parseInt(localStorage.getItem(LAUNCH_COUNT_KEY) || "0", 10) || 0;
     count += 1;
     localStorage.setItem(LAUNCH_COUNT_KEY, String(count));
@@ -148,6 +176,8 @@ export default function App() {
   const finishOnboarding = () => {
     localStorage.setItem(ONBOARDING_KEY, "1");
     setShowOnboarding(false);
+    // Deep link bekleyen event varsa tetikle
+    window.dispatchEvent(new CustomEvent("halisaha:onboarded"));
   };
 
   return (

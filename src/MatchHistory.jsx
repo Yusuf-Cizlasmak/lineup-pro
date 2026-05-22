@@ -10,6 +10,7 @@ import {
   getAllMatches, deleteMatch,
   computeLeaderboards, summarizeMatch,
 } from "./matchHistoryStore";
+import { useSubscription, FREE_LIMITS } from "./subscription";
 import ShareCard from "./ShareCard";
 
 // ─── Tarih formatla — detaylı ───
@@ -400,16 +401,28 @@ const LeaderRow = ({ index, info, primaryStat, secondaryStat, primaryLabel, acce
 // ─── MAIN ───
 export default function MatchHistoryView({ teamA, teamB, onBack, onOpenPlayerStats }) {
   const [tab, setTab] = useState("overview");
-  const [matches, setMatches] = useState(() => getAllMatches());
+  const { isPremium, openPaywall } = useSubscription();
+  // ★ Tüm maçları her zaman okuyalım — hem hidden count'ı bilelim hem free limit'i uygulayalım
+  const [allMatches, setAllMatches] = useState(() => getAllMatches());
   const [selectedMatch, setSelectedMatch] = useState(null);
   const [filter, setFilter] = useState("all"); // all | wins | losses | draws | thisWeek | thisMonth
   const [showSeasonShare, setShowSeasonShare] = useState(false);
 
   useEffect(() => {
-    const refresh = () => setMatches(getAllMatches());
+    const refresh = () => setAllMatches(getAllMatches());
     window.addEventListener("halisaha:history-updated", refresh);
     return () => window.removeEventListener("halisaha:history-updated", refresh);
   }, []);
+
+  // ★ FREE TIER: sadece son N maç görünür (getAllMatches en yeni → en eski sıralı geliyor)
+  // Premium ise tüm geçmiş, free ise FREE_LIMITS.HISTORY_LIMIT kadarı
+  const matches = useMemo(() => {
+    if (isPremium) return allMatches;
+    return allMatches.slice(0, FREE_LIMITS.HISTORY_LIMIT);
+  }, [allMatches, isPremium]);
+
+  // Free user için "gizlenen" maç sayısı — paywall upsell banner'da kullanılacak
+  const hiddenCount = isPremium ? 0 : Math.max(0, allMatches.length - FREE_LIMITS.HISTORY_LIMIT);
 
   const leaderboards = useMemo(() => computeLeaderboards(matches, [teamA, teamB]), [matches, teamA, teamB]);
 
@@ -656,6 +669,44 @@ export default function MatchHistoryView({ teamA, teamB, onBack, onOpenPlayerSta
                         }}
                       />
                     ))}
+
+                    {/* ★ FREE TIER — Gizlenen maç sayısını + upsell göster */}
+                    {hiddenCount > 0 && (
+                      <button
+                        onClick={() => { hapticLight(); openPaywall("unlimited_history"); }}
+                        style={{
+                          marginTop: 6,
+                          padding: "14px 16px",
+                          background: "linear-gradient(135deg, rgba(251,191,36,0.10), rgba(251,191,36,0.03))",
+                          border: "1px solid rgba(251,191,36,0.35)",
+                          borderRadius: 12,
+                          color: "#fbbf24",
+                          textAlign: "left",
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 12,
+                        }}
+                      >
+                        <div style={{
+                          width: 36, height: 36, borderRadius: 10,
+                          background: "linear-gradient(135deg, #fbbf24, #f59e0b)",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          fontSize: 18, flexShrink: 0,
+                          boxShadow: "0 6px 14px rgba(251,191,36,0.3)",
+                        }}>🔒</div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 800, color: "#fff", marginBottom: 2 }}>
+                            {hiddenCount} maç daha var
+                          </div>
+                          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)" }}>
+                            Free: son {FREE_LIMITS.HISTORY_LIMIT} maç · Pro ile sınırsız geçmiş
+                          </div>
+                        </div>
+                        <span style={{ fontSize: 18, color: "#fbbf24" }}>→</span>
+                      </button>
+                    )}
                   </div>
                 )}
               </>
