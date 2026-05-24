@@ -15,6 +15,7 @@ import { Capacitor } from "@capacitor/core";
 //   Chrome DevTools console'da:  localStorage.setItem('hk_debug', '1')
 // Sonra app'i tekrar başlat, panel açılır. Kapatmak için:
 //   localStorage.removeItem('hk_debug')
+
 const ADMOB_DEBUG = (() => {
   try { return localStorage.getItem('hk_debug') === '1'; }
   catch { return false; }

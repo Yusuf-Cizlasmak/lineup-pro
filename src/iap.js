@@ -1,95 +1,53 @@
 // ─────────────────────────────────────────────────────────────
-// HalıSaha-Kolik · IAP (DEBUG INSTRUMENTED VERSION)
+// HalıSaha-Kolik · IAP (Minimal)
 // ─────────────────────────────────────────────────────────────
-// Bu versiyon her adımı detaylı loglar. Chrome Inspect ile bağlanıp
-// console'dan şu komutları çalıştırabilirsin:
+// RevenueCat ile native abonelik yönetimi.
 //
-//   await window.hkIap.diagnose()         — Tam tanı raporu (BUNU ÇALIŞTIR)
-//   await window.hkIap.getOfferings()     — Raw offerings response
-//   await window.hkIap.getCustomerInfo()  — Raw customer info
-//   window.hkIap.state()                  — İç state dump
-//   await window.hkIap.purchase('pro_monthly')  — Manuel satın alma testi
-//   await window.hkIap.restore()          — Manuel restore
-//   window.hkIap.logs()                   — Son 100 log
+// ★ v2: "current" offering bağımlılığı kaldırıldı.
+//   RC dashboard'da "Make Current" işareti olmadan da çalışır —
+//   identifier "default" olan offering'i veya ilk offering'i alır.
+//   Paket bulma mantığı 4 stratejiyle agresifleştirildi.
 //
-// Public API (PaywallScreen aynı kalıyor):
+// Public API (PaywallScreen aynı kalır):
 //   iap.init() / iap.purchase() / iap.restore() / iap.getOfferings()
 //   iap.isReady() / iap.openSubscriptionManagement() / iap.logIn() / iap.logOut()
+//
+// Dev simulate (Apple/Google'a gitmeden test):
+//   localStorage.setItem("hk_dev_simulate", "1")
+//
+// Debug:
+//   window.hkIap.state()       — iç durum
+//   window.hkIap.offerings()   — ürünler
+//   window.hkIap.restore()     — manuel restore
 // ─────────────────────────────────────────────────────────────
 
 import { Capacitor } from "@capacitor/core";
-import {
-  Purchases,
-  PURCHASES_ERROR_CODE,
-  LOG_LEVEL,
-} from "@revenuecat/purchases-capacitor";
+import { Purchases, LOG_LEVEL } from "@revenuecat/purchases-capacitor";
 import { TIER, activateSubscription, markTrialUsed } from "./subscription";
 
-// ═══ RevenueCat API anahtarları ═══
-// iOS: "appl_" ile başlamalı, ~32 karakter
-// Android: "goog_" ile başlamalı, ~32 karakter
-// YANLIŞ FORMAT → init başarısız, log'da uyarı görürsün
+// ═══ Konfigürasyon ═══
 const REVENUECAT_API_KEY = {
   ios:     "appl_tlYOfFKQtBtuktDXQcPysCNZzgw",
   android: "goog_JrnXzixnvIUClDpspvYcQMyNear",
 };
 
-// ═══ Plan ↔ paket eşleştirmesi ═══
+// Plan ID → RevenueCat paket identifier eşleştirmesi
 const PACKAGE_MAP = {
-  pro_monthly: { tier: TIER.PRO, durationDays: 30,  rcIdentifier: "$rc_monthly" },
-  pro_yearly:  { tier: TIER.PRO, durationDays: 365, rcIdentifier: "$rc_annual"  },
-  trial_7d:    { tier: TIER.PRO, durationDays: 7,   rcIdentifier: "$rc_annual", isTrial: true },
+  pro_monthly: { rcId: "$rc_monthly", durationDays: 30,  productId: "pro_monthly" },
+  pro_yearly:  { rcId: "$rc_annual",  durationDays: 365, productId: "pro_yearly"  },
+  trial_7d:    { rcId: "$rc_annual",  durationDays: 7,   productId: "pro_yearly", isTrial: true },
 };
 
-// ═══ Internal state ═══
-const _state = {
+const state = {
   ready: false,
-  configured: false,
-  apiKeyValid: false,
-  platform: null,
-  offerings: null,
-  lastCustomerInfo: null,
+  offering: null,      // ★ Aktif offering (default veya ilk bulunan)
+  allOfferings: null,  // ★ Tüm offering'ler (fallback için)
   lastError: null,
-  initCallCount: 0,
-  purchaseCallCount: 0,
 };
 
-// ═══ Log buffer (window.hkIap.logs() ile erişilir) ═══
-const _logs = [];
-function L(level, label, data) {
-  const entry = {
-    t: new Date().toISOString().slice(11, 23),
-    level,
-    label,
-    data,
-  };
-  _logs.push(entry);
-  if (_logs.length > 200) _logs.shift();
-
-  const prefix = `[IAP ${entry.t}] ${label}`;
-  if (data !== undefined) {
-    if (level === "error") console.error(prefix, data);
-    else if (level === "warn") console.warn(prefix, data);
-    else console.log(prefix, data);
-  } else {
-    if (level === "error") console.error(prefix);
-    else if (level === "warn") console.warn(prefix);
-    else console.log(prefix);
-  }
-}
-
-// ═══ API key doğrulama ═══
-function _isValidApiKey(key) {
-  if (!key || typeof key !== "string") return { valid: false, reason: "boş veya string değil" };
-  if (key.includes("YOUR_")) return { valid: false, reason: "placeholder (YOUR_ içeriyor)" };
-  if (!key.startsWith("appl_") && !key.startsWith("goog_")) {
-    return { valid: false, reason: `prefix 'appl_' veya 'goog_' değil — '${key.slice(0, 6)}...' ile başlıyor` };
-  }
-  if (key.length < 30) {
-    return { valid: false, reason: `çok kısa (${key.length} karakter, minimum 30 olmalı)` };
-  }
-  return { valid: true, reason: null };
-}
+const log  = (...a) => console.log("[IAP]", ...a);
+const warn = (...a) => console.warn("[IAP]", ...a);
+const err  = (...a) => console.error("[IAP]", ...a);
 
 // ═══════════════════════════════════════════════════════════
 // PUBLIC API
@@ -97,301 +55,172 @@ function _isValidApiKey(key) {
 
 export const iap = {
   async init() {
-    _state.initCallCount++;
-    L("info", `init() çağrıldı (#${_state.initCallCount})`);
+    if (state.ready) return;
 
-    if (_state.ready) {
-      L("info", "Zaten hazır — init atlanıyor");
+    if (!Capacitor.isNativePlatform()) {
+      log("Web platform — IAP devre dışı (simulate mode kullanılabilir)");
       return;
     }
 
-    const isNative = Capacitor.isNativePlatform();
     const platform = Capacitor.getPlatform();
-    _state.platform = platform;
-    L("info", `Platform: ${platform} (isNative=${isNative})`);
+    const apiKey = REVENUECAT_API_KEY[platform];
 
-    if (!isNative) {
-      L("info", "Web platform — IAP devre dışı, simülasyon kullanılır");
+    if (!apiKey?.startsWith("appl_") && !apiKey?.startsWith("goog_")) {
+      err("Geçersiz API key:", platform, apiKey?.slice(0, 8));
+      state.lastError = "Invalid API key";
       return;
     }
 
     try {
-      const apiKey = REVENUECAT_API_KEY[platform];
-      const masked = apiKey ? `${apiKey.slice(0, 8)}...${apiKey.slice(-4)}` : "(boş)";
-      const validation = _isValidApiKey(apiKey);
-      _state.apiKeyValid = validation.valid;
-
-      L("info", `API key: ${masked} (uzunluk=${apiKey?.length || 0})`);
-
-      if (!validation.valid) {
-        L("error", `❌ API key GEÇERSİZ: ${validation.reason}`);
-        L("error", "→ iap.js'de REVENUECAT_API_KEY değerini doğru SDK key ile değiştir");
-        L("error", "→ RevenueCat Dashboard → Project Settings → API Keys → 'Public app-specific API key' kopyala");
-        _state.lastError = `API key invalid: ${validation.reason}`;
-        return;
-      }
-      L("info", "✓ API key formatı geçerli");
-
-      L("info", "Purchases.setLogLevel(WARN) çağrılıyor...");
-      await Purchases.setLogLevel({ level: LOG_LEVEL.WARN });
-
-      L("info", "Purchases.configure() çağrılıyor...");
+      // ★ Debug için VERBOSE — native console'da RC log'ları görünür
+      await Purchases.setLogLevel({ level: LOG_LEVEL.DEBUG });
       await Purchases.configure({ apiKey });
-      _state.configured = true;
-      L("info", "✓ Purchases.configure() başarılı");
 
-      L("info", "CustomerInfo listener ekleniyor...");
+      // CustomerInfo değişimlerini otomatik dinle — restore/refund/renewal hepsi buraya gelir
       await Purchases.addCustomerInfoUpdateListener((info) => {
-        L("info", "🔔 CustomerInfo listener tetiklendi");
-        _state.lastCustomerInfo = info;
-        _syncSubscriptionFromCustomerInfo(info);
+        syncFromCustomerInfo(info);
       });
 
-      L("info", "İlk getCustomerInfo() çağrılıyor...");
+      // İlk durum çek — eski abonelik varsa burada zaten gelir
       const { customerInfo } = await Purchases.getCustomerInfo();
-      _state.lastCustomerInfo = customerInfo;
-      L("info", `✓ CustomerInfo alındı`, {
-        originalAppUserId: customerInfo?.originalAppUserId,
-        managementURL: customerInfo?.managementURL ? "(var)" : "(yok)",
-        activeEntitlements: Object.keys(customerInfo?.entitlements?.active || {}),
-        allEntitlements: Object.keys(customerInfo?.entitlements?.all || {}),
-        activeSubscriptions: customerInfo?.activeSubscriptions || [],
-        nonSubscriptionTransactions: (customerInfo?.nonSubscriptionTransactions || []).length,
-      });
+      syncFromCustomerInfo(customerInfo);
 
-      _syncSubscriptionFromCustomerInfo(customerInfo);
-
-      _state.ready = true;
-      L("info", "✅ RevenueCat HAZIR");
-    } catch (err) {
-      _state.lastError = err?.message || String(err);
-      L("error", `❌ init başarısız: ${_state.lastError}`, err);
+      state.ready = true;
+      log("✓ Hazır", platform);
+    } catch (e) {
+      state.lastError = e?.message || String(e);
+      err("init başarısız:", state.lastError);
     }
   },
 
   isReady() {
-    return _state.ready;
+    return state.ready;
   },
 
+  // ★ Artık "current" değil — "default" identifier'ını arar, yoksa ilk offering'i alır
   async getOfferings() {
-    L("info", "getOfferings() çağrıldı");
-
-    if (!_state.ready) {
-      L("warn", "SDK hazır değil — getOfferings null döner");
-      return null;
-    }
-    if (_state.offerings) {
-      L("info", "Cache'den offerings dönülüyor");
-      return _state.offerings;
-    }
+    if (!state.ready) return null;
+    if (state.offering) return { offering: state.offering, all: state.allOfferings };
 
     try {
-      L("info", "Purchases.getOfferings() native çağrı yapılıyor...");
-      let result;
-      try {
-        result = await Purchases.getOfferings();
-      } catch (fetchErr) {
-        const msg = fetchErr?.message || String(fetchErr);
-        L("error", `❌ Purchases.getOfferings() exception fırlattı: ${msg}`, fetchErr);
-        L("error", "→ Olası sebepler: (1) Google Play subscription'lar Active değil " +
-                   "(2) Base Plan yok/Inactive (3) Pricing tanımsız (4) APK Play Store'dan değil");
-        const e = new Error("Ürün listesi alınamadı: " + msg);
-        e.code = "NO_OFFERINGS";
-        e.original = fetchErr;
-        throw e;
-      }
-
-      L("info", "Raw response:", {
+      const result = await Purchases.getOfferings();
+      log("getOfferings raw:", JSON.stringify({
         hasCurrent: !!result.current,
-        currentIdentifier: result.current?.identifier || null,
-        allKeys: result.all ? Object.keys(result.all) : [],
-      });
+        currentId: result.current?.identifier,
+        allKeys: Object.keys(result.all || {}),
+      }));
 
-      let { current, all } = result;
+      const all = result.all || {};
 
-      if (!current && all) {
-        const keys = Object.keys(all);
-        if (all.default) {
-          current = all.default;
-          L("warn", "current YOK — 'default' offering kullanılıyor (RC'de Make Current yap)");
-        } else if (keys.length > 0) {
-          current = all[keys[0]];
-          L("warn", `current YOK — ilk offering '${keys[0]}' kullanılıyor`);
-        }
+      // ★ Öncelik sırası:
+      // 1) result.all["default"] — RC'de offering identifier'ı "default" olduğu için
+      // 2) result.current — "Current" işareti varsa
+      // 3) İlk offering — yedek
+      const offering =
+        all.default
+        || result.current
+        || Object.values(all)[0]
+        || null;
+
+      if (!offering) {
+        warn("Hiç offering bulunamadı! all keys:", Object.keys(all));
+        state.lastError = "No offerings available";
+        return null;
       }
 
-      if (current) {
-        const pkgs = current.availablePackages || [];
-        L("info", `✓ Offering '${current.identifier}' — ${pkgs.length} paket bulundu`);
-        pkgs.forEach((p, idx) => {
-          L("info", `  Paket #${idx + 1}:`, {
-            identifier: p.identifier,
-            packageType: p.packageType,
-            productIdentifier: p.product?.identifier,
-            priceString: p.product?.priceString,
-            currencyCode: p.product?.currencyCode,
-          });
-        });
-        if (pkgs.length === 0) {
-          L("error", "❌ Offering var ama PAKET YOK — RC dashboard'da pakete ürün attach et");
-        }
-      } else {
-        L("error", "❌ Hiçbir offering yok — RC dashboard'da Offerings'i oluştur ve Current yap");
-      }
+      log("Offering seçildi:", offering.identifier, "paket sayısı:", offering.availablePackages?.length || 0);
 
-      _state.offerings = { current, all };
-      return _state.offerings;
-    } catch (err) {
-      if (err.code) throw err;
-      L("error", `getOfferings genel hata: ${err.message}`, err);
-      _state.lastError = err.message;
+      state.offering = offering;
+      state.allOfferings = all;
+      return { offering, all };
+    } catch (e) {
+      err("getOfferings:", e?.message);
+      state.lastError = e?.message;
       return null;
     }
   },
 
   async purchase(planId) {
-    _state.purchaseCallCount++;
-    L("info", `═══ purchase('${planId}') ÇAĞRILDI (#${_state.purchaseCallCount}) ═══`);
-
     const meta = PACKAGE_MAP[planId];
-    if (!meta) {
-      L("error", `Geçersiz planId: ${planId} — PACKAGE_MAP'te yok`);
-      const e = new Error("Geçersiz paket: " + planId);
-      e.code = "INVALID_PACKAGE";
-      throw e;
-    }
-    L("info", "Plan meta:", meta);
+    if (!meta) throw codedError("INVALID_PACKAGE", "Geçersiz paket: " + planId);
 
-    let devSim = false;
-    try { devSim = localStorage.getItem("hk_dev_simulate") === "1"; } catch {}
-    if (devSim) {
-      L("warn", "★ DEV SIMULATE aktif — fake purchase");
-      return _simulatePurchase(planId, meta);
-    }
+    // Dev mode — store'a gitmeden test
+    if (isDevSimulate()) return simulate(planId, meta);
 
     if (!Capacitor.isNativePlatform()) {
-      L("warn", "Native değil — WEB_NOT_SUPPORTED");
-      const err = new Error("Satın alma sadece App Store ve Google Play'de aktif.");
-      err.code = "WEB_NOT_SUPPORTED";
-      throw err;
+      throw codedError("WEB_NOT_SUPPORTED", "Satın alma sadece App Store ve Google Play'de aktif.");
     }
 
-    if (!_state.ready) {
-      L("warn", "_ready=false — init tekrar deneniyor...");
+    if (!state.ready) {
       await this.init();
-      if (!_state.ready) {
-        L("error", `init hâlâ başarısız: ${_state.lastError}`);
-        const err = new Error(_state.lastError || "Mağaza bağlantısı yok");
-        err.code = _state.apiKeyValid ? "NOT_READY" : "NOT_CONFIGURED";
-        throw err;
+      if (!state.ready) {
+        throw codedError("NOT_READY", state.lastError || "Mağaza bağlantısı kurulamadı");
       }
     }
 
     try {
-      L("info", "Offerings cache temizleniyor (fresh fetch için)");
-      _state.offerings = null;
-      const offerings = await this.getOfferings();
+      // ★ Fresh fetch — eski cache'i temizle
+      state.offering = null;
+      state.allOfferings = null;
+      const result = await this.getOfferings();
 
-      if (!offerings || !offerings.current) {
-        L("error", "Offerings veya current yok");
-        const e = new Error("Ürünler şu an yüklenemiyor. Lütfen birkaç dakika sonra tekrar deneyin.");
-        e.code = "NO_OFFERINGS";
-        throw e;
+      if (!result?.offering) {
+        throw codedError("NO_OFFERINGS", "Ürünler şu an yüklenemiyor. Birkaç dakika sonra tekrar dene.");
       }
 
-      const pkg = _findPackage(offerings, planId);
+      const pkg = findPackage(result.offering, planId, result.all);
       if (!pkg) {
-        const availableIds = (offerings.current.availablePackages || [])
-          .map((p) => p.identifier).join(", ") || "(boş)";
-        L("error", `Paket '${planId}' bulunamadı. Mevcut: ${availableIds}`);
-        const e = new Error(`Bu paket şu an mağazada bulunamıyor. (Mevcut: ${availableIds})`);
-        e.code = "INVALID_PACKAGE";
-        throw e;
+        // Debug için ne bulunduğunu da log'la
+        const available = (result.offering.availablePackages || []).map(p => ({
+          id: p.identifier,
+          type: p.packageType,
+          product: p.product?.identifier,
+        }));
+        err("Paket bulunamadı! planId:", planId, "mevcut:", JSON.stringify(available));
+        throw codedError("INVALID_PACKAGE", "Bu paket şu an mağazada bulunamıyor.");
       }
 
-      L("info", "✓ Paket seçildi:", {
-        identifier: pkg.identifier,
-        packageType: pkg.packageType,
-        productId: pkg.product?.identifier,
-        price: pkg.product?.priceString,
-      });
+      log("Paket seçildi:", pkg.identifier, "→", pkg.product?.identifier);
 
-      L("info", "═══ Purchases.purchasePackage() çağrılıyor — NATIVE PAYWALL açılacak ═══");
-      const result = await Purchases.purchasePackage({ aPackage: pkg });
-      L("info", "✓ purchasePackage başarılı dönüş aldı");
+      // Native paywall açılır
+      const purchaseResult = await Purchases.purchasePackage({ aPackage: pkg });
 
-      const ci = result.customerInfo;
-      _state.lastCustomerInfo = ci;
-      L("info", "Purchase sonrası CustomerInfo:", {
-        activeEntitlements: Object.keys(ci?.entitlements?.active || {}),
-        allEntitlements: Object.keys(ci?.entitlements?.all || {}),
-        activeSubscriptions: ci?.activeSubscriptions || [],
-        productIdentifier: result.productIdentifier,
-      });
-
-      const synced = _syncSubscriptionFromCustomerInfo(ci, { fallbackPlanId: planId });
-
+      // Entitlement geldiyse normal sync; gelmezse direct aktivasyon (kullanıcı para verdi)
+      const synced = syncFromCustomerInfo(purchaseResult.customerInfo, { fallbackPlanId: planId });
       if (!synced) {
-        L("warn", "Entitlement gelmedi ama purchase başarılı — DIRECT aktivasyon yapılıyor");
-        const expiresAt = Date.now() + (meta.durationDays || 365) * 86400000;
-        activateSubscription({
-          tier: TIER.PRO,
-          plan: planId,
-          expiresAt,
-        });
-        L("info", `✓ DIRECT activation: planId=${planId}, expiresAt=${new Date(expiresAt).toISOString()}`);
+        const expiresAt = Date.now() + meta.durationDays * 86400000;
+        activateSubscription({ tier: TIER.PRO, plan: planId, expiresAt });
+        warn("Entitlement gelmedi — direct aktivasyon yapıldı");
       }
 
+      if (meta.isTrial) markTrialUsed();
+
+      // 1.5 sn sonra RC'den yeniden çek — bazen webhook gecikiyor
       setTimeout(async () => {
         try {
-          L("info", "Post-purchase recheck — getCustomerInfo()");
           const { customerInfo } = await Purchases.getCustomerInfo();
-          _state.lastCustomerInfo = customerInfo;
-          L("info", "Recheck sonrası entitlements:", {
-            active: Object.keys(customerInfo?.entitlements?.active || {}),
-            all: Object.keys(customerInfo?.entitlements?.all || {}),
-          });
-          _syncSubscriptionFromCustomerInfo(customerInfo, { fallbackPlanId: planId });
-        } catch (e) {
-          L("warn", "Recheck başarısız", e?.message);
-        }
+          syncFromCustomerInfo(customerInfo, { fallbackPlanId: planId });
+        } catch {}
       }, 1500);
 
-      if (meta.isTrial) {
-        markTrialUsed();
-        L("info", "Trial mark edildi");
-      }
-
-      L("info", "═══ purchase() BAŞARI ═══");
       return { success: true };
-    } catch (err) {
-      const OWN_CODES = ["NO_OFFERINGS", "INVALID_PACKAGE", "NOT_READY", "NOT_CONFIGURED", "WEB_NOT_SUPPORTED", "USER_CANCELLED"];
-      if (err.code && OWN_CODES.includes(err.code)) {
-        L("warn", `purchase fırlattı: ${err.code} — ${err.message}`);
-        throw err;
+    } catch (e) {
+      // Bizim attığımız hatalar olduğu gibi geçsin
+      if (e.code && ["NO_OFFERINGS", "INVALID_PACKAGE", "NOT_READY", "WEB_NOT_SUPPORTED"].includes(e.code)) {
+        throw e;
       }
-      const normalized = _normalizeError(err);
-      L("error", `purchase fail: ${normalized.code} — ${normalized.message}`, err);
-      throw normalized;
+      throw normalizeError(e);
     }
   },
 
   async restore() {
-    L("info", "restore() çağrıldı");
-    if (!Capacitor.isNativePlatform() || !_state.ready) {
-      L("warn", "Native değil veya ready değil — restore no-op");
-      return { success: false, message: "Native platform değil veya hazır değil" };
+    if (!Capacitor.isNativePlatform() || !state.ready) {
+      return { success: false, message: "Native değil veya SDK hazır değil" };
     }
     try {
-      L("info", "Purchases.restorePurchases() çağrılıyor...");
       const { customerInfo } = await Purchases.restorePurchases();
-      _state.lastCustomerInfo = customerInfo;
-      L("info", "Restore sonrası:", {
-        active: Object.keys(customerInfo?.entitlements?.active || {}),
-        all: Object.keys(customerInfo?.entitlements?.all || {}),
-      });
-      const synced = _syncSubscriptionFromCustomerInfo(customerInfo);
-      const hasActive = _hasAnyActiveEntitlement(customerInfo);
+      const synced = syncFromCustomerInfo(customerInfo);
+      const hasActive = Object.keys(customerInfo?.entitlements?.active || {}).length > 0;
       return {
         success: true,
         restored: hasActive && synced,
@@ -399,328 +228,192 @@ export const iap = {
           ? "Aboneliğin başarıyla geri yüklendi"
           : "Geri yüklenebilecek aktif abonelik bulunamadı",
       };
-    } catch (err) {
-      L("error", "restore başarısız", err?.message);
-      throw _normalizeError(err);
+    } catch (e) {
+      throw normalizeError(e);
     }
   },
 
   async openSubscriptionManagement() {
     if (!Capacitor.isNativePlatform()) return;
-    try {
-      const platform = Capacitor.getPlatform();
-      if (platform === "ios") {
-        window.open("itms-apps://apps.apple.com/account/subscriptions", "_system");
-      } else if (platform === "android") {
-        window.open("https://play.google.com/store/account/subscriptions?package=com.halisahakolik.app", "_system");
-      }
-    } catch (err) {
-      L("error", "openSubscriptionManagement", err);
+    const platform = Capacitor.getPlatform();
+    if (platform === "ios") {
+      window.open("itms-apps://apps.apple.com/account/subscriptions", "_system");
+    } else if (platform === "android") {
+      window.open("https://play.google.com/store/account/subscriptions?package=com.halisahakolik.app", "_system");
     }
   },
 
   async logIn(appUserId) {
-    if (!Capacitor.isNativePlatform() || !_state.ready) return;
+    if (!Capacitor.isNativePlatform() || !state.ready) return;
     try {
-      L("info", `logIn(${appUserId})`);
       await Purchases.logIn({ appUserID: appUserId });
-    } catch (err) { L("error", "logIn", err); }
+    } catch (e) { warn("logIn:", e?.message); }
   },
 
   async logOut() {
-    if (!Capacitor.isNativePlatform() || !_state.ready) return;
+    if (!Capacitor.isNativePlatform() || !state.ready) return;
     try {
-      L("info", "logOut()");
       await Purchases.logOut();
-    } catch (err) { L("error", "logOut", err); }
+    } catch (e) { warn("logOut:", e?.message); }
   },
 };
 
 // ═══════════════════════════════════════════════════════════
-// INTERNAL
+// HELPERS
 // ═══════════════════════════════════════════════════════════
-function _syncSubscriptionFromCustomerInfo(customerInfo, opts = {}) {
-  if (!customerInfo) {
-    L("warn", "sync: customerInfo yok");
-    return false;
-  }
-  const active = customerInfo.entitlements?.active || {};
-  const all = customerInfo.entitlements?.all || {};
-  L("info", "sync — active entitlements:", Object.keys(active));
-  L("info", "sync — all entitlements:", Object.keys(all));
 
-  const proKey = Object.keys(active).find((k) => k.toLowerCase() === "pro");
-  let proEnt = proKey ? active[proKey] : null;
-  if (proEnt) L("info", `✓ 'pro' entitlement bulundu (key='${proKey}')`);
-
-  if (!proEnt && Object.keys(active).length > 0) {
-    const firstKey = Object.keys(active)[0];
-    proEnt = active[firstKey];
-    L("warn", `'pro' yok ama '${firstKey}' aktif — onu kullanıyorum`);
-  }
-
-  if (!proEnt && opts.fallbackPlanId) {
-    L("warn", `Hiç entitlement yok ama fallbackPlanId='${opts.fallbackPlanId}' — direct aktivasyon`);
-    const meta = PACKAGE_MAP[opts.fallbackPlanId] || PACKAGE_MAP.pro_yearly;
-    const expiresAt = Date.now() + (meta.durationDays || 365) * 86400000;
-    activateSubscription({
-      tier: TIER.PRO,
-      plan: opts.fallbackPlanId,
-      expiresAt,
-    });
-    return true;
-  }
-
-  if (!proEnt) {
-    L("info", "sync: aktif entitlement yok — değişiklik yapılmadı");
-    return false;
-  }
-
-  const pid = (proEnt.productIdentifier || "").toLowerCase();
-  let planId = "pro_monthly";
-  if (pid.includes("year") || pid.includes("annual") || pid.includes("yearly")) planId = "pro_yearly";
-  else if (pid.includes("month") || pid.includes("monthly")) planId = "pro_monthly";
-  else if (opts.fallbackPlanId) planId = opts.fallbackPlanId;
-
-  const expiresAt = proEnt.expirationDate
-    ? new Date(proEnt.expirationDate).getTime()
-    : Date.now() + 30 * 86400000;
-
-  L("info", `✅ Pro aktive ediliyor:`, {
-    planId,
-    productId: proEnt.productIdentifier,
-    expiresAt: new Date(expiresAt).toISOString(),
-  });
-
-  activateSubscription({ tier: TIER.PRO, plan: planId, expiresAt });
-  return true;
+function isDevSimulate() {
+  try { return localStorage.getItem("hk_dev_simulate") === "1"; }
+  catch { return false; }
 }
 
-function _findPackage(offerings, planId) {
-  if (!offerings?.current) return null;
-  const pkgs = offerings.current.availablePackages || [];
-  if (pkgs.length === 0) return null;
+function codedError(code, message) {
+  const e = new Error(message);
+  e.code = code;
+  return e;
+}
 
+// ★ 4 stratejiyle paket arar — bir tanesi tutmazsa diğeri tutsun
+function findPackage(offering, planId, allOfferings) {
   const meta = PACKAGE_MAP[planId];
   if (!meta) return null;
 
-  let found = pkgs.find((p) => p.identifier === meta.rcIdentifier);
-  if (found) { L("info", `Paket strategy 1: identifier=${meta.rcIdentifier}`); return found; }
-
-  const wantedType = planId === "pro_monthly" ? "MONTHLY"
-                   : planId === "pro_yearly"  ? "ANNUAL"
-                   : planId === "trial_7d"    ? "ANNUAL"
-                   : null;
-  if (wantedType) {
-    found = pkgs.find((p) => (p.packageType || "").toUpperCase() === wantedType);
-    if (found) { L("info", `Paket strategy 2: packageType=${wantedType}`); return found; }
+  // Tüm offering'lerden tüm paketleri topla (default'ta yoksa diğerinde bulabiliriz)
+  const allPkgs = [];
+  if (offering?.availablePackages) allPkgs.push(...offering.availablePackages);
+  if (allOfferings) {
+    for (const [key, off] of Object.entries(allOfferings)) {
+      if (off === offering) continue; // zaten ekledik
+      if (off?.availablePackages) allPkgs.push(...off.availablePackages);
+    }
   }
 
-  const keywords = planId === "pro_monthly" ? ["month"]
-                 : planId === "pro_yearly"  ? ["year", "annual"]
-                 : planId === "trial_7d"    ? ["year", "annual"]
-                 : [];
-  if (keywords.length) {
-    found = pkgs.find((p) => {
-      const id = (p.identifier || "").toLowerCase();
-      const pid = (p.product?.identifier || "").toLowerCase();
-      return keywords.some((k) => id.includes(k) || pid.includes(k));
-    });
-    if (found) { L("info", `Paket strategy 3: keyword=${keywords.join("/")}`); return found; }
-  }
+  if (!allPkgs.length) return null;
 
-  if (pkgs.length === 1) {
-    L("warn", "Spesifik bulunamadı — tek paket kullanılıyor");
-    return pkgs[0];
-  }
+  // 1) RC identifier exact match ($rc_monthly / $rc_annual)
+  let found = allPkgs.find(p => p.identifier === meta.rcId);
+  if (found) return found;
+
+  // 2) Package type match (MONTHLY / ANNUAL)
+  const wantedType = planId === "pro_monthly" ? "MONTHLY" : "ANNUAL";
+  found = allPkgs.find(p => (p.packageType || "").toUpperCase() === wantedType);
+  if (found) return found;
+
+  // 3) Product identifier exact match (pro_monthly / pro_yearly)
+  found = allPkgs.find(p => p.product?.identifier === meta.productId);
+  if (found) return found;
+
+  // 4) Product identifier contains (pro_monthly:proaylik59 gibi Android base plan'lar için)
+  found = allPkgs.find(p => (p.product?.identifier || "").startsWith(meta.productId));
+  if (found) return found;
+
+  // 5) Tek paket varsa onu kullan
+  if (allPkgs.length === 1) return allPkgs[0];
 
   return null;
 }
 
-function _hasAnyActiveEntitlement(customerInfo) {
-  return Object.keys(customerInfo?.entitlements?.active || {}).length > 0;
-}
+function syncFromCustomerInfo(customerInfo, opts = {}) {
+  if (!customerInfo) return false;
 
-function _normalizeError(err) {
-  const rcCode = err?.code;
-  const e = new Error(err?.message || "Bilinmeyen ödeme hatası");
+  const active = customerInfo.entitlements?.active || {};
 
-  if (rcCode === PURCHASES_ERROR_CODE.PURCHASE_CANCELLED_ERROR || rcCode === "1" || err?.userCancelled === true) {
-    e.code = "USER_CANCELLED";
-    e.message = "Satın alma iptal edildi";
-  } else if (rcCode === PURCHASES_ERROR_CODE.NETWORK_ERROR) {
-    e.code = "PAYMENT_FAILED";
-    e.message = "Bağlantı sorunu — internet kontrolü yap";
-  } else if (rcCode === PURCHASES_ERROR_CODE.PAYMENT_PENDING_ERROR) {
-    e.code = "PAYMENT_FAILED";
-    e.message = "Ödeme onayı bekliyor";
-  } else if (rcCode === PURCHASES_ERROR_CODE.PURCHASE_NOT_ALLOWED_ERROR || rcCode === PURCHASES_ERROR_CODE.PURCHASE_INVALID_ERROR) {
-    e.code = "PAYMENT_FAILED";
-    e.message = "Ödeme yöntemi reddedildi";
-  } else if (rcCode === PURCHASES_ERROR_CODE.STORE_PROBLEM_ERROR) {
-    e.code = "PAYMENT_FAILED";
-    e.message = "Mağaza geçici sorun yaşıyor";
-  } else {
-    e.code = "PAYMENT_FAILED";
+  // 'pro' entitlement öncelikli; yoksa ilk aktif entitlement
+  const proKey = Object.keys(active).find(k => k.toLowerCase() === "pro");
+  let ent = proKey ? active[proKey] : Object.values(active)[0];
+
+  // Entitlement yok ama satın alma yeni tamamlandıysa direct aktivasyon
+  if (!ent && opts.fallbackPlanId) {
+    const meta = PACKAGE_MAP[opts.fallbackPlanId];
+    const expiresAt = Date.now() + (meta?.durationDays || 365) * 86400000;
+    activateSubscription({ tier: TIER.PRO, plan: opts.fallbackPlanId, expiresAt });
+    return true;
   }
-  e.original = err;
-  return e;
+
+  if (!ent) return false;
+
+  // Plan ID'yi product identifier'dan tahmin et
+  const pid = (ent.productIdentifier || "").toLowerCase();
+  let planId = "pro_monthly";
+  if (pid.includes("year") || pid.includes("annual") || pid.includes("yearly")) planId = "pro_yearly";
+  else if (opts.fallbackPlanId) planId = opts.fallbackPlanId;
+
+  const expiresAt = ent.expirationDate
+    ? new Date(ent.expirationDate).getTime()
+    : Date.now() + 30 * 86400000;
+
+  log("✓ Pro aktive:", planId, "expires:", new Date(expiresAt).toISOString());
+  activateSubscription({ tier: TIER.PRO, plan: planId, expiresAt });
+  return true;
 }
 
-function _simulatePurchase(planId, meta) {
+function normalizeError(error) {
+  const rcCode = error?.code;
+  const userCancelled = rcCode === "1" || error?.userCancelled === true
+    || /cancel/i.test(error?.message || "");
+
+  const out = new Error(error?.message || "Bilinmeyen ödeme hatası");
+
+  if (userCancelled) {
+    out.code = "USER_CANCELLED";
+    out.message = "Satın alma iptal edildi";
+  } else if (/not allowed|billing.*not available/i.test(error?.message || "")) {
+    out.code = "PURCHASE_NOT_ALLOWED";
+    out.message = "Bu cihaz veya hesap satın alma yapmaya yetkili değil. " +
+                  "Mağaza hesabını kontrol et veya uygulamayı resmi mağazadan indir.";
+  } else if (/network/i.test(error?.message || "")) {
+    out.code = "PAYMENT_FAILED";
+    out.message = "Bağlantı sorunu — internet kontrolü yap";
+  } else {
+    out.code = "PAYMENT_FAILED";
+  }
+
+  out.original = error;
+  return out;
+}
+
+function simulate(planId, meta) {
   return new Promise((resolve, reject) => {
     setTimeout(() => {
-      const forced = (() => { try { return localStorage.getItem("hk_force_purchase_fail"); } catch { return null; } })();
+      // Force fail/cancel için: localStorage.setItem("hk_force_purchase_fail", "fail" | "cancel")
+      let forced = null;
+      try { forced = localStorage.getItem("hk_force_purchase_fail"); } catch {}
+
       if (forced === "cancel") {
-        const err = new Error("Satın alma iptal edildi");
-        err.code = "USER_CANCELLED";
-        reject(err); return;
+        reject(codedError("USER_CANCELLED", "Satın alma iptal edildi"));
+        return;
       }
       if (forced === "fail") {
-        const err = new Error("Ödeme bilgilerin doğrulanamadı (simulate)");
-        err.code = "PAYMENT_FAILED";
-        reject(err); return;
+        reject(codedError("PAYMENT_FAILED", "Ödeme bilgilerin doğrulanamadı (simulate)"));
+        return;
       }
+
       const expiresAt = Date.now() + meta.durationDays * 86400000;
-      activateSubscription({ tier: meta.tier, plan: planId, expiresAt });
+      activateSubscription({ tier: TIER.PRO, plan: planId, expiresAt });
       if (meta.isTrial) markTrialUsed();
-      L("info", `✓ DEV SIMULATE success — ${planId}`);
+      log("✓ DEV SIMULATE success —", planId);
       resolve({ success: true });
-    }, 1200);
+    }, 800);
   });
 }
 
 // ═══════════════════════════════════════════════════════════
-// DEBUG INTERFACE — window.hkIap
-// Inspect console'dan kullanım:
-//   await window.hkIap.diagnose()
+// DEBUG INTERFACE (minimal)
 // ═══════════════════════════════════════════════════════════
 if (typeof window !== "undefined") {
   window.hkIap = {
-    state: () => ({
-      ready: _state.ready,
-      configured: _state.configured,
-      apiKeyValid: _state.apiKeyValid,
-      platform: _state.platform,
-      hasOfferings: !!_state.offerings,
-      initCallCount: _state.initCallCount,
-      purchaseCallCount: _state.purchaseCallCount,
-      lastError: _state.lastError,
-      lastCustomerInfo: _state.lastCustomerInfo ? {
-        userId: _state.lastCustomerInfo.originalAppUserId,
-        active: Object.keys(_state.lastCustomerInfo.entitlements?.active || {}),
-        all: Object.keys(_state.lastCustomerInfo.entitlements?.all || {}),
-      } : null,
-    }),
-
-    logs: (n = 100) => _logs.slice(-n),
-
-    getOfferings: async () => {
-      _state.offerings = null;
-      return await iap.getOfferings();
+    state: () => ({ ...state, platform: Capacitor.getPlatform() }),
+    offerings: () => {
+      state.offering = null;
+      state.allOfferings = null;
+      return iap.getOfferings();
     },
-
-    getCustomerInfo: async () => {
-      if (!_state.ready) { console.warn("SDK ready değil — önce init"); return null; }
+    restore: () => iap.restore(),
+    purchase: (planId) => iap.purchase(planId),
+    customerInfo: async () => {
+      if (!state.ready) return null;
       const { customerInfo } = await Purchases.getCustomerInfo();
-      _state.lastCustomerInfo = customerInfo;
       return customerInfo;
     },
-
-    purchase: (planId) => iap.purchase(planId),
-    restore: () => iap.restore(),
-
-    /**
-     * Tam tanı raporu — sorunlarını otomatik tespit eder.
-     * Inspect console'dan: await window.hkIap.diagnose()
-     */
-    diagnose: async () => {
-      const r = [];
-      const push = (icon, line) => { r.push(`${icon} ${line}`); };
-
-      r.push("═══════════════════════════════════════");
-      r.push("  IAP DIAGNOSE REPORT");
-      r.push("═══════════════════════════════════════");
-
-      const isNative = Capacitor.isNativePlatform();
-      const platform = Capacitor.getPlatform();
-      if (isNative) push("✓", `Platform: ${platform} (native)`);
-      else { push("✗", `Platform: ${platform} (NATIVE DEĞİL — IAP çalışmaz)`); }
-
-      const apiKey = REVENUECAT_API_KEY[platform];
-      const validation = _isValidApiKey(apiKey);
-      if (validation.valid) push("✓", `API key formatı geçerli: ${apiKey.slice(0, 8)}...${apiKey.slice(-4)}`);
-      else push("✗", `API key GEÇERSİZ: ${validation.reason}`);
-
-      if (!_state.ready) {
-        push("✗", `SDK ready DEĞİL — init başarısız. lastError: ${_state.lastError || "(yok)"}`);
-        r.push("");
-        r.push("Init başarısız — diğer kontroller atlanıyor.");
-        const out = r.join("\n");
-        console.log(out);
-        return out;
-      }
-      push("✓", `SDK ready, configured=${_state.configured}`);
-
-      let ci = _state.lastCustomerInfo;
-      try {
-        const result = await Purchases.getCustomerInfo();
-        ci = result.customerInfo;
-        _state.lastCustomerInfo = ci;
-        push("✓", `CustomerInfo alındı (userId: ${ci.originalAppUserId})`);
-      } catch (e) {
-        push("✗", `CustomerInfo alınamadı: ${e?.message}`);
-      }
-
-      if (ci) {
-        const active = Object.keys(ci.entitlements?.active || {});
-        const all = Object.keys(ci.entitlements?.all || {});
-        push("ℹ", `Active entitlements: ${active.length ? active.join(", ") : "(yok)"}`);
-        push("ℹ", `All entitlements (history): ${all.length ? all.join(", ") : "(yok)"}`);
-        push("ℹ", `Active subscriptions: ${(ci.activeSubscriptions || []).join(", ") || "(yok)"}`);
-
-        const hasPro = active.some((k) => k.toLowerCase() === "pro");
-        if (hasPro) push("✓", "'pro' entitlement aktif — kullanıcı Pro");
-        else if (active.length) push("⚠", `'pro' yok ama '${active[0]}' aktif — entitlement adı yanlış olabilir`);
-        else push("ℹ", "Hiç aktif entitlement yok (henüz satın alma yapılmamış olabilir)");
-      }
-
-      _state.offerings = null;
-      try {
-        const result = await Purchases.getOfferings();
-        const hasCurrent = !!result.current;
-        const allKeys = result.all ? Object.keys(result.all) : [];
-
-        if (hasCurrent) push("✓", `Offering current var: '${result.current.identifier}'`);
-        else if (allKeys.length) push("⚠", `current YOK ama .all içinde: ${allKeys.join(", ")} → RC'de "Make Current" yap`);
-        else push("✗", "Hiçbir offering yok — RC dashboard'da Offerings oluştur");
-
-        const offering = result.current || result.all?.default || (allKeys.length ? result.all[allKeys[0]] : null);
-        if (offering) {
-          const pkgs = offering.availablePackages || [];
-          push("ℹ", `Offering '${offering.identifier}' — ${pkgs.length} paket:`);
-          pkgs.forEach((p) => {
-            push("  •", `${p.identifier} (${p.packageType}) → ${p.product?.identifier} = ${p.product?.priceString}`);
-          });
-          if (pkgs.length === 0) push("✗", "Offering boş — paketlere ürün attach et");
-        }
-      } catch (e) {
-        push("✗", `getOfferings exception: ${e?.message}`);
-        push("→", "Google Play Console: subscription ürünleri Active mi? Base Plan var ve Active mi? Pricing var mı?");
-      }
-
-      r.push("");
-      r.push("───────────────────────────────────────");
-      r.push("Sonraki adımlar:");
-      r.push("  • Sorun varsa yukarıdaki ✗ ve ⚠ satırlarına bak");
-      r.push("  • Detaylı log: window.hkIap.logs()");
-      r.push("  • Manuel test: await window.hkIap.purchase('pro_monthly')");
-      r.push("═══════════════════════════════════════");
-
-      const out = r.join("\n");
-      console.log(out);
-      return out;
-    },
   };
-  console.log("[IAP] window.hkIap debug interface hazır — 'await window.hkIap.diagnose()' çalıştır");
 }
