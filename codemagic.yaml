@@ -40,6 +40,7 @@ workflows:
             @capacitor/ios \
             @capacitor/core \
             @capacitor/cli \
+            @capacitor/app \
             @capacitor/camera \
             @capacitor/share \
             @capacitor/filesystem \
