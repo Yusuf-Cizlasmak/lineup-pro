@@ -6,6 +6,8 @@ import RatePrompt from "./RatePrompt";
 import Tour from "./Tour";
 import { PaywallProvider } from "./PaywallScreen";
 import { iap } from "./iap";
+import { App as CapApp } from "@capacitor/app";
+import { Capacitor } from "@capacitor/core";
 
 // ─── ADMOB / IAP DEBUG PANEL ─────────────────────────────────
 // Default KAPALI — production'da görünmesin.
@@ -121,27 +123,47 @@ export default function App() {
     //   Native değilse (web) no-op. PaywallScreen iap.js'i çağrır.
     iap.init();
 
-    // ─── Deep link — ?join=KOD URL param ───
-    // Paylaşılan bağlantıya tıklanınca uygulama direkt odaya yönlendirir
-    try {
-      const url = new URL(window.location.href);
-      const joinCode = url.searchParams.get('join');
-      if (joinCode?.trim()) {
-        const dispatch = () => window.dispatchEvent(
-          new CustomEvent('halisaha:join-code', { detail: { code: joinCode.trim().toUpperCase() } })
-        );
-        if (onboarded) {
-          // Uygulama yüklendikten biraz sonra gönder (LiveMatch mount edilsin)
-          setTimeout(dispatch, 1200);
-        } else {
-          // Onboarding bitince gönder
-          window.addEventListener('halisaha:onboarded', dispatch, { once: true });
-        }
-        // URL'yi temizle — tekrar tetiklenmesin
-        url.searchParams.delete('join');
-        window.history.replaceState({}, '', url.toString());
+    // ─── Deep link — Native: appUrlOpen  |  Web: URL param ───
+    const dispatchJoinCode = (code) => {
+      if (!code?.trim()) return;
+      const dispatch = () => window.dispatchEvent(
+        new CustomEvent('halisaha:join-code', { detail: { code: code.trim().toUpperCase() } })
+      );
+      const isOnboarded = localStorage.getItem(ONBOARDING_KEY) === "1";
+      if (isOnboarded) {
+        setTimeout(dispatch, 800);   // LiveMatch mount olsun diye kısa bekle
+      } else {
+        window.addEventListener('halisaha:onboarded', dispatch, { once: true });
       }
-    } catch {}
+    };
+
+    // Native (iOS/Android): Capacitor appUrlOpen
+    // Scheme: halisahakolik://join?code=HK-AB12
+    // Universal link: https://halisahakolik.app/join?code=HK-AB12
+    let capListener = null;
+    if (Capacitor.isNativePlatform()) {
+      CapApp.addListener('appUrlOpen', (data) => {
+        try {
+          const url = new URL(data.url);
+          // Hem scheme path hem de query param destekle
+          const code = url.searchParams.get('code')
+            || url.pathname.match(/\/join\/([A-Z0-9-]+)/i)?.[1];
+          if (code) dispatchJoinCode(code);
+        } catch {}
+      }).then(listener => { capListener = listener; });
+    } else {
+      // Web: URL param — ?code=HK-AB12 veya ?join=HK-AB12
+      try {
+        const url = new URL(window.location.href);
+        const code = url.searchParams.get('code') || url.searchParams.get('join');
+        if (code) {
+          dispatchJoinCode(code);
+          url.searchParams.delete('code');
+          url.searchParams.delete('join');
+          window.history.replaceState({}, '', url.toString());
+        }
+      } catch {}
+    }
 
     let count = parseInt(localStorage.getItem(LAUNCH_COUNT_KEY) || "0", 10) || 0;
     count += 1;
@@ -170,6 +192,8 @@ export default function App() {
       window.removeEventListener("halisaha:replay-onboarding", onReplay);
       window.removeEventListener("halisaha:start-tour", onStartTour);
       window.removeEventListener("halisaha:start-match-end-tour", onStartMatchEndTour);
+      // Capacitor deep link listener'ı temizle
+      if (capListener) capListener.remove();
     };
   }, []);
 

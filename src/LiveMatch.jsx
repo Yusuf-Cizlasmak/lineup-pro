@@ -40,6 +40,18 @@ import {
   getAttrKeys, generateDefaultAttributes, computeOverallFromAttributes,
 } from './playerAttributes';
 import { buildMatch, saveMatch } from './matchHistoryStore';
+import { Capacitor } from '@capacitor/core';
+
+// ═══════════════════════════════════════════════════════════
+// DEEP LINK — Buraya kendi domain'inizi veya custom URL
+// scheme'inizi yazın. Capacitor native'de appUrlOpen ile
+// yakalanır; web'de URL param olarak çalışır.
+//
+//   Domain örneği:  'https://halisahakolik.app'
+//   Custom scheme:  'halisahakolik://app'
+//
+const DEEP_LINK_BASE = 'https://halisahakolik.app';   // ← DEĞİŞTİRİN
+// ═══════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════
 // PALET
@@ -94,6 +106,27 @@ input::placeholder   { color:#475569; }
 /* Scrollbar tamamen gizle — tüm tarayıcılar */
 .lm-scroll::-webkit-scrollbar { display: none; width: 0; height: 0; }
 .lm-scroll { scrollbar-width: none; -ms-overflow-style: none; }
+
+/* ── Özel sağ scrollbar ── */
+.lm-scrollbar-track {
+  position: fixed;
+  right: 4px;
+  width: 3px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 3px;
+  z-index: 150;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.35s ease;
+}
+.lm-scrollbar-handle {
+  position: absolute;
+  left: 0; right: 0;
+  background: rgba(52,211,153,0.55);
+  border-radius: 3px;
+  transition: top 0.06s linear, height 0.06s linear;
+  top: 0%; height: 20%;
+}
 
 /* Kart giriş animasyonu */
 @keyframes lmCardIn {
@@ -848,6 +881,9 @@ export default function LiveMatch() {
   // Scroll progress bar için
   const scrollRef = useRef(null);
   const progressRef = useRef(null);
+  // Custom sağ scrollbar için (re-render olmadan DOM'a doğrudan yaz)
+  const scrollbarTrackRef = useRef(null);
+  const scrollbarHandleRef = useRef(null);
   useEffect(() => { screenRef.current = screen; }, [screen]);
 
   // ─── Yardımcılar ───
@@ -915,22 +951,17 @@ export default function LiveMatch() {
   }, []);
   useEffect(() => { loadMySessions(); }, [loadMySessions]);
 
-  // ─── Deep link auto-join: ?join=KOD URL param veya custom event ───
+  // ─── Deep link auto-join: sadece custom event dinle ───
+  // (window.location.href native'de http://localhost olur — kullanılmaz)
+  // Dispatch: App.js'deki appUrlOpen veya web'deki URL param işleme
   useEffect(() => {
     if (!nicknameSet) return;
-    try {
-      const url = new URL(window.location.href);
-      const code = url.searchParams.get('join');
-      if (code && screen === 'home') {
-        setJoinCode(code.toUpperCase().trim());
-        setScreen('join');
-        url.searchParams.delete('join');
-        window.history.replaceState({}, '', url.toString());
-      }
-    } catch {}
     const onCode = (e) => {
       const code = e.detail?.code;
-      if (code) { setJoinCode(code.toUpperCase().trim()); setScreen('join'); }
+      if (code) {
+        setJoinCode(code.toUpperCase().trim());
+        setScreen('join');
+      }
     };
     window.addEventListener('halisaha:join-code', onCode);
     return () => window.removeEventListener('halisaha:join-code', onCode);
@@ -1395,26 +1426,31 @@ export default function LiveMatch() {
   const handleShareInvite = async () => {
     if (!session) return;
     const code = session.join_code;
-    // Deep link — uygulama açıksa direkt odaya girer, değilse tarayıcıdan açar
-    const base = window.location.origin + (window.location.pathname.replace(/\/[^/]*$/, '') || '');
-    const deepLink = `${base}?join=${code}`;
+    // Gerçek deep link — DEEP_LINK_BASE sabiti yukarıda tanımlı
+    const deepLink = `${DEEP_LINK_BASE}/join?code=${code}`;
     const fieldInfo = session.field_name ? `📍 ${session.field_name}\n` : '';
-    const shareText = `⚽ Halı Saha maçıma katıl!\n\n${fieldInfo}🔑 Kod: ${code}\n\n👇 Tek tıkla katıl:\n${deepLink}`;
+    const shareText = `⚽ Halı Saha maçıma katıl!\n\n${fieldInfo}🔑 Oda kodu: ${code}\n\n👇 Linke tıkla, direkt gir:\n${deepLink}`;
+
+    hapticLight();
     if (navigator.share) {
       try {
         await navigator.share({
-          title: `${session.team_a_name} vs ${session.team_b_name}`,
+          title: `${session.team_a_name} vs ${session.team_b_name} — HalıSaha`,
           text: shareText,
           url: deepLink,
         });
       } catch (e) {
-        if (!/cancel/i.test(e?.message || '')) {
-          try { await navigator.clipboard?.writeText(deepLink); showToast('🔗 Link kopyalandı'); } catch {}
-        }
+        // Kullanıcı iptal ettiyse sessizce geç
+        if (/cancel/i.test(e?.message || '')) return;
+        // Share API başarısız → clipboard fallback
+        try {
+          await navigator.clipboard?.writeText(shareText);
+          showToast('📋 Davet metni kopyalandı');
+        } catch {}
       }
     } else if (navigator.clipboard) {
       await navigator.clipboard.writeText(shareText);
-      showToast('📋 Davet bağlantısı kopyalandı');
+      showToast('📋 Davet metni kopyalandı');
     }
   };
 
@@ -1451,16 +1487,36 @@ export default function LiveMatch() {
     }
   };
 
-  // ─── Scroll progress ───
+  // ─── Scroll progress + sağ scrollbar ───
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
     const bar = progressRef.current;
-    if (!el || !bar) return;
+    const track = scrollbarTrackRef.current;
+    const handle = scrollbarHandleRef.current;
+    if (!el) return;
+
     const max = el.scrollHeight - el.clientHeight;
-    if (max <= 0) { bar.classList.remove('visible'); return; }
+    if (max <= 0) {
+      if (bar) bar.classList.remove('visible');
+      if (track) track.style.opacity = '0';
+      return;
+    }
+
     const ratio = Math.min(1, el.scrollTop / max);
-    bar.style.transform = `scaleX(${ratio})`;
-    bar.classList.toggle('visible', el.scrollTop > 30);
+    // Kaydırma göstergesi (üst şerit)
+    if (bar) {
+      bar.style.transform = `scaleX(${ratio})`;
+      bar.classList.toggle('visible', el.scrollTop > 30);
+    }
+    // Sağ scrollbar — track + handle
+    if (track) {
+      track.style.opacity = el.scrollTop > 10 ? '1' : '0';
+    }
+    if (handle) {
+      const sizeRatio = Math.max(0.07, el.clientHeight / el.scrollHeight);
+      handle.style.height = `${sizeRatio * 100}%`;
+      handle.style.top    = `${ratio * (1 - sizeRatio) * 100}%`;
+    }
   }, []);
 
   // ═══════════════════════════════════════════════════════════
@@ -1495,6 +1551,17 @@ export default function LiveMatch() {
           className="lm-scroll-progress"
           style={{ transform: 'scaleX(0)' }}
         />
+        {/* ── Sağ custom scrollbar ── */}
+        <div
+          ref={scrollbarTrackRef}
+          className="lm-scrollbar-track"
+          style={{
+            top: 'calc(env(safe-area-inset-top, 0px) + 52px)',
+            bottom: 'calc(env(safe-area-inset-bottom, 0px) + 84px)',
+          }}
+        >
+          <div ref={scrollbarHandleRef} className="lm-scrollbar-handle" />
+        </div>
         <div className="lm-screen" style={{ minHeight: '100%' }}>
           {children}
         </div>
@@ -1972,7 +2039,9 @@ export default function LiveMatch() {
             borderRadius: 16, overflow: 'hidden',
             background: 'linear-gradient(180deg,#1a6b31 0%,#1e7a38 25%,#1a6b31 50%,#1e7a38 75%,#1a6b31 100%)',
             boxShadow: '0 12px 40px rgba(0,0,0,0.55), inset 0 0 80px rgba(0,0,0,0.3)',
-            touchAction: 'none',
+            // ★ dragInfo yokken pan-y → saha üzerinden scroll çalışır
+            // dragInfo varken none → oyuncu sürükleme düzgün çalışır
+            touchAction: dragInfo ? 'none' : 'pan-y',
           }}>
             <Pitch colA={colA} colB={colB} />
 
