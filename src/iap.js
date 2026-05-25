@@ -11,7 +11,7 @@
 //   await iap.restore()                    — Restore Purchases butonu
 //   iap.isReady()                          — true ise SDK yüklendi
 //   iap.openSubscriptionManagement()       — App Store / Play Store yönetim ekranı
-//   await iap.diagnose()                   — ★ YENİ: tüm sistemi kontrol et, sorun nerede?
+//   await iap.diagnose()                   — Debug için: tam sistem teşhisi
 //
 // CALLER FORMAT (PaywallScreen):
 //   try {
@@ -20,6 +20,10 @@
 //     if (err.code === "USER_CANCELLED") return;
 //     showError(err.message);
 //   }
+//
+// DEBUG (production'da bile aktifleştirilebilir):
+//   localStorage.setItem('hk_debug', '1')   → window.iap expose edilir
+//   Sonra DevTools console'dan: await iap.diagnose()
 // ─────────────────────────────────────────────────────────────
 
 import { Capacitor } from "@capacitor/core";
@@ -30,7 +34,7 @@ import {
 } from "@revenuecat/purchases-capacitor";
 import { TIER, activateSubscription, markTrialUsed } from "./subscription";
 
-// ═══ RevenueCat API anahtarlarını buraya yaz ═══
+// ═══ RevenueCat API anahtarları ═══
 const REVENUECAT_API_KEY = {
   ios:     "appl_tlYOfFKQtBtuktDXQcPysCNZzgw",
   android: "goog_JrnXzixnvIUClDpspvYcQMyNear",
@@ -45,13 +49,17 @@ const PACKAGE_MAP = {
 
 let _ready = false;
 let _offerings = null;
-let _lastInitError = null;   // ★ son init hatasını saklayalım — diagnose() için
+let _lastInitError = null;
 
 // ═══════════════════════════════════════════════════════════
 // PUBLIC API
 // ═══════════════════════════════════════════════════════════
 
 export const iap = {
+  /**
+   * App boot sırasında BİR KEZ çağrılır.
+   * Web'de no-op olur (Capacitor değilse).
+   */
   async init() {
     if (_ready) return;
     if (!Capacitor.isNativePlatform()) {
@@ -67,7 +75,13 @@ export const iap = {
         return;
       }
 
-      await Purchases.setLogLevel({ level: LOG_LEVEL.DEBUG }); // ★ Debug — sorunu bulana kadar
+      // ★ PRODUCTION: WARN seviyesi — gereksiz log yok, sadece uyarı/hata
+      //   Debug için geçici: localStorage.setItem('hk_iap_verbose', '1') → DEBUG
+      const verbose = (() => {
+        try { return localStorage.getItem("hk_iap_verbose") === "1"; }
+        catch { return false; }
+      })();
+      await Purchases.setLogLevel({ level: verbose ? LOG_LEVEL.DEBUG : LOG_LEVEL.WARN });
       await Purchases.configure({ apiKey });
 
       await Purchases.addCustomerInfoUpdateListener((info) => {
@@ -79,7 +93,7 @@ export const iap = {
 
       _ready = true;
       _lastInitError = null;
-      console.log("[IAP] RevenueCat hazır", { platform, anonId: customerInfo?.originalAppUserId });
+      console.log("[IAP] RevenueCat hazır");
     } catch (err) {
       _lastInitError = err?.message || String(err);
       console.error("[IAP] init başarısız:", err);
@@ -90,31 +104,34 @@ export const iap = {
     return _ready;
   },
 
+  /**
+   * Tüm offerings'leri döner. Hata durumunda throw eder.
+   */
   async getOfferings() {
     if (!_ready) return null;
     if (_offerings) return _offerings;
     try {
       const { current, all } = await Purchases.getOfferings();
       _offerings = { current, all };
-      console.log("[IAP] offerings alındı:", {
-        currentId: current?.identifier,
-        packageCount: current?.availablePackages?.length || 0,
-        packages: (current?.availablePackages || []).map(p => ({
-          id: p.identifier,
-          product: p.product?.identifier,
-          price: p.product?.priceString,
-        })),
-      });
       return _offerings;
     } catch (err) {
       console.error("[IAP] getOfferings başarısız:", err);
-      // ★ Bu hatayı sakla — paywall daha açıklayıcı mesaj göstersin
       const e = _normalizeError(err);
       e._fromOfferings = true;
       throw e;
     }
   },
 
+  /**
+   * Bir paketi satın al. Native paywall açılır.
+   *
+   * @param {string} planId — "pro_monthly" | "pro_yearly" | "trial_7d"
+   * @throws {Error} err.code ∈ {
+   *   "USER_CANCELLED", "PAYMENT_FAILED", "BILLING_UNAVAILABLE",
+   *   "NOT_READY", "INVALID_PACKAGE", "NO_OFFERINGS",
+   *   "NOT_CONFIGURED", "WEB_NOT_SUPPORTED"
+   * }
+   */
   async purchase(planId) {
     const meta = PACKAGE_MAP[planId];
     if (!meta) {
@@ -138,12 +155,10 @@ export const iap = {
     }
 
     try {
-      // ★ getOfferings artık throw edebilir — yakala ve açıklayıcı hataya çevir
       let offerings;
       try {
         offerings = await this.getOfferings();
       } catch (offErr) {
-        // BILLING_UNAVAILABLE / PurchaseNotAllowed → kullanıcıya net mesaj
         if (offErr.code === "BILLING_UNAVAILABLE" || offErr.code === "PURCHASE_NOT_ALLOWED") {
           throw offErr;
         }
@@ -156,7 +171,7 @@ export const iap = {
 
       if (!offerings?.current) {
         const e = new Error(
-          "Uygulamada henüz ürün tanımlı değil. (RevenueCat'te 'current offering' atanmamış olabilir)"
+          "Şu anda satın alınabilir paket yok. Lütfen birkaç dakika sonra tekrar deneyin."
         );
         e.code = "NO_OFFERINGS";
         throw e;
@@ -164,15 +179,12 @@ export const iap = {
 
       const pkg = _findPackage(offerings, meta.rcIdentifier);
       if (!pkg) {
-        const available = offerings.current.availablePackages?.map(p => p.identifier).join(", ") || "(yok)";
-        const e = new Error(
-          `Paket bulunamadı (aranan: ${meta.rcIdentifier}, mevcut: ${available})`
-        );
+        const e = new Error("Bu paket şu an mevcut değil.");
         e.code = "INVALID_PACKAGE";
         throw e;
       }
 
-      // ★ NATIVE PAYWALL ekranı buradan açılır ★
+      // ★ NATIVE PAYWALL ★
       const result = await Purchases.purchasePackage({ aPackage: pkg });
 
       const synced = _syncSubscriptionFromCustomerInfo(result.customerInfo, { fallbackPlanId: planId });
@@ -204,6 +216,9 @@ export const iap = {
     }
   },
 
+  /**
+   * Eski satın almaları geri yükle.
+   */
   async restore() {
     if (!Capacitor.isNativePlatform() || !_ready) {
       console.log("[IAP] Web/no-RC — restore no-op");
@@ -227,6 +242,9 @@ export const iap = {
     }
   },
 
+  /**
+   * App Store / Play Store abonelik yönetim ekranını aç.
+   */
   async openSubscriptionManagement() {
     if (!Capacitor.isNativePlatform()) return;
     try {
@@ -262,12 +280,12 @@ export const iap = {
   },
 
   // ═══════════════════════════════════════════════════════════
-  // ★ YENİ: SELF-DIAGNOSTIC
+  // SELF-DIAGNOSTIC — kullanıcı destek için
   // ═══════════════════════════════════════════════════════════
-  // Console'dan çağrılabilir:
-  //   await iap.diagnose()
-  // Veya debug panel'inden butonla. Tüm sistemi tarayıp tam olarak
-  // nerede patladığını söyler.
+  // Kullanım: kullanıcı sorun bildirirse şunu yapsın:
+  //   1) localStorage.setItem('hk_debug', '1') sonra app'i kapatıp aç
+  //   2) DevTools console'dan: await iap.diagnose()
+  //   3) Çıktıyı kopyalayıp gönderir
   // ═══════════════════════════════════════════════════════════
   async diagnose() {
     const out = {
@@ -314,7 +332,6 @@ export const iap = {
       return out;
     }
 
-    // canMakePayments → cihaz seviyesinde billing açık mı?
     try {
       const r = await Purchases.canMakePayments();
       out.canMakePayments = r?.canMakePayments;
@@ -332,7 +349,6 @@ export const iap = {
       );
     }
 
-    // Customer info
     try {
       const { customerInfo } = await Purchases.getCustomerInfo();
       out.customerInfo = {
@@ -344,7 +360,6 @@ export const iap = {
       out.customerInfo = "ERROR: " + (e?.message || String(e));
     }
 
-    // ★ KRİTİK TEST: offerings çekilebiliyor mu?
     try {
       const { current, all } = await Purchases.getOfferings();
       out.currentOffering = current?.identifier || "(YOK)";
@@ -375,10 +390,9 @@ export const iap = {
           out.diagnosis.push("✅ Tüm beklenen paketler mevcut.");
         }
 
-        // Fiyat boşsa → Play Store ürünü görmemiş
         const noPriceCount = out.packages.filter(p => !p.price).length;
         if (noPriceCount > 0) {
-          out.diagnosis.push(`⚠️ ${noPriceCount} paketin fiyatı boş. Bu, Google Play / App Store ürün metadata'sı çekilemediği anlamına gelir.`);
+          out.diagnosis.push(`⚠️ ${noPriceCount} paketin fiyatı boş.`);
           out.suggestions.push(
             "1) Play Console → Monetize → Subscriptions → ürünler 'Active' mi?",
             "2) Base plan'ın TR fiyatı girilmiş mi?",
@@ -394,16 +408,13 @@ export const iap = {
 
       if (code === 3 || /not allowed|billing unavailable/i.test(e?.message || "")) {
         out.suggestions.push(
-          "Bu hata Google Play Billing'in BILLING_UNAVAILABLE / PURCHASE_NOT_ALLOWED kodudur.",
-          "Sebepler (yaygından az yaygına):",
+          "BILLING_UNAVAILABLE / PURCHASE_NOT_ALLOWED — Google Play satışı reddediyor.",
           "1) APK Play Store'dan değil ADB ile yüklendi — internal test track kullan.",
           "2) Google hesabı License Tester olarak eklenmemiş.",
           "3) Subscription ürünleri Play Console'da 'Active' değil.",
           "4) Base plan'ın TR (cihaz ülkesi) fiyatı yok.",
           "5) Cihaz ↔ Google hesabı ↔ Play Store ülkeleri uyuşmuyor.",
-          "6) Play Console'da payments profile (merchant) tamamlanmamış.",
-          "7) Emülatör'ün Play Store yok — 'Google Play' AVD image'i kullan.",
-          "8) RC dashboard'da Service Credentials (Google Play) JSON yüklü değil."
+          "6) Play Console'da payments profile (merchant) tamamlanmamış."
         );
       }
     }
@@ -428,11 +439,31 @@ export const iap = {
   },
 };
 
-// ★ Global erişim — Chrome DevTools / Safari Web Inspector'dan çağırmak için:
-//   await window.iap.diagnose()
-if (typeof window !== "undefined") {
-  try { window.iap = iap; } catch {}
-}
+// ═══════════════════════════════════════════════════════════
+// ★ GLOBAL EXPOSE — sadece debug modda
+// ═══════════════════════════════════════════════════════════
+// Production'da window.iap default olarak EXPOSE DEĞİL.
+// Kullanıcı sorun bildirirse:
+//   localStorage.setItem('hk_debug', '1')   // App'i kapatıp aç
+//   await iap.diagnose()                    // DevTools console'dan
+//
+// Geliştirme modunda (NODE_ENV !== 'production') otomatik açık.
+// ═══════════════════════════════════════════════════════════
+try {
+  const isDev = (() => {
+    try {
+      return typeof process !== "undefined"
+        && process?.env?.NODE_ENV !== "production";
+    } catch { return false; }
+  })();
+  const debugFlag = (() => {
+    try { return localStorage.getItem("hk_debug") === "1"; }
+    catch { return false; }
+  })();
+  if (typeof window !== "undefined" && (isDev || debugFlag)) {
+    window.iap = iap;
+  }
+} catch {}
 
 // ═══════════════════════════════════════════════════════════
 // INTERNAL — customer info → subscription state senkronu
@@ -444,21 +475,21 @@ function _syncSubscriptionFromCustomerInfo(customerInfo, opts = {}) {
     return false;
   }
   const ents = customerInfo.entitlements?.active || {};
-  const allEnts = customerInfo.entitlements?.all || {};
-  console.log("[IAP] active entitlements:", Object.keys(ents));
-  console.log("[IAP] all entitlements:", Object.keys(allEnts));
 
+  // CASE-INSENSITIVE arama
   const proKey = Object.keys(ents).find((k) => k.toLowerCase() === "pro");
   let proEnt = proKey ? ents[proKey] : null;
 
+  // Fallback 1: any active entitlement
   if (!proEnt && Object.keys(ents).length > 0) {
     const firstKey = Object.keys(ents)[0];
     proEnt = ents[firstKey];
     console.warn(`[IAP] 'pro' entitlement yok ama '${firstKey}' aktif — onu kullanıyorum`);
   }
 
+  // Fallback 2: hiç entitlement yok ama az önce başarılı satın alma var
   if (!proEnt && opts.fallbackPlanId) {
-    console.warn(`[IAP] entitlement gelmedi ama purchase başarılıydı — fallback ile aktive ediyorum: ${opts.fallbackPlanId}`);
+    console.warn(`[IAP] entitlement gelmedi ama purchase başarılıydı — fallback: ${opts.fallbackPlanId}`);
     const meta = PACKAGE_MAP[opts.fallbackPlanId] || PACKAGE_MAP.pro_yearly;
     const expiresAt = Date.now() + (meta.durationDays || 365) * 86400000;
     activateSubscription({
@@ -470,10 +501,10 @@ function _syncSubscriptionFromCustomerInfo(customerInfo, opts = {}) {
   }
 
   if (!proEnt) {
-    console.log("[IAP] sync: aktif entitlement yok, değişiklik yapılmadı");
     return false;
   }
 
+  // Plan ID belirleme
   const pid = (proEnt.productIdentifier || "").toLowerCase();
   let planId = "pro_monthly";
   if (pid.includes("year") || pid.includes("annual") || pid.includes("yearly")) {
@@ -488,7 +519,7 @@ function _syncSubscriptionFromCustomerInfo(customerInfo, opts = {}) {
     ? new Date(proEnt.expirationDate).getTime()
     : Date.now() + 30 * 86400000;
 
-  console.log("[IAP] ✓ Pro aktive ediliyor:", { planId, expiresAt: new Date(expiresAt).toISOString() });
+  console.log("[IAP] ✓ Pro aktive:", planId);
 
   activateSubscription({
     tier: TIER.PRO,
@@ -538,7 +569,6 @@ function _normalizeError(err) {
     rcCode === 3 || rcCode === "3" ||
     /not allowed|billing unavailable|purchasenotallowed/i.test(combo)
   ) {
-    // ★ Spesifik: BILLING_UNAVAILABLE → kullanıcıya açıklayıcı mesaj
     e.code = "BILLING_UNAVAILABLE";
     e.message =
       "Google Play satın almalara izin vermiyor. Sebebi şunlardan biri olabilir:\n" +
@@ -568,7 +598,7 @@ function _normalizeError(err) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// SIMULATION
+// SIMULATION — Web preview için (production'da çağrılmaz)
 // ═══════════════════════════════════════════════════════════
 
 function _simulatePurchase(planId, meta) {
