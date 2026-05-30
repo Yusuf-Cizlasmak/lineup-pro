@@ -9,6 +9,10 @@ import { iap } from "./iap";
 import { App as CapApp } from "@capacitor/app";
 import { Capacitor } from "@capacitor/core";
 
+// ★ NEW — Deep link / Landing page
+import JoinLandingPage from "./JoinLandingPage";
+import { parseCodeFromUrl } from "./deepLink";
+
 // ─── ADMOB / IAP DEBUG PANEL ─────────────────────────────────
 // Default KAPALI — production'da görünmesin.
 // Geliştirici test ederken açmak için:
@@ -116,6 +120,9 @@ export default function App() {
   const [tourActive, setTourActive] = useState(false);
   const [matchEndTourActive, setMatchEndTourActive] = useState(false);
 
+  // ★ NEW — Web'de deep link açıldığında landing page için pending code
+  const [pendingLandingCode, setPendingLandingCode] = useState(null);
+
   useEffect(() => {
     const onboarded = localStorage.getItem(ONBOARDING_KEY) === "1";
     if (!onboarded) setShowOnboarding(true);
@@ -124,7 +131,7 @@ export default function App() {
     //   Native değilse (web) no-op. PaywallScreen iap.js'i çağrır.
     iap.init();
 
-    // ─── Deep link — Native: appUrlOpen  |  Web: URL param ───
+    // ─── Deep link join code dispatcher ───
     const dispatchJoinCode = (code) => {
       if (!code?.trim()) return;
       const dispatch = () => window.dispatchEvent(
@@ -138,30 +145,38 @@ export default function App() {
       }
     };
 
-    // Native (iOS/Android): Capacitor appUrlOpen
-    // Scheme: halisahakolik://join?code=HK-AB12
-    // Universal link: https://halisahakolik.app/join?code=HK-AB12
+    // ═══════════════════════════════════════════════════════════
+    // NATIVE (iOS/Android) — Capacitor appUrlOpen
+    //   Scheme:        halisahakolik://join?code=HK-AB12
+    //                  halisahakolik:///m/HK-AB12
+    //   Universal:     https://halisaha-kolik.pages.dev/#/m/HK-AB12
+    //   Tüm formatlar deepLink.js → parseCodeFromUrl ile yakalanır.
+    // ═══════════════════════════════════════════════════════════
     let capListener = null;
     if (Capacitor.isNativePlatform()) {
       CapApp.addListener('appUrlOpen', (data) => {
-        try {
-          const url = new URL(data.url);
-          // Hem scheme path hem de query param destekle
-          const code = url.searchParams.get('code')
-            || url.pathname.match(/\/join\/([A-Z0-9-]+)/i)?.[1];
-          if (code) dispatchJoinCode(code);
-        } catch {}
+        const code = parseCodeFromUrl(data.url);
+        if (code) dispatchJoinCode(code);
       }).then(listener => { capListener = listener; });
     } else {
-      // Web: URL param — ?code=HK-AB12 veya ?join=HK-AB12
+      // ═══════════════════════════════════════════════════════════
+      // WEB — URL'den kodu yakala
+      //   • Hash route:  /#/m/HK-AB12        ← yeni profesyonel format
+      //   • Query:       /?code=HK-AB12      ← legacy fallback
+      //
+      //   Kod bulunursa → JoinLandingPage göster (kullanıcı seçsin:
+      //   uygulamada aç / tarayıcıda devam et / store'a git).
+      // ═══════════════════════════════════════════════════════════
       try {
-        const url = new URL(window.location.href);
-        const code = url.searchParams.get('code') || url.searchParams.get('join');
+        const code = parseCodeFromUrl(window.location.href);
         if (code) {
-          dispatchJoinCode(code);
-          url.searchParams.delete('code');
-          url.searchParams.delete('join');
-          window.history.replaceState({}, '', url.toString());
+          setPendingLandingCode(code);
+          // URL'yi temizle — refresh'te tekrar landing açılmasın
+          const u = new URL(window.location.href);
+          u.searchParams.delete('code');
+          u.searchParams.delete('join');
+          if (u.hash && /\/?m\//i.test(u.hash)) u.hash = '';
+          window.history.replaceState({}, '', u.toString());
         }
       } catch {}
     }
@@ -205,6 +220,19 @@ export default function App() {
     window.dispatchEvent(new CustomEvent("halisaha:onboarded"));
   };
 
+  // ★ NEW — Landing'den "Tarayıcıda Devam Et"e basıldığında
+  const handleContinueWebFromLanding = () => {
+    const code = pendingLandingCode;
+    setPendingLandingCode(null);
+    if (!code) return;
+    const isOnboarded = localStorage.getItem(ONBOARDING_KEY) === "1";
+    const dispatch = () => window.dispatchEvent(
+      new CustomEvent('halisaha:join-code', { detail: { code } })
+    );
+    if (isOnboarded) setTimeout(dispatch, 600);
+    else window.addEventListener('halisaha:onboarded', dispatch, { once: true });
+  };
+
   return (
     <PremiumProvider>
       <AdMobDebugPanel />
@@ -214,6 +242,14 @@ export default function App() {
       {showRate && <RatePrompt onClose={() => setShowRate(false)} />}
       <Tour active={tourActive} onFinish={() => setTourActive(false)} mode="main" />
       <Tour active={matchEndTourActive} onFinish={() => setMatchEndTourActive(false)} mode="matchEnd" />
+
+      {/* ★ NEW — Web deep-link landing page (sadece web'de açılır) */}
+      {pendingLandingCode && (
+        <JoinLandingPage
+          code={pendingLandingCode}
+          onContinueWeb={handleContinueWebFromLanding}
+        />
+      )}
     </PremiumProvider>
   );
 }

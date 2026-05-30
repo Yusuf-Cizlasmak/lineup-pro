@@ -42,15 +42,13 @@ import {
 import { buildMatch, saveMatch } from './matchHistoryStore';
 import { Capacitor } from '@capacitor/core';
 
+// ★ NEW — Profesyonel paylaşım sistemi
+import ShareInviteModal from './ShareInviteModal';
+import { buildJoinUrl, buildShareText } from './deepLink';
+
 // ═══════════════════════════════════════════════════════════
-// DEEP LINK — Buraya kendi domain'inizi veya custom URL
-// scheme'inizi yazın. Capacitor native'de appUrlOpen ile
-// yakalanır; web'de URL param olarak çalışır.
-//
-//   Domain örneği:  'https://halisahakolik.app'
-//   Custom scheme:  'halisahakolik://app'
-//
-const DEEP_LINK_BASE = 'https://halisahakolik.app';   // ← DEĞİŞTİRİN
+// DEEP LINK — Tüm yapılandırma deepLink.js dosyasında.
+// Domain'i değiştirmek istersen oradaki WEB_BASE sabitini düzenle.
 // ═══════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════
@@ -831,6 +829,9 @@ export default function LiveMatch() {
   const [activeSessions, setActiveSessions] = useState([]);
   const [finishedSessions, setFinishedSessions] = useState([]);
 
+  // ★ NEW — Profesyonel davet paylaşım modal'ı
+  const [showShareModal, setShowShareModal] = useState(false);
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
@@ -1423,35 +1424,12 @@ export default function LiveMatch() {
     } catch (e) { setError(e.message); }
   };
 
-  const handleShareInvite = async () => {
+  // ★ Profesyonel paylaşım modal'ını aç
+  // (Tüm paylaşım mantığı ShareInviteModal.jsx + deepLink.js içinde)
+  const handleShareInvite = () => {
     if (!session) return;
-    const code = session.join_code;
-    // Gerçek deep link — DEEP_LINK_BASE sabiti yukarıda tanımlı
-    const deepLink = `${DEEP_LINK_BASE}/join?code=${code}`;
-    const fieldInfo = session.field_name ? `📍 ${session.field_name}\n` : '';
-    const shareText = `⚽ Halı Saha maçıma katıl!\n\n${fieldInfo}🔑 Oda kodu: ${code}\n\n👇 Linke tıkla, direkt gir:\n${deepLink}`;
-
     hapticLight();
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: `${session.team_a_name} vs ${session.team_b_name} — HalıSaha`,
-          text: shareText,
-          url: deepLink,
-        });
-      } catch (e) {
-        // Kullanıcı iptal ettiyse sessizce geç
-        if (/cancel/i.test(e?.message || '')) return;
-        // Share API başarısız → clipboard fallback
-        try {
-          await navigator.clipboard?.writeText(shareText);
-          showToast('📋 Davet metni kopyalandı');
-        } catch {}
-      }
-    } else if (navigator.clipboard) {
-      await navigator.clipboard.writeText(shareText);
-      showToast('📋 Davet metni kopyalandı');
-    }
+    setShowShareModal(true);
   };
 
   const handleCopyCode = () => {
@@ -1580,6 +1558,15 @@ export default function LiveMatch() {
             textAlign: 'center',
           }}>{toast}</div>
         )}
+
+        {/* ★ NEW — Profesyonel davet paylaşım modal'ı */}
+        <ShareInviteModal
+          open={showShareModal}
+          onClose={() => setShowShareModal(false)}
+          session={session}
+          hostNickname={getNickname()}
+          onToast={showToast}
+        />
       </div>
     </>
   );

@@ -22,7 +22,7 @@ export const TIER = {
 // ═══ Feature limitleri (free tier) ═══
 export const FREE_LIMITS = {
   ONLINE_MATCHES_LIFETIME: 1,    // hayatta 1 kez oda kurma hakkı
-  ONLINE_JOINS_LIFETIME:   1,    // hayatta 1 kez maça katılma hakkı
+  ONLINE_JOINS_LIFETIME:   3,    // hayatta 3 kez maça katılma hakkı
   HISTORY_LIMIT: 5,              // son 5 maç geçmişi
   TEAMS_LIMIT: 1,
   ADS: true,

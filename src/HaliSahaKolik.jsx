@@ -20,6 +20,7 @@ import {
   getOnlineMatchCount,
   getOnlineJoinCount,
   FREE_LIMITS,
+  isPremium,
 } from "./subscription";
 import {
   generateDefaultAttributes,
@@ -33,6 +34,9 @@ import {
 import SpiderChart from "./SpiderChart";
 import { getAllMatches, computePlayerStats } from "./matchHistoryStore";
 import LiveMatch from "./LiveMatch";
+import TeamBalancerAI from "./TeamBalancerAI";
+import AIFieldDistribution from "./AIFieldDistribution";
+import AIModeSheet from "./AIModeSheet";
 
 // ─── SCREENSHOT & SHARE UTILITY ───
 const captureAndShare = async (element, filename = "halisaha-kolik.png") => {
@@ -499,6 +503,8 @@ const FieldPlayer = ({
   isMatch, side, isGoalkeeper,
   // ★ YENİ: slot takası için
   slotIndex, slotPositions, onSlotChange,
+  // ★ YENİ: AI dağıtımındaki mevki cezası (varsa)
+  posMeta,
 }) => {
   const [pos, setPos] = useState({ x, y });
   const [drag, setDrag] = useState(false);
@@ -600,8 +606,22 @@ const FieldPlayer = ({
     };
   }, [drag, move, stop]);
 
-  const rc = ratingColor(player?.rating || 50);
+  // ★ Mevki dışı oynuyorsa AI cezasını uygula (temel rating bozulmaz, sadece gösterim)
+  const baseRating = player?.rating || 50;
+  const penalty = posMeta && posMeta.penalty > 0 ? posMeta.penalty : 0;
+  const isOutOfPos = !!(posMeta && posMeta.isOutOfPosition && penalty > 0);
+  const isEmergencyGK = !!(posMeta && posMeta.tier === "gk_emergency");
+  const effRating = Math.max(30, baseRating - penalty);
+  const rc = ratingColor(effRating);
   const isBottom = side === "A" || !isMatch;
+  // Hat-mesafesine göre renk: uyumlu=sarı, zorlama=turuncu, acil=kırmızı
+  const tierColor = isEmergencyGK || posMeta?.tier === "emergency" ? "#ef4444"
+    : posMeta?.tier === "stretch" ? "#fb923c"
+    : "#fbbf24";
+  const POS_SHORT = { "KALECİ": "KL", "DEFANS": "DEF", "STOPER": "STP", "SOL BEK": "SLB", "SAĞ BEK": "SĞB", "ORTA SAHA": "OS", "FORVET": "FV" };
+  const showChip = isOutOfPos || isEmergencyGK;
+  const natShort = POS_SHORT[posMeta?.naturalPos || player?.position] || "";
+  const playShort = POS_SHORT[posMeta?.playedRole] || "";
 
   return (
     <div
@@ -628,8 +648,13 @@ const FieldPlayer = ({
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 9.5, color: "rgba(255,255,255,0.4)", fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase" }}>{tPos(player?.position)}</span>
-            <span style={{ color: rc, fontSize: 13, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace" }}>{player?.rating}</span>
+            <span style={{ color: rc, fontSize: 13, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace" }}>{effRating}{penalty > 0 && <span style={{ color: isEmergencyGK ? "#f87171" : "#fbbf24", fontSize: 10, marginLeft: 3 }}>−{penalty}</span>}</span>
           </div>
+          {(isOutOfPos || isEmergencyGK) && (
+            <div style={{ fontSize: 9, color: isEmergencyGK ? "#f87171" : "#fbbf24", fontWeight: 700, marginTop: 1 }}>
+              {posMeta?.note || "Mevki dışı"}
+            </div>
+          )}
           <div style={{ position: "absolute", [isBottom ? "top" : "bottom"]: "100%", left: "50%", transform: "translateX(-50%)", border: "5px solid transparent", [isBottom ? "borderTopColor" : "borderBottomColor"]: "rgba(8,12,20,0.96)" }} />
         </div>
       )}
@@ -673,11 +698,27 @@ const FieldPlayer = ({
             background: `linear-gradient(135deg, ${rc}, ${rc}dd)`,
             color: "#fff", fontSize: 11, fontWeight: 900,
             borderRadius: 7, padding: "2px 6px", lineHeight: "16px",
-            border: "2px solid rgba(0,0,0,0.5)",
+            border: `2px solid ${(isOutOfPos || isEmergencyGK) ? (isEmergencyGK ? "#ef4444" : "#fbbf24") : "rgba(0,0,0,0.5)"}`,
             fontFamily: "'JetBrains Mono','SF Mono',monospace",
             boxShadow: "0 3px 8px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.25)",
             minWidth: 22, textAlign: "center",
-          }}>{player?.rating}</div>
+          }}>{effRating}</div>
+          {/* ★ Mevki dışı: profesyonel geçiş çipi (doğal → oynanan, −ceza) */}
+          {showChip && (
+            <div style={{
+              position: "absolute", top: isCaptain ? -28 : -10, left: "50%", transform: "translateX(-50%)",
+              display: "flex", alignItems: "center", gap: 3, zIndex: 6,
+              background: "rgba(8,12,20,0.95)", border: `1px solid ${tierColor}`,
+              borderRadius: 6, padding: "1px 5px", whiteSpace: "nowrap",
+              boxShadow: `0 2px 8px rgba(0,0,0,0.6), 0 0 8px ${tierColor}44`,
+              fontFamily: "'JetBrains Mono',monospace",
+            }}>
+              <span style={{ fontSize: 7.5, fontWeight: 700, color: "rgba(255,255,255,0.55)" }}>{natShort}</span>
+              <span style={{ fontSize: 8, color: tierColor }}>→</span>
+              <span style={{ fontSize: 7.5, fontWeight: 800, color: tierColor }}>{playShort}</span>
+              <span style={{ fontSize: 8, fontWeight: 900, color: tierColor, marginLeft: 1 }}>−{penalty}</span>
+            </div>
+          )}
           <button data-screenshot-hide="true" onClick={(e) => { e.stopPropagation(); onRemove?.(); }} style={{
             position: "absolute", top: -7, right: -9,
             width: 22, height: 22, borderRadius: "50%",
@@ -2281,6 +2322,10 @@ export default function LineupPro() {
   const [showSettings, setSS] = useState(null);
   const [showResult, setSR] = useState(false);
   const [showCaptain, setSC] = useState(false);
+  const [showBalancer, setShowBalancer] = useState(false); // ★ AI Takım Dağıtımı
+  const [showFieldAI, setShowFieldAI] = useState(false);   // ★ AI Saha Dağıtımı (tüm havuz → saha)
+  const [showAIMode, setShowAIMode] = useState(false);     // ★ AI Modu seçim menüsü
+  const [showAISplit, setShowAISplit] = useState(false);   // ★ AI A&B böl (tüm havuz → kadrolar)
   const [showAppSettings, setShowAppSettings] = useState(false); // ★ Genel ayarlar modal
   const [hapticsOn, setHapticsOnState] = useState(isHapticsEnabled());
   // ★ Rehber turu — App.js'teki tek Tour instance'ı window event ile yönetilir
@@ -2321,6 +2366,69 @@ export default function LineupPro() {
   const team = activeTeam === "A" ? teamA : teamB;
   const setTeam = activeTeam === "A" ? setTeamA : setTeamB;
   const tc = team.color.secondary;
+
+  // ★ AI Takım Dağıtımı — sonucu metin olarak paylaş
+  const shareBalancedTeams = useCallback(async (r) => {
+    if (!r) return;
+    const names = (arr) => arr.map((p) => `${p.name || ""} ${p.surname || ""}`.trim()).join(", ");
+    const txt =
+      `⚽ Takımlar — HalıSaha-Kolik\n\n` +
+      `A Takımı (ort. ${r.ratingA}): ${names(r.teamA)}\n` +
+      `B Takımı (ort. ${r.ratingB}): ${names(r.teamB)}\n\n` +
+      `Denge: %${r.balance}`;
+    try {
+      await Share.share({ title: "Takımlar", text: txt, dialogTitle: t("share") });
+    } catch (e) { /* iptal */ }
+  }, []);
+
+  // ★ AI Saha Dağıtımı — sonucu gerçek kadrolara + sahaya uygula
+  const applyFieldDistribution = useCallback((res) => {
+    if (!res || res.error) return;
+    setTeamA((tt) => ({
+      ...tt,
+      players: res.A.players,
+      fieldPlayers: res.A.fieldPlayers,
+      captain: res.A.captain || null,
+      slotMeta: res.A.meta || null,
+    }));
+    setTeamB((tt) => ({
+      ...tt,
+      players: res.B.players,
+      fieldPlayers: res.B.fieldPlayers,
+      captain: res.B.captain || null,
+      slotMeta: res.B.meta || null,
+    }));
+    hapticSuccess();
+    toast_("Takımlar sahaya dağıtıldı");
+  }, []);
+
+  // ★ AI A&B Böl — tüm havuzu iki dengeli kadroya yaz (saha sıfırlanır, temiz başlangıç)
+  const applyRosterSplit = useCallback((res) => {
+    if (!res || res.error) return;
+    setTeamA((tt) => ({
+      ...tt,
+      players: res.teamA,
+      fieldPlayers: Array(7).fill(null),
+      captain: null,
+    }));
+    setTeamB((tt) => ({
+      ...tt,
+      players: res.teamB,
+      fieldPlayers: Array(7).fill(null),
+      captain: null,
+    }));
+    hapticSuccess();
+    toast_("Oyuncular A ve B takımına bölündü");
+  }, []);
+
+  // ★ Birleşik havuz (iki takımın tüm oyuncuları, tekilleştirilmiş)
+  const combinedPool = useMemo(() => {
+    const seen = new Set(); const out = [];
+    [...(teamA.players || []), ...(teamB.players || [])].forEach((p) => {
+      if (p && !seen.has(p.id)) { seen.add(p.id); out.push(p); }
+    });
+    return out;
+  }, [teamA.players, teamB.players]);
 
   // ★ REKLAM: Uygulama açılışında reklamları başlat
   useEffect(() => {
@@ -2548,34 +2656,9 @@ export default function LineupPro() {
     });
   };
 
-  const autoFill = async (side) => {
-    const doFill = () => {
-      const setter = side === "A" ? setTeamA : setTeamB;
-      setter((t) => {
-        const on = new Set(t.fieldPlayers.filter(Boolean));
-        const av = [...t.players.filter((p) => !on.has(p.id))];
-        const n = [...t.fieldPlayers];
-        const positionsNeeded = FORMATIONS[t.formation].positions;
-        for (let i = 0; i < 7; i++) { if (!n[i] && av.length) { const reqRole = positionsNeeded[i].role; const matchIdx = av.findIndex((p) => p.position === reqRole); if (matchIdx !== -1) { n[i] = av[matchIdx].id; av.splice(matchIdx, 1); } } }
-        for (let i = 0; i < 7; i++) { if (!n[i] && av.length) { const reqRole = positionsNeeded[i].role; const matchIdx = av.findIndex((p) => { if (reqRole.includes("BEK") || reqRole === "STOPER" || reqRole === "DEFANS") { return ["DEFANS", "SOL BEK", "SAĞ BEK", "STOPER"].includes(p.position); } return false; }); if (matchIdx !== -1) { n[i] = av[matchIdx].id; av.splice(matchIdx, 1); } } }
-        av.sort((a, b) => b.rating - a.rating);
-        for (let i = 0; i < 7; i++) { if (!n[i] && av.length) { n[i] = av.shift().id; } }
-        return { ...t, fieldPlayers: n };
-      });
-      toast_(t("t_auto_filled"));
-    };
-
-    const rewarded = await showRewarded(doFill);
-    if (!rewarded) {
-      showInterstitial();
-      doFill();
-    }
-    hapticSuccess();
-  };
-
   const clearField = (side) => {
     hapticWarning();
-    (side === "A" ? setTeamA : setTeamB)((tt) => ({ ...tt, fieldPlayers: Array(7).fill(null) }));
+    (side === "A" ? setTeamA : setTeamB)((tt) => ({ ...tt, fieldPlayers: Array(7).fill(null), slotMeta: null }));
     toast_(t("t_field_cleared"));
   };
 
@@ -2588,11 +2671,14 @@ export default function LineupPro() {
       if (existingIdx === idx) return tt;        // aynı slot — değişiklik yok
       if (existingIdx !== -1) n[existingIdx] = null;  // eski slotu temizle
       n[idx] = id;
+      // Manuel yerleştirme → o slot(lar)ın AI mevki cezası geçersiz
+      let sm = tt.slotMeta;
+      if (sm) { sm = [...sm]; sm[idx] = null; if (existingIdx !== -1) sm[existingIdx] = null; }
       if (n.filter(Boolean).length === 7 && !milestones.current.complete) {
         milestones.current.complete = true;
         setTimeout(() => { hapticSuccess(); toast_(t("t_squad_complete")); }, 250);
       }
-      return { ...tt, fieldPlayers: n };
+      return { ...tt, fieldPlayers: n, slotMeta: sm };
     });
   };
 
@@ -2604,13 +2690,20 @@ export default function LineupPro() {
     setter((tt) => {
       const n = [...tt.fieldPlayers];
       [n[fromIdx], n[toIdx]] = [n[toIdx], n[fromIdx]];
-      return { ...tt, fieldPlayers: n };
+      // Takas → her iki slotun AI cezası geçersiz (mevkiler değişti)
+      let sm = tt.slotMeta;
+      if (sm) { sm = [...sm]; sm[fromIdx] = null; sm[toIdx] = null; }
+      return { ...tt, fieldPlayers: n, slotMeta: sm };
     });
   };
 
   const removeFromField = (side, idx) => {
     hapticLight();
-    (side === "A" ? setTeamA : setTeamB)((tt) => { const n = [...tt.fieldPlayers]; n[idx] = null; return { ...tt, fieldPlayers: n }; });
+    (side === "A" ? setTeamA : setTeamB)((tt) => {
+      const n = [...tt.fieldPlayers]; n[idx] = null;
+      let sm = tt.slotMeta; if (sm) { sm = [...sm]; sm[idx] = null; }
+      return { ...tt, fieldPlayers: n, slotMeta: sm };
+    });
   };
 
   const toggleCaptain = (side, id) => {
@@ -2983,6 +3076,22 @@ const handleShareLineup = async () => {
       <div style={{ flex: 1, overflow: "auto", paddingBottom: `calc(${TAB_BAR_HEIGHT}px + ${BOTTOM_SAFE} + 8px)` }}>
         {tab === "field" ? (
           <div key="field" style={{ animation: "tabContentIn 0.32s cubic-bezier(.22,.85,.32,1) both" }}>
+            {isMatch && (
+              <div style={{ padding: "9px 13px 3px" }}>
+                <button onClick={() => { hapticMedium(); setShowAIMode(true); }} style={{
+                  width: "100%", display: "flex", alignItems: "center", gap: 11, padding: "12px 14px",
+                  borderRadius: 12, border: "1px solid rgba(16,185,129,0.3)", cursor: "pointer",
+                  background: "linear-gradient(135deg, rgba(16,185,129,0.16), rgba(16,185,129,0.04))",
+                }}>
+                  <div style={{ width: 34, height: 34, borderRadius: 9, display: "grid", placeItems: "center", background: "rgba(16,185,129,0.18)", border: "1px solid rgba(16,185,129,0.35)", fontFamily: "'Bebas Neue',sans-serif", fontSize: 17, color: "#10b981", letterSpacing: 1, flexShrink: 0 }}>AI</div>
+                  <div style={{ flex: 1, textAlign: "left" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: "'Bebas Neue',sans-serif", fontSize: 16, letterSpacing: 0.8, color: "#10b981" }}>AI MODU<span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 8, letterSpacing: 1, color: "#fbbf24", border: "1px solid rgba(251,191,36,0.4)", borderRadius: 4, padding: "1px 4px" }}>BETA</span></div>
+                    <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.42)", marginTop: 1 }}>Oyuncuları A&B'ye böl ya da sahaya dağıt</div>
+                  </div>
+                  <div style={{ color: "rgba(16,185,129,0.5)", transform: "rotate(-90deg)" }}><I.Chevron /></div>
+                </button>
+              </div>
+            )}
             {/* Formation bar */}
             <div style={{ padding: "5px 13px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
               <div style={{ display: "flex", gap: 4 }}>
@@ -2998,41 +3107,6 @@ const handleShareLineup = async () => {
                 ); })}
               </div>
               <div style={{ display: "flex", gap: 4 }}>
-                {(isMatch ? ["A", "B"] : ["A"]).map((s) => {
-                  const tm = s === "A" ? teamA : teamB;
-                  // Takım isminin ilk 2 büyük harfi (örn "Manchester" → "MA", "Real Madrid" → "RM")
-                  const teamAbbr = (() => {
-                    const parts = (tm.name || "").trim().split(/\s+/).filter(Boolean);
-                    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-                    if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
-                    return s; // fallback "A"/"B"
-                  })();
-                  return (
-                    <button
-                      key={`af${s}`}
-                      onClick={() => autoFill(s)}
-                      style={{
-                        ...S.mini,
-                        padding: "5px 9px",
-                        fontSize: 10,
-                        fontWeight: 800,
-                        gap: 4,
-                        display: "flex",
-                        alignItems: "center",
-                        color: tm.color.secondary,
-                        border: `1px solid ${tm.color.secondary}44`,
-                        background: `${tm.color.secondary}10`,
-                        borderRadius: 8,
-                        letterSpacing: 0.5,
-                      }}
-                    >
-                      <I.Zap />
-                      <span style={{ fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>
-                        {isMatch ? teamAbbr : t("auto_fill")}
-                      </span>
-                    </button>
-                  );
-                })}
                 <button onClick={() => { clearField("A"); if (isMatch) clearField("B"); }} style={{ ...S.mini, padding: 5, color: "#f87171" }}><I.Reset /></button>
               </div>
             </div>
@@ -3059,6 +3133,7 @@ const handleShareLineup = async () => {
                       const p = pid ? teamA.players.find((x) => x.id === pid) : null;
                       return p
                         ? (<FieldPlayer key={`a${idx}`} player={p} x={pos.x} y={pos.y} fieldRef={fieldRef} teamColor={teamA.color.secondary} isCaptain={teamA.captain === p.id} side="A" isMatch={isMatch} isGoalkeeper={pos.role === "KALECİ"} onToggleCaptain={() => toggleCaptain("A", p.id)} onRemove={() => removeFromField("A", idx)}
+                        posMeta={teamA.slotMeta && teamA.slotMeta[idx]}
                         slotIndex={idx} slotPositions={positions} onSlotChange={(newIdx) => movePlayerOnField("A", idx, newIdx)} />)
                         : (<EmptySlot key={`ae${idx}`} x={pos.x} y={pos.y} role={pos.role} teamColor={teamA.color.secondary} onDrop={(id) => placePlayer("A", idx, id)} onClickPlus={() => handleEmptySlotTap("A", idx, pos.role)} tourTarget={idx === tourTargetIdx ? "empty-slot" : undefined} />);
                     });
@@ -3077,6 +3152,7 @@ const handleShareLineup = async () => {
                             isMatch={isMatch} isGoalkeeper={pos.role === "KALECİ"}
                             onToggleCaptain={() => toggleCaptain("B", p.id)}
                             onRemove={() => removeFromField("B", idx)}
+                            posMeta={teamB.slotMeta && teamB.slotMeta[idx]}
                             slotIndex={idx} slotPositions={bPositions}
                             onSlotChange={(newIdx) => movePlayerOnField("B", idx, newIdx)} />)
                         : (<EmptySlot key={`be${idx}`} x={pos.x} y={pos.y} role={pos.role}
@@ -3129,6 +3205,19 @@ const handleShareLineup = async () => {
               <div style={{ flex: 1, textAlign: "left" }}><div style={{ fontSize: 11, fontWeight: 700, color: "#fbbf24" }}>{t("captain")}</div><div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)" }}>{team.captain ? (() => { const cp = team.players.find((p) => p.id === team.captain); return cp ? `${cp.name} ${cp.surname}` : t("captain_none"); })() : t("captain_none")}</div></div>
               <div style={{ color: "rgba(251,191,36,0.5)", transform: "rotate(-90deg)" }}><I.Chevron /></div>
             </button>
+            {team.players.length >= 2 && (
+              <button
+                onClick={() => { hapticMedium(); setShowBalancer(true); }}
+                style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", background: "linear-gradient(135deg, rgba(16,185,129,0.10), rgba(16,185,129,0.03))", borderRadius: 10, marginBottom: 10, border: "1px solid rgba(16,185,129,0.22)", cursor: "pointer", width: "100%" }}
+              >
+                <div style={{ width: 30, height: 30, borderRadius: 8, display: "grid", placeItems: "center", background: "rgba(16,185,129,0.14)", border: "1px solid rgba(16,185,129,0.3)", fontFamily: "'Bebas Neue', sans-serif", fontSize: 15, letterSpacing: 1, color: "#10b981", flexShrink: 0 }}>AI</div>
+                <div style={{ flex: 1, textAlign: "left" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#10b981", display: "flex", alignItems: "center", gap: 6 }}>Takımları Karıştır<span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 8, letterSpacing: 1, color: "#fbbf24", border: "1px solid rgba(251,191,36,0.4)", borderRadius: 4, padding: "1px 4px" }}>BETA</span></div>
+                  <div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)" }}>AI ile dengeli iki kadro oluştur</div>
+                </div>
+                <div style={{ color: "rgba(16,185,129,0.5)", transform: "rotate(-90deg)" }}><I.Chevron /></div>
+              </button>
+            )}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 9 }}><span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontWeight: 600 }}>{t("players_count", {n: filtered.length})}</span><span style={{ fontSize: 10, color: "rgba(255,255,255,0.22)" }}>{t("on_field", {n: onFieldIds.size})}</span></div>
             <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
               {filtered.map((p) => (<PlayerCard key={p.id} player={p} isOnField={onFieldIds.has(p.id)} teamColor={tc} isCaptain={team.captain === p.id} onToggleCaptain={(id) => toggleCaptain(activeTeam, id)} onEdit={(pl) => { setEP(pl); setSP(true); }} onDelete={deletePlayer} onShowStats={(pl) => { setHistoryPlayer(pl); setMode("history"); }} onTransfer={isMatch ? (pl) => setTransferRequest({ player: pl, fromSide: activeTeam }) : undefined} formDelta={formDeltaMap[p.id]} />))}
@@ -3260,6 +3349,49 @@ const handleShareLineup = async () => {
       )}
 
       <Modal open={showCaptain} onClose={() => setSC(false)} title={t("captain_select")}><CaptainSelector team={team} accent={tc} onSelect={(id) => { toggleCaptain(activeTeam, id); if (id) { setSC(false); toast_(t("t_captain_set")); } else { toast_(t("t_captain_removed")); } }} /></Modal>
+      {showBalancer && (
+        <TeamBalancerAI
+          players={team.players}
+          formByPlayerId={formDeltaMap}
+          onClose={() => setShowBalancer(false)}
+          onShare={shareBalancedTeams}
+        />
+      )}
+      {showAIMode && (
+        <AIModeSheet
+          poolSize={combinedPool.length}
+          showAdBadge={!isPremium()}
+          onClose={() => setShowAIMode(false)}
+          onSelect={async (m) => {
+            setShowAIMode(false);
+            // ★ Her AI modu 1 reward reklam ister (premium hariç)
+            const open = () => { if (m === "split") setShowAISplit(true); else setShowFieldAI(true); };
+            if (isPremium()) { open(); return; }
+            const rewarded = await showRewarded(open);
+            if (!rewarded) { showInterstitial(); open(); }
+          }}
+        />
+      )}
+      {showAISplit && (
+        <TeamBalancerAI
+          players={combinedPool}
+          formByPlayerId={formDeltaMap}
+          onClose={() => setShowAISplit(false)}
+          onCommit={applyRosterSplit}
+          commitLabel="UYGULA"
+        />
+      )}
+      {showFieldAI && (
+        <AIFieldDistribution
+          teamA={teamA}
+          teamB={teamB}
+          positionsA={(FORMATIONS[teamA.formation] || FORMATIONS["3-2-1"]).positions}
+          positionsB={(FORMATIONS[teamB.formation] || FORMATIONS["3-2-1"]).positions}
+          formByPlayerId={formDeltaMap}
+          onClose={() => setShowFieldAI(false)}
+          onCommit={applyFieldDistribution}
+        />
+      )}
       <Modal open={!!quickSelect} onClose={() => setQS(null)} title={t("select")}>{quickSelect && (<QuickSelect role={quickSelect.role} players={(quickSelect.side === "A" ? teamA : teamB).players} teamColor={(quickSelect.side === "A" ? teamA : teamB).color.secondary} onFieldIds={new Set((quickSelect.side === "A" ? teamA : teamB).fieldPlayers.filter(Boolean))} onSelect={(id) => { placePlayer(quickSelect.side, quickSelect.idx, id); setQS(null); }} />)}</Modal>
       <Modal open={!!showSettings} onClose={() => setSS(null)} title={t("team_settings")}>
         {showSettings && (() => { const tm = showSettings === "A" ? teamA : teamB; const setter = showSettings === "A" ? setTeamA : setTeamB; return (
