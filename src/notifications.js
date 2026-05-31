@@ -18,21 +18,13 @@
 // ─────────────────────────────────────────────────────────────
 
 import { Capacitor } from "@capacitor/core";
+import { LocalNotifications } from "@capacitor/local-notifications";
 
 const CH_ID = "reengage";
-let _plugin = null;
 
-async function getPlugin() {
-  if (_plugin) return _plugin;
+function getPlugin() {
   if (!Capacitor.isNativePlatform()) return null;
-  try {
-    const mod = await import("@capacitor/local-notifications");
-    _plugin = mod.LocalNotifications;
-    return _plugin;
-  } catch (e) {
-    console.warn("[notif] local-notifications yüklenemedi:", e?.message);
-    return null;
-  }
+  return LocalNotifications;
 }
 
 // ═══ EĞLENCELİ MESAJ HAVUZU ═══
@@ -101,7 +93,7 @@ function fireDate(daysFromNow) {
 
 // ═══ İzin + kanal kurulumu (bir kez) ═══
 export async function initNotifications() {
-  const LN = await getPlugin();
+  const LN = getPlugin();
   if (!LN) return false;
   try {
     const perm = await LN.checkPermissions();
@@ -143,7 +135,7 @@ async function cancelReengagement(LN) {
 
 // ═══ Geri-getirme planını tazele (her uygulama açılışında çağır) ═══
 export async function scheduleReengagement() {
-  const LN = await getPlugin();
+  const LN = getPlugin();
   if (!LN) return false;
   try {
     const perm = await LN.checkPermissions();
@@ -176,7 +168,7 @@ export async function scheduleReengagement() {
 // Kullanıcı uygulamayı ilk kez açtıktan birkaç saat sonra sıcak bir hatırlatma.
 // Hemen göndermeyiz (kullanıcı zaten içeride); 3 saat sonra planlanır.
 export async function scheduleWelcome() {
-  const LN = await getPlugin();
+  const LN = getPlugin();
   if (!LN) return false;
   try {
     // Zaten gönderildiyse tekrar planlama
@@ -185,7 +177,7 @@ export async function scheduleWelcome() {
     const perm = await LN.checkPermissions();
     if (perm.display !== "granted") return false;
 
-    const at = new Date(Date.now() + 3 * 60 * 60 * 1000); // 3 saat sonra
+    const at = new Date(Date.now() + 5 * 1000); // ~anında (5 sn sonra)
     await LN.schedule({
       notifications: [{
         id: WELCOME_ID,
@@ -281,7 +273,7 @@ function ctxFireDate(daysFromNow) {
 // state: { squadComplete: bool, hasCaptain: bool, hasPlayedMatch: bool, hasSquad: bool }
 // hasSquad: kadroda hiç oyuncu var mı (boş takıma bildirim atmayız)
 export async function scheduleContextNotifications(state = {}) {
-  const LN = await getPlugin();
+  const LN = getPlugin();
   if (!LN) return false;
   try {
     const perm = await LN.checkPermissions();
@@ -353,7 +345,7 @@ export async function scheduleContextNotifications(state = {}) {
 
 // Kullanıcı bildirime dokununca uygulama açılır; ekstra yönlendirme istenirse:
 export async function addNotificationTapListener(handler) {
-  const LN = await getPlugin();
+  const LN = getPlugin();
   if (!LN) return;
   try {
     LN.addListener("localNotificationActionPerformed", (action) => {

@@ -1,5 +1,6 @@
 import { AdMob, BannerAdSize, BannerAdPosition, MaxAdContentRating, AdmobConsentStatus } from '@capacitor-community/admob';
 import { Capacitor } from '@capacitor/core';
+import { isPremium } from './subscription';
 
 const IS_TESTING = false;
 
@@ -195,6 +196,8 @@ export async function initializeAdMob() {
 // ═══ BANNER ═══
 export async function showBanner() {
   if (!isNative() || !isInitialized) return;
+  // ★ Premium kullanıcı: hiç reklam yok. Olası kalıntı banner'ı da gizle.
+  if (isPremium()) { try { await AdMob.hideBanner(); } catch (_) {} return; }
   if (isBannerShowing) return;
   try {
     // ★ Önceki bir banner kalıntısı varsa temizle (Android race condition)
@@ -240,6 +243,7 @@ export async function removeBanner() {
 // ═══ INTERSTITIAL ═══
 export async function prepareInterstitial() {
   if (!isNative() || !isInitialized) return;
+  if (isPremium()) return; // ★ Premium: interstitial hazırlama
   if (isInterstitialReady || isInterstitialLoading) return; // ★ Çift yükleme önleme
 
   isInterstitialLoading = true;
@@ -272,6 +276,7 @@ export async function prepareInterstitial() {
 
 export async function showInterstitial() {
   if (!isNative() || !isInitialized) return false;
+  if (isPremium()) return false; // ★ Premium: interstitial gösterme
 
   const now = Date.now();
   if (now - lastInterstitialTime < INTERSTITIAL_COOLDOWN_MS && lastInterstitialTime > 0) {
@@ -343,6 +348,9 @@ export async function prepareRewarded() {
 
 export async function showRewarded(onReward) {
   if (!isNative() || !isInitialized) return false;
+  // ★ Premium: reklam GÖSTERME ama ödülü ver (kullanıcı içeriği kazansın).
+  //   true döner → çağıran taraf ödülü verilmiş sayar, fallback interstitial açmaz.
+  if (isPremium()) { if (onReward) onReward({ premium: true }); return true; }
 
   const now = Date.now();
   if (now - lastRewardedTime < REWARDED_COOLDOWN_MS) return false;

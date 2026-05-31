@@ -2505,6 +2505,15 @@ export default function LineupPro() {
     }
   }, [mode, showPlayer, showCaptain, showAppSettings, showResult, showSettings, quickSelect, tourActive]);
 
+  // ★ Premium'a geçilince banner'ı anında gizle (uygulama açıkken satın alma)
+  useEffect(() => {
+    const onSubChange = () => {
+      try { if (isPremium()) hideBanner(); } catch {}
+    };
+    window.addEventListener("hk:subscription-changed", onSubChange);
+    return () => window.removeEventListener("hk:subscription-changed", onSubChange);
+  }, []);
+
   // ★ Onboarding bittiğinde banner'ı tekrar göster — kademeli retry
   useEffect(() => {
     const onDone = () => {
