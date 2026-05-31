@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "521007621587",
+    "project_id": "halisahakolik-7f135",
+    "storage_bucket": "halisahakolik-7f135.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:521007621587:android:ac8871d0978643d8b1bb26",
+        "android_client_info": {
+          "package_name": "com.halisahakolik.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBydYdK0Sf5sadpUXJOOYUvmqbNZIRszSI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

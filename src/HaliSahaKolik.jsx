@@ -37,6 +37,8 @@ import LiveMatch from "./LiveMatch";
 import TeamBalancerAI from "./TeamBalancerAI";
 import AIFieldDistribution from "./AIFieldDistribution";
 import AIModeSheet from "./AIModeSheet";
+import { compatOf, TIER_LABEL } from "./aiFieldDistribute";
+import { scheduleContextNotifications } from "./notifications";
 
 // ─── SCREENSHOT & SHARE UTILITY ───
 const captureAndShare = async (element, filename = "halisaha-kolik.png") => {
@@ -503,7 +505,9 @@ const FieldPlayer = ({
   isMatch, side, isGoalkeeper,
   // ★ YENİ: slot takası için
   slotIndex, slotPositions, onSlotChange,
-  // ★ YENİ: AI dağıtımındaki mevki cezası (varsa)
+  // ★ YENİ: bulunduğu slotun mevkisi (canlı mevki-dışı cezası için)
+  slotRole,
+  // (eski) AI dağıtımındaki meta — artık canlı hesaplıyoruz, opsiyonel
   posMeta,
 }) => {
   const [pos, setPos] = useState({ x, y });
@@ -606,22 +610,27 @@ const FieldPlayer = ({
     };
   }, [drag, move, stop]);
 
-  // ★ Mevki dışı oynuyorsa AI cezasını uygula (temel rating bozulmaz, sadece gösterim)
+  // ★ Mevki dışı oynuyorsa cezayı CANLI hesapla (elle taşımada da çalışır)
+  //   Temel rating bozulmaz; sadece bulunduğu slota göre etkin güç gösterilir.
   const baseRating = player?.rating || 50;
-  const penalty = posMeta && posMeta.penalty > 0 ? posMeta.penalty : 0;
-  const isOutOfPos = !!(posMeta && posMeta.isOutOfPosition && penalty > 0);
-  const isEmergencyGK = !!(posMeta && posMeta.tier === "gk_emergency");
+  const natPos = player?.position;
+  const playedRole = slotRole || natPos;
+  const compat = (natPos && playedRole) ? compatOf(natPos, playedRole) : { tier: "natural", penalty: 0 };
+  const penalty = compat.penalty > 0 ? compat.penalty : 0;
+  const isEmergencyGK = compat.tier === "gk_emergency";
+  const isOutOfPos = penalty > 0 && natPos !== playedRole;
   const effRating = Math.max(30, baseRating - penalty);
   const rc = ratingColor(effRating);
   const isBottom = side === "A" || !isMatch;
   // Hat-mesafesine göre renk: uyumlu=sarı, zorlama=turuncu, acil=kırmızı
-  const tierColor = isEmergencyGK || posMeta?.tier === "emergency" ? "#ef4444"
-    : posMeta?.tier === "stretch" ? "#fb923c"
+  const tierColor = isEmergencyGK || compat.tier === "emergency" ? "#ef4444"
+    : compat.tier === "stretch" ? "#fb923c"
     : "#fbbf24";
   const POS_SHORT = { "KALECİ": "KL", "DEFANS": "DEF", "STOPER": "STP", "SOL BEK": "SLB", "SAĞ BEK": "SĞB", "ORTA SAHA": "OS", "FORVET": "FV" };
   const showChip = isOutOfPos || isEmergencyGK;
-  const natShort = POS_SHORT[posMeta?.naturalPos || player?.position] || "";
-  const playShort = POS_SHORT[posMeta?.playedRole] || "";
+  const natShort = POS_SHORT[natPos] || "";
+  const playShort = POS_SHORT[playedRole] || "";
+  const tierNote = TIER_LABEL[compat.tier] || "";
 
   return (
     <div
@@ -652,7 +661,7 @@ const FieldPlayer = ({
           </div>
           {(isOutOfPos || isEmergencyGK) && (
             <div style={{ fontSize: 9, color: isEmergencyGK ? "#f87171" : "#fbbf24", fontWeight: 700, marginTop: 1 }}>
-              {posMeta?.note || "Mevki dışı"}
+              {tierNote || "Mevki dışı"}
             </div>
           )}
           <div style={{ position: "absolute", [isBottom ? "top" : "bottom"]: "100%", left: "50%", transform: "translateX(-50%)", border: "5px solid transparent", [isBottom ? "borderTopColor" : "borderBottomColor"]: "rgba(8,12,20,0.96)" }} />
@@ -2512,6 +2521,41 @@ export default function LineupPro() {
     saveData(teamA, teamB);
   }, [teamA, teamB]);
 
+  // ★ DURUM-BAZLI BİLDİRİM: "Takımım" (teamA) durumuna göre spam'siz hatırlatma
+  //   Kadro eksik / kaptan yok / hiç maç oynanmamış → tek hatırlatma (cooldown'lu).
+  //   Koşul düzelince ilgili bildirim iptal olur. Debounce ile sık çağrılmaz.
+  useEffect(() => {
+    const tid = setTimeout(() => {
+      try {
+        const onField = (teamA.fieldPlayers || []).filter(Boolean).length;
+        const hasSquad = (teamA.players || []).length > 0;
+        let hasPlayed = false;
+        try { hasPlayed = (getAllMatches() || []).length > 0; } catch {}
+        let usedAI = false;
+        try { usedAI = localStorage.getItem("halisaha_used_ai") === "1"; } catch {}
+        // Online hak bitti mi? (premium değilse, hem katılma hem oluşturma hakkı tükenmişse)
+        let onlineQuotaOut = false;
+        try {
+          if (!isPremium()) {
+            const joinLeft = canJoinOnlineMatch()?.allowed;
+            const createLeft = canCreateOnlineMatch()?.allowed;
+            onlineQuotaOut = (joinLeft === false && createLeft === false);
+          }
+        } catch {}
+        scheduleContextNotifications({
+          hasSquad,
+          squadComplete: onField >= 7,
+          hasCaptain: !!teamA.captain,
+          hasPlayedMatch: hasPlayed,
+          usedAI,
+          playerCount: (teamA.players || []).length,
+          onlineQuotaOut,
+        }).catch(() => {});
+      } catch {}
+    }, 1500);
+    return () => clearTimeout(tid);
+  }, [teamA.players, teamA.fieldPlayers, teamA.captain]);
+
   // ★ MATCH-END TOUR: maç modunda her iki takımda en az 1 oyuncu sahadayken
   //    ilk kez "Maçı Bitir" butonunu vurgulayan mini-tour'u tetikle
   useEffect(() => {
@@ -3134,6 +3178,7 @@ const handleShareLineup = async () => {
                       return p
                         ? (<FieldPlayer key={`a${idx}`} player={p} x={pos.x} y={pos.y} fieldRef={fieldRef} teamColor={teamA.color.secondary} isCaptain={teamA.captain === p.id} side="A" isMatch={isMatch} isGoalkeeper={pos.role === "KALECİ"} onToggleCaptain={() => toggleCaptain("A", p.id)} onRemove={() => removeFromField("A", idx)}
                         posMeta={teamA.slotMeta && teamA.slotMeta[idx]}
+                        slotRole={pos.role}
                         slotIndex={idx} slotPositions={positions} onSlotChange={(newIdx) => movePlayerOnField("A", idx, newIdx)} />)
                         : (<EmptySlot key={`ae${idx}`} x={pos.x} y={pos.y} role={pos.role} teamColor={teamA.color.secondary} onDrop={(id) => placePlayer("A", idx, id)} onClickPlus={() => handleEmptySlotTap("A", idx, pos.role)} tourTarget={idx === tourTargetIdx ? "empty-slot" : undefined} />);
                     });
@@ -3153,6 +3198,7 @@ const handleShareLineup = async () => {
                             onToggleCaptain={() => toggleCaptain("B", p.id)}
                             onRemove={() => removeFromField("B", idx)}
                             posMeta={teamB.slotMeta && teamB.slotMeta[idx]}
+                            slotRole={pos.role}
                             slotIndex={idx} slotPositions={bPositions}
                             onSlotChange={(newIdx) => movePlayerOnField("B", idx, newIdx)} />)
                         : (<EmptySlot key={`be${idx}`} x={pos.x} y={pos.y} role={pos.role}
@@ -3366,6 +3412,7 @@ const handleShareLineup = async () => {
             setShowAIMode(false);
             // ★ Her AI modu 1 reward reklam ister (premium hariç)
             const open = () => { if (m === "split") setShowAISplit(true); else setShowFieldAI(true); };
+            try { localStorage.setItem("halisaha_used_ai", "1"); } catch {}
             if (isPremium()) { open(); return; }
             const rewarded = await showRewarded(open);
             if (!rewarded) { showInterstitial(); open(); }

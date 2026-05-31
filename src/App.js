@@ -12,6 +12,8 @@ import { Capacitor } from "@capacitor/core";
 // ★ NEW — Deep link / Landing page
 import JoinLandingPage from "./JoinLandingPage";
 import { parseCodeFromUrl } from "./deepLink";
+import { initNotifications, scheduleReengagement, scheduleWelcome } from "./notifications";
+import { initPush } from "./push";
 
 // ─── ADMOB / IAP DEBUG PANEL ─────────────────────────────────
 // Default KAPALI — production'da görünmesin.
@@ -131,6 +133,20 @@ export default function App() {
     //   Native değilse (web) no-op. PaywallScreen iap.js'i çağrır.
     iap.init();
 
+    // ★ Eğlenceli geri-getirme bildirimleri — izin al + planı tazele.
+    //   Her açılışta planlananlar sıfırlanıp yeniden kurulur → aktif kullanıcı
+    //   spam yemez, yalnızca uzaklaşan kullanıcıya bildirim gider.
+    (async () => {
+      try {
+        await initNotifications();
+        await scheduleWelcome();
+        await scheduleReengagement();
+      } catch (e) { /* sessiz geç */ }
+    })();
+
+    // ★ FCM push — admin'in Firebase Console'dan herkese bildirim atabilmesi için kayıt
+    initPush();
+
     // ─── Deep link join code dispatcher ───
     const dispatchJoinCode = (code) => {
       if (!code?.trim()) return;
@@ -153,11 +169,17 @@ export default function App() {
     //   Tüm formatlar deepLink.js → parseCodeFromUrl ile yakalanır.
     // ═══════════════════════════════════════════════════════════
     let capListener = null;
+    let resumeListener = null;
     if (Capacitor.isNativePlatform()) {
       CapApp.addListener('appUrlOpen', (data) => {
         const code = parseCodeFromUrl(data.url);
         if (code) dispatchJoinCode(code);
       }).then(listener => { capListener = listener; });
+
+      // ★ Uygulama öne gelince geri-getirme planını tazele (sayaç sıfırlanır)
+      CapApp.addListener('resume', () => {
+        scheduleReengagement().catch(() => {});
+      }).then(listener => { resumeListener = listener; });
     } else {
       // ═══════════════════════════════════════════════════════════
       // WEB — URL'den kodu yakala
@@ -210,6 +232,7 @@ export default function App() {
       window.removeEventListener("halisaha:start-match-end-tour", onStartMatchEndTour);
       // Capacitor deep link listener'ı temizle
       if (capListener) capListener.remove();
+      if (resumeListener) resumeListener.remove();
     };
   }, []);
 
