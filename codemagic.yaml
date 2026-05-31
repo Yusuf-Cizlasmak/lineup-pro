@@ -20,7 +20,7 @@ workflows:
         GAD_APP_ID: "ca-app-pub-2886543552287006~5889085689"
         # Marketing version — her store upload'unda mutlaka bump et.
         # Apple aynı versiyonu iki kez kabul etmez (Error 90062 / 90186).
-        MARKETING_VERSION: "1.3"
+        MARKETING_VERSION: "1.4"
         # App Store Connect'te bilinen en yüksek build numarası.
         # Yeni upload'larda otomatik tespit edersek bunu kullanmayız,
         # tespit başarısız olursa bu sayı taban olur.
