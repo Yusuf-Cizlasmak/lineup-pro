@@ -14,6 +14,7 @@ import JoinLandingPage from "./JoinLandingPage";
 import { parseCodeFromUrl, queueJoinCode } from "./deepLink";
 import { initNotifications, scheduleReengagement, scheduleWelcome } from "./notifications";
 import { initPush } from "./push";
+import { initAnalytics, track, EVENTS } from "./analytics";
 
 // ─── ADMOB / IAP DEBUG PANEL ─────────────────────────────────
 // Default KAPALI — production'da görünmesin.
@@ -129,6 +130,10 @@ export default function App() {
     const onboarded = localStorage.getItem(ONBOARDING_KEY) === "1";
     if (!onboarded) setShowOnboarding(true);
 
+    // ★ Ölçüm — kullanıcının nerede bıraktığını görmek için (anahtar yoksa no-op)
+    initAnalytics();
+    track(EVENTS.APP_OPEN, { source: "cold", onboarded });
+
     // ★ RevenueCat IAP — App boot'unda bir kez init et
     //   Native değilse (web) no-op. PaywallScreen iap.js'i çağrır.
     iap.init();
@@ -190,6 +195,7 @@ export default function App() {
 
       // ★ Uygulama öne gelince geri-getirme planını tazele (sayaç sıfırlanır)
       CapApp.addListener('resume', () => {
+        track(EVENTS.APP_OPEN, { source: "resume" });
         scheduleReengagement().catch(() => {});
       }).then(listener => { resumeListener = listener; });
     } else {
