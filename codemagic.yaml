@@ -278,7 +278,7 @@ workflows:
               i=$((i+1))
             done
           fi
-          if [ -z "$DOMAINS" ]; then DOMAINS="applinks:davet.halisahakolik.com.tr"; fi
+          if [ -z "$DOMAINS" ]; then DOMAINS="applinks:halisahakolik.com.tr"; fi
 
           # Sıfırdan üret
           printf '%s\n' \

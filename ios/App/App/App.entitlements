@@ -12,7 +12,7 @@
 	     Buraya aps-environment EKLEME (Push capability açılmadan imza kırılır). -->
 	<key>com.apple.developer.associated-domains</key>
 	<array>
-		<string>applinks:davet.halisahakolik.com.tr</string>
+		<string>applinks:halisahakolik.com.tr</string>
 	</array>
 </dict>
 </plist>

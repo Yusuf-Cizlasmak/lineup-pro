@@ -22,7 +22,7 @@ import { Capacitor } from '@capacitor/core';
 //     • android/app/src/main/AndroidManifest.xml → android:host="<domain>"
 //   Not: Domain değişince eski linkler/QR'lar çalışmaz — kalıcı bir domain seç.
 export const WEB_BASE = (
-  process.env.REACT_APP_WEB_BASE || 'https://davet.halisahakolik.com.tr'
+  process.env.REACT_APP_WEB_BASE || 'https://halisahakolik.com.tr'
 ).replace(/\/+$/, '');
 
 // ★ CUSTOM_SCHEME — Native uygulamayı doğrudan açan URI scheme.
@@ -58,7 +58,7 @@ export const SHARE_FOOTER = '⚽ HalıSaha-Kolik ile kuruldu · halisahakolik.co
  * App yüklüyse işletim sistemi linki doğrudan uygulamaya verir; değilse
  * Worker davet sayfasını gösterip mağazaya yönlendirir.
  *
- * Format:  https://davet.halisahakolik.com.tr/m/HK-AB12
+ * Format:  https://halisahakolik.com.tr/m/HK-AB12
  */
 export const buildJoinUrl = (code) => {
   if (!code) return WEB_BASE;
