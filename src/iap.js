@@ -7,6 +7,7 @@
 // Public API:
 //   await iap.init()                       — App boot'unda bir kez (App.js)
 //   const offerings = await iap.getOfferings()
+//   const prices = await iap.getPlanPrices() — mağazanın gerçek fiyatları (paywall için)
 //   await iap.purchase(packageId)          — packageId: pro_monthly | pro_yearly | trial_7d
 //   await iap.restore()                    — Restore Purchases butonu
 //   iap.isReady()                          — true ise SDK yüklendi
@@ -41,13 +42,16 @@ const REVENUECAT_API_KEY = {
 };
 
 // ═══ Product / package identifier eşleştirmesi ═══
+// packageType: RevenueCat dashboard'unda paket custom identifier ile
+// tanımlanmışsa bile doğru paketi bulabilmek için ikinci eşleştirme anahtarı.
 const PACKAGE_MAP = {
-  pro_monthly: { tier: TIER.PRO, durationDays: 30,  rcIdentifier: "$rc_monthly" },
-  pro_yearly:  { tier: TIER.PRO, durationDays: 365, rcIdentifier: "$rc_annual"  },
-  trial_7d:    { tier: TIER.PRO, durationDays: 7,   rcIdentifier: "$rc_annual", isTrial: true },
+  pro_monthly: { tier: TIER.PRO, durationDays: 30,  rcIdentifier: "$rc_monthly", packageType: "MONTHLY" },
+  pro_yearly:  { tier: TIER.PRO, durationDays: 365, rcIdentifier: "$rc_annual",  packageType: "ANNUAL"  },
+  trial_7d:    { tier: TIER.PRO, durationDays: 7,   rcIdentifier: "$rc_annual",  packageType: "ANNUAL", isTrial: true },
 };
 
 let _ready = false;
+let _initPromise = null;
 let _offerings = null;
 let _lastInitError = null;
 
@@ -61,43 +65,72 @@ export const iap = {
    * Web'de no-op olur (Capacitor değilse).
    */
   async init() {
-    if (_ready) return;
+    if (_ready) return true;
     if (!Capacitor.isNativePlatform()) {
       console.log("[IAP] Web platform — IAP devre dışı, simülasyon kullanılır");
-      return;
+      return false;
     }
-    try {
+    // ★ Aynı anda gelen çağrılar (App boot + paywall) tek init'i paylaşır
+    if (_initPromise) return _initPromise;
+
+    _initPromise = (async () => {
       const platform = Capacitor.getPlatform();
       const apiKey = REVENUECAT_API_KEY[platform];
       if (!apiKey || apiKey.includes("YOUR_")) {
         _lastInitError = "API key yok";
         console.warn("[IAP] API key yok — RevenueCat init atlanıyor");
-        return;
+        return false;
       }
 
-      // ★ PRODUCTION: WARN seviyesi — gereksiz log yok, sadece uyarı/hata
-      //   Debug için geçici: localStorage.setItem('hk_iap_verbose', '1') → DEBUG
-      const verbose = (() => {
-        try { return localStorage.getItem("hk_iap_verbose") === "1"; }
-        catch { return false; }
-      })();
-      await Purchases.setLogLevel({ level: verbose ? LOG_LEVEL.DEBUG : LOG_LEVEL.WARN });
-      await Purchases.configure({ apiKey });
+      try {
+        // ★ PRODUCTION: WARN seviyesi — gereksiz log yok, sadece uyarı/hata
+        //   Debug için geçici: localStorage.setItem('hk_iap_verbose', '1') → DEBUG
+        const verbose = (() => {
+          try { return localStorage.getItem("hk_iap_verbose") === "1"; }
+          catch { return false; }
+        })();
+        await Purchases.setLogLevel({ level: verbose ? LOG_LEVEL.DEBUG : LOG_LEVEL.WARN });
 
-      await Purchases.addCustomerInfoUpdateListener((info) => {
-        _syncSubscriptionFromCustomerInfo(info);
-      });
+        // Yarım kalmış bir önceki deneme SDK'yı zaten kurduysa tekrar configure etme
+        let configured = false;
+        try { configured = (await Purchases.isConfigured())?.isConfigured === true; } catch {}
+        if (!configured) await Purchases.configure({ apiKey });
+      } catch (err) {
+        _lastInitError = err?.message || String(err);
+        console.error("[IAP] init başarısız:", err);
+        return false;
+      }
 
-      const { customerInfo } = await Purchases.getCustomerInfo();
-      _syncSubscriptionFromCustomerInfo(customerInfo);
-
+      // ★ FIX: configure başarılıysa SDK kullanılabilir. Eskiden getCustomerInfo
+      //   hata verince (ağ, RC backend) _ready hiç true olmuyordu → iPhone'da
+      //   her satın alma "sadece mobil cihazda" hatasıyla reddediliyordu.
       _ready = true;
       _lastInitError = null;
       console.log("[IAP] RevenueCat hazır");
-    } catch (err) {
-      _lastInitError = err?.message || String(err);
-      console.error("[IAP] init başarısız:", err);
-    }
+
+      try {
+        await Purchases.addCustomerInfoUpdateListener((info) => {
+          _syncSubscriptionFromCustomerInfo(info);
+        });
+      } catch (err) {
+        console.warn("[IAP] customerInfo listener eklenemedi:", err);
+      }
+
+      try {
+        const { customerInfo } = await Purchases.getCustomerInfo();
+        _syncSubscriptionFromCustomerInfo(customerInfo);
+      } catch (err) {
+        console.warn("[IAP] ilk customerInfo alınamadı (satın alma yine çalışır):", err);
+      }
+
+      // Paywall açıldığında fiyatlar hazır olsun
+      iap.getOfferings().catch(() => {});
+      return true;
+    })();
+
+    const ok = await _initPromise;
+    if (!ok) _initPromise = null; // sonraki çağrı tekrar denesin
+    return ok;
   },
 
   isReady() {
@@ -106,19 +139,52 @@ export const iap = {
 
   /**
    * Tüm offerings'leri döner. Hata durumunda throw eder.
+   * @param {{ force?: boolean }} opts — force: cache'i atla, mağazadan tekrar çek
    */
-  async getOfferings() {
-    if (!_ready) return null;
-    if (_offerings) return _offerings;
+  async getOfferings({ force = false } = {}) {
+    if (!_ready && !(await iap.init())) return null;
+    if (_offerings && !force) return _offerings;
     try {
       const { current, all } = await Purchases.getOfferings();
-      _offerings = { current, all };
-      return _offerings;
+      const result = { current, all };
+      // ★ FIX: Boş sonucu cache'leme — App Store ürünleri geç yayılabilir;
+      //   eskiden ilk boş cevap app kapanana kadar kalıcı oluyordu.
+      if ((current?.availablePackages || []).length > 0) _offerings = result;
+      return result;
     } catch (err) {
       console.error("[IAP] getOfferings başarısız:", err);
       const e = _normalizeError(err);
       e._fromOfferings = true;
       throw e;
+    }
+  },
+
+  /**
+   * Paywall için mağazanın GERÇEK fiyatları (App Store / Play'deki TL fiyatı).
+   * Native değilse veya ürünler yüklenemediyse null döner → paywall varsayılan
+   * fiyatları gösterir.
+   * @returns {Promise<null | { pro_monthly?: PlanPrice, pro_yearly?: PlanPrice }>}
+   */
+  async getPlanPrices() {
+    if (!Capacitor.isNativePlatform()) return null;
+    try {
+      const offerings = await iap.getOfferings();
+      if (!offerings?.current) return null;
+      const out = {};
+      ["pro_monthly", "pro_yearly"].forEach((planId) => {
+        const product = _findPackage(offerings, PACKAGE_MAP[planId])?.product;
+        if (!product?.priceString) return;
+        out[planId] = {
+          priceString: product.priceString,
+          price: product.price,
+          currencyCode: product.currencyCode,
+          pricePerMonthString: product.pricePerMonthString || null,
+          introPrice: product.introPrice || null,
+        };
+      });
+      return Object.keys(out).length ? out : null;
+    } catch {
+      return null;
     }
   },
 
@@ -140,7 +206,7 @@ export const iap = {
       throw e;
     }
 
-    if (!Capacitor.isNativePlatform() || !_ready) {
+    if (!Capacitor.isNativePlatform()) {
       let devSim = false;
       try { devSim = localStorage.getItem("hk_dev_simulate") === "1"; } catch {}
       if (devSim) {
@@ -152,6 +218,28 @@ export const iap = {
       );
       err.code = "WEB_NOT_SUPPORTED";
       throw err;
+    }
+
+    // ★ FIX: Native'de SDK henüz hazır değilse (boot'ta init yarışı / ağ hatası)
+    //   kullanıcıya "web" hatası göstermek yerine init'i burada tekrar dene.
+    if (!_ready && !(await iap.init())) {
+      const err = new Error(
+        "Mağazaya bağlanılamadı. İnternet bağlantını kontrol edip tekrar dene."
+      );
+      err.code = "NOT_READY";
+      err.detail = _lastInitError;
+      throw err;
+    }
+
+    // iOS Ekran Süresi / Android aile kısıtlaması → net mesaj
+    try {
+      const r = await Purchases.canMakePayments();
+      if (r?.canMakePayments === false) {
+        throw _normalizeError({ code: PURCHASES_ERROR_CODE.PURCHASE_NOT_ALLOWED_ERROR });
+      }
+    } catch (err) {
+      if (err?.code === "BILLING_UNAVAILABLE") throw err;
+      // canMakePayments desteklenmiyorsa satın almayı engelleme
     }
 
     try {
@@ -177,10 +265,18 @@ export const iap = {
         throw e;
       }
 
-      const pkg = _findPackage(offerings, meta.rcIdentifier);
+      let pkg = _findPackage(offerings, meta);
       if (!pkg) {
+        // Cache eski olabilir — mağazadan bir kez taze çek
+        const fresh = await this.getOfferings({ force: true }).catch(() => null);
+        pkg = _findPackage(fresh, meta);
+      }
+      if (!pkg) {
+        const available = (offerings.current.availablePackages || [])
+          .map((p) => p.identifier).join(", ") || "yok";
         const e = new Error("Bu paket şu an mevcut değil.");
         e.code = "INVALID_PACKAGE";
+        e.detail = `Aranan: ${meta.rcIdentifier} · Mevcut: ${available}`;
         throw e;
       }
 
@@ -212,7 +308,19 @@ export const iap = {
 
       return { success: true };
     } catch (err) {
-      throw _normalizeError(err);
+      // Kendi fırlattığımız (normalize edilmiş) hatalar olduğu gibi geçsin
+      if (err?.original || ["NO_OFFERINGS", "INVALID_PACKAGE", "BILLING_UNAVAILABLE"].includes(err?.code)) {
+        throw err;
+      }
+      const e = _normalizeError(err);
+      // Bu Apple ID / Google hesabı zaten abone → satın alma yerine geri yükle
+      if (e.code === "ALREADY_OWNED") {
+        try {
+          const r = await this.restore();
+          if (r?.restored) return { success: true, restored: true };
+        } catch {}
+      }
+      throw e;
     }
   },
 
@@ -220,9 +328,15 @@ export const iap = {
    * Eski satın almaları geri yükle.
    */
   async restore() {
-    if (!Capacitor.isNativePlatform() || !_ready) {
-      console.log("[IAP] Web/no-RC — restore no-op");
+    if (!Capacitor.isNativePlatform()) {
+      console.log("[IAP] Web — restore no-op");
       return { success: false, message: "Native platform değil" };
+    }
+    if (!_ready && !(await iap.init())) {
+      const err = new Error("Mağazaya bağlanılamadı. İnternet bağlantını kontrol edip tekrar dene.");
+      err.code = "NOT_READY";
+      err.detail = _lastInitError;
+      throw err;
     }
 
     try {
@@ -324,7 +438,9 @@ export const iap = {
       return out;
     }
 
+    if (!_ready) await iap.init();
     out.sdkReady = _ready;
+    out.lastInitError = _lastInitError;
     if (!_ready) {
       out.diagnosis.push("❌ SDK init edilmedi. Hata: " + (_lastInitError || "bilinmiyor"));
       out.suggestions.push("App.js'te iap.init() çağrılıyor mu? Internet var mı?");
@@ -339,7 +455,14 @@ export const iap = {
       out.canMakePayments = "ERROR: " + (e?.message || String(e));
     }
 
-    if (out.canMakePayments === false) {
+    const isIOS = out.platform === "ios";
+
+    if (out.canMakePayments === false && isIOS) {
+      out.diagnosis.push("❌ canMakePayments=false — bu iPhone'da uygulama içi satın alma kısıtlı.");
+      out.suggestions.push(
+        "Ayarlar → Ekran Süresi → İçerik ve Gizlilik Kısıtlamaları → iTunes ve App Store Satın Alımları → Uygulama İçi Satın Alma: İzin Ver."
+      );
+    } else if (out.canMakePayments === false) {
       out.diagnosis.push("❌ Cihaz canMakePayments=false döndürüyor. Google Play Billing servisi bu cihazda aktif değil.");
       out.suggestions.push(
         "1) APK'yı Play Store'dan (internal test track'ten) yükle, ADB ile değil.",
@@ -371,16 +494,27 @@ export const iap = {
         title: p.product?.title,
       }));
 
+      // iOS'ta ürünlerin hiç gelmemesinin en sık sebepleri (App Store Connect tarafı)
+      const iosStoreHints = [
+        "App Store Connect → İş (Business) → Ücretli Uygulamalar Sözleşmesi (Paid Apps Agreement) 'Etkin' mi? Banka + vergi formları tamam mı?",
+        "App Store Connect → Uygulama → Abonelikler: aylık/yıllık ürünler 'Gönderilmeye Hazır' veya 'Onaylandı' durumunda mı? Türkiye fiyatı girilmiş mi?",
+        "İlk abonelik ürünleri, uygulama sürümüyle BİRLİKTE incelemeye gönderilmeli (Sürüm sayfası → Uygulama İçi Satın Alımlar ve Abonelikler bölümü).",
+        "RevenueCat → Apps → iOS: Bundle ID 'com.halisahakolik.app' mi? In-App Purchase Key (.p8) ve App Store Connect API key yüklü mü?",
+        "RevenueCat → Products: App Store ürün ID'leri App Store Connect'tekilerle birebir aynı mı ve 'pro' entitlement'ına bağlı mı?",
+      ];
+
       if (!current) {
         out.diagnosis.push("❌ Current offering YOK. RevenueCat dashboard'da 'Current' olarak işaretlenmiş offering yok.");
         out.suggestions.push(
           "RevenueCat → Project → Offerings → 'default' offering'in solundaki dot'u tıklayıp 'Make Current' yap."
         );
+        if (isIOS) out.suggestions.push(...iosStoreHints);
       } else if (out.packages.length === 0) {
-        out.diagnosis.push("❌ Current offering var ama içinde paket yok.");
+        out.diagnosis.push("❌ Current offering var ama içinde paket yok (veya App Store ürünleri döndürmedi).");
         out.suggestions.push(
           "RevenueCat → Offerings → default → Add package → $rc_monthly ve $rc_annual paketlerini ekle."
         );
+        if (isIOS) out.suggestions.push(...iosStoreHints);
       } else {
         const needed = ["$rc_monthly", "$rc_annual"];
         const missing = needed.filter(n => !out.packages.find(p => p.identifier === n));
@@ -391,7 +525,10 @@ export const iap = {
         }
 
         const noPriceCount = out.packages.filter(p => !p.price).length;
-        if (noPriceCount > 0) {
+        if (noPriceCount > 0 && isIOS) {
+          out.diagnosis.push(`⚠️ ${noPriceCount} paketin fiyatı boş.`);
+          out.suggestions.push(...iosStoreHints);
+        } else if (noPriceCount > 0) {
           out.diagnosis.push(`⚠️ ${noPriceCount} paketin fiyatı boş.`);
           out.suggestions.push(
             "1) Play Console → Monetize → Subscriptions → ürünler 'Active' mi?",
@@ -406,7 +543,13 @@ export const iap = {
       out.offerings = "ERROR: " + (e?.message || String(e));
       out.diagnosis.push(`❌ getOfferings throw etti: ${e?.message}`);
 
-      if (code === 3 || /not allowed|billing unavailable/i.test(e?.message || "")) {
+      if (isIOS) {
+        out.suggestions.push(
+          "Hata kodu: " + (code ?? "?") + " — RC#11/#23 ise RevenueCat ↔ App Store Connect kimlik bilgileri eksik.",
+          "RevenueCat → Apps → iOS → In-App Purchase Key (.p8) + Issuer ID yüklü mü?",
+          "App Store Connect → Ücretli Uygulamalar Sözleşmesi etkin mi?"
+        );
+      } else if (String(code) === "3" || /not allowed|billing unavailable/i.test(e?.message || "")) {
         out.suggestions.push(
           "BILLING_UNAVAILABLE / PURCHASE_NOT_ALLOWED — Google Play satışı reddediyor.",
           "1) APK Play Store'dan değil ADB ile yüklendi — internal test track kullan.",
@@ -436,6 +579,35 @@ export const iap = {
     }
     console.log("═══════════════════════════════════════");
     return out;
+  },
+
+  /**
+   * diagnose() çıktısını kopyalanabilir düz metne çevirir — paywall'daki
+   * "Tanılama raporu" ekranı kullanır (Mac/Web Inspector gerekmeden).
+   */
+  async diagnoseReport() {
+    const d = await iap.diagnose();
+    const lines = [
+      "HalıSaha-Kolik · IAP tanılama",
+      `Tarih: ${new Date().toISOString()}`,
+      `Platform: ${d.platform} (native: ${d.isNative})`,
+      `API key: ${d.apiKey ?? "-"}`,
+      `SDK hazır: ${d.sdkReady}${d.lastInitError ? " · hata: " + d.lastInitError : ""}`,
+      `canMakePayments: ${d.canMakePayments}`,
+      `Offering: ${d.currentOffering ?? "-"} · tümü: ${Array.isArray(d.offerings) ? d.offerings.join(", ") || "-" : d.offerings ?? "-"}`,
+      "Paketler:",
+      ...(d.packages.length
+        ? d.packages.map((p) => `  • ${p.identifier} → ${p.productId ?? "?"} (${p.price ?? "fiyat yok"})`)
+        : ["  (yok)"]),
+      `Müşteri: ${typeof d.customerInfo === "string" ? d.customerInfo : JSON.stringify(d.customerInfo)}`,
+      "",
+      "Teşhis:",
+      ...(d.diagnosis.length ? d.diagnosis.map((x) => "  " + x) : ["  -"]),
+    ];
+    if (d.suggestions.length) {
+      lines.push("", "Öneriler:", ...d.suggestions.map((x) => "  → " + x));
+    }
+    return lines.join("\n");
   },
 };
 
@@ -534,65 +706,103 @@ function _hasAnyActiveEntitlement(customerInfo) {
   return Object.keys(ents).length > 0;
 }
 
-function _findPackage(offerings, rcIdentifier) {
-  if (!offerings?.current) return null;
-  const pkgs = offerings.current.availablePackages || [];
-  return pkgs.find((p) => p.identifier === rcIdentifier) || null;
+function _findPackage(offerings, meta) {
+  const pkgs = offerings?.current?.availablePackages || [];
+  if (!pkgs.length || !meta) return null;
+  // 1) RevenueCat standart identifier ($rc_monthly / $rc_annual)
+  const byId = pkgs.find((p) => p.identifier === meta.rcIdentifier);
+  if (byId) return byId;
+  // 2) Paket tipi (dashboard'da custom identifier verilmişse)
+  const byType = pkgs.find((p) => p.packageType === meta.packageType);
+  if (byType) return byType;
+  // 3) Ürün id'sinden tahmin (örn. "halisaha_pro_yearly")
+  const re = meta.packageType === "ANNUAL" ? /(year|annual|yillik)/i : /(month|aylik)/i;
+  return pkgs.find((p) => re.test(p.product?.identifier || "") || re.test(p.identifier || "")) || null;
 }
 
 // ═══════════════════════════════════════════════════════════
 // ERROR NORMALIZATION
 // ═══════════════════════════════════════════════════════════
+// RC kodları string gelir ("1", "3"...) ama bazı platformlarda number
+// olabiliyor — karşılaştırmayı tek tipe indiriyoruz.
+
+const RC = PURCHASES_ERROR_CODE;
 
 function _normalizeError(err) {
-  const rcCode = err?.code;
+  const rcCode = err?.code == null ? null : String(err.code);
   const msg    = err?.message || "";
   const under  = err?.underlyingErrorMessage || "";
   const combo  = (msg + " " + under).toLowerCase();
+  const isIOS  = (() => { try { return Capacitor.getPlatform() === "ios"; } catch { return false; } })();
+  const store  = isIOS ? "App Store" : "Google Play";
   const e = new Error(err?.message || "Bilinmeyen ödeme hatası");
 
-  if (
-    rcCode === PURCHASES_ERROR_CODE.PURCHASE_CANCELLED_ERROR ||
-    rcCode === "1" ||
-    err?.userCancelled === true
-  ) {
+  if (rcCode === RC.PURCHASE_CANCELLED_ERROR || err?.userCancelled === true) {
     e.code = "USER_CANCELLED";
     e.message = "Satın alma iptal edildi";
-  } else if (rcCode === PURCHASES_ERROR_CODE.NETWORK_ERROR) {
+  } else if (rcCode === RC.NETWORK_ERROR || rcCode === RC.PRODUCT_REQUEST_TIMED_OUT_ERROR) {
     e.code = "PAYMENT_FAILED";
     e.message = "Bağlantı sorunu — internet kontrolü yap";
-  } else if (rcCode === PURCHASES_ERROR_CODE.PAYMENT_PENDING_ERROR) {
+  } else if (rcCode === RC.PAYMENT_PENDING_ERROR) {
     e.code = "PAYMENT_FAILED";
     e.message = "Ödeme onayı bekliyor — birkaç dakika sonra tekrar dene";
   } else if (
-    rcCode === PURCHASES_ERROR_CODE.PURCHASE_NOT_ALLOWED_ERROR ||
-    rcCode === 3 || rcCode === "3" ||
+    rcCode === RC.PURCHASE_NOT_ALLOWED_ERROR ||
     /not allowed|billing unavailable|purchasenotallowed/i.test(combo)
   ) {
     e.code = "BILLING_UNAVAILABLE";
-    e.message =
-      "Google Play satın almalara izin vermiyor. Sebebi şunlardan biri olabilir:\n" +
-      "• Uygulamayı Play Store'dan değil, dosya olarak yüklediysen.\n" +
-      "• Google hesabın test/lisans listesinde değilse.\n" +
-      "• Cihaz ülkesi ile hesabın ülkesi farklıysa.\n" +
-      "• Aile/çocuk hesabı kısıtlaması varsa.\n\n" +
-      "Önce uygulamayı Play Store'dan güncelleyip tekrar dene.";
-  } else if (rcCode === PURCHASES_ERROR_CODE.PURCHASE_INVALID_ERROR) {
+    e.message = isIOS
+      ? "Bu cihazda App Store satın alımları kapalı.\n\n" +
+        "Ayarlar → Ekran Süresi → İçerik ve Gizlilik Kısıtlamaları → " +
+        "iTunes ve App Store Satın Alımları → Uygulama İçi Satın Alma: İzin Ver\n\n" +
+        "Aile Paylaşımı'nda çocuk hesabıysan 'Satın Almak İçin Sor' onayı gerekir."
+      : "Google Play satın almalara izin vermiyor. Sebebi şunlardan biri olabilir:\n" +
+        "• Uygulamayı Play Store'dan değil, dosya olarak yüklediysen.\n" +
+        "• Google hesabın test/lisans listesinde değilse.\n" +
+        "• Cihaz ülkesi ile hesabın ülkesi farklıysa.\n" +
+        "• Aile/çocuk hesabı kısıtlaması varsa.\n\n" +
+        "Önce uygulamayı Play Store'dan güncelleyip tekrar dene.";
+  } else if (rcCode === RC.PRODUCT_ALREADY_PURCHASED_ERROR) {
+    e.code = "ALREADY_OWNED";
+    e.message = `Bu ${isIOS ? "Apple ID" : "Google hesabı"} ile zaten abonesin. "Satın alımları geri yükle"ye dokun.`;
+  } else if (rcCode === RC.RECEIPT_ALREADY_IN_USE_ERROR || rcCode === RC.RECEIPT_IN_USE_BY_OTHER_SUBSCRIBER_ERROR) {
+    e.code = "PAYMENT_FAILED";
+    e.message = `Bu ${isIOS ? "Apple ID" : "Google hesabı"}ndaki abonelik başka bir kullanıcıya bağlı. "Satın alımları geri yükle"yi dene.`;
+  } else if (rcCode === RC.PRODUCT_NOT_AVAILABLE_FOR_PURCHASE_ERROR) {
+    e.code = "PAYMENT_FAILED";
+    e.message = `Bu paket şu an ${store}'da satın alınamıyor. Lütfen daha sonra tekrar dene.`;
+  } else if (rcCode === RC.INELIGIBLE_ERROR) {
+    e.code = "PAYMENT_FAILED";
+    e.message = "Bu hesap ücretsiz deneme için uygun değil. Normal planla devam edebilirsin.";
+  } else if (rcCode === RC.OPERATION_ALREADY_IN_PROGRESS_ERROR) {
+    e.code = "PAYMENT_FAILED";
+    e.message = "Önceki satın alma işlemi hâlâ sürüyor — birkaç saniye bekleyip tekrar dene.";
+  } else if (rcCode === RC.PURCHASE_INVALID_ERROR) {
     e.code = "PAYMENT_FAILED";
     e.message = "Ödeme yöntemi reddedildi";
-  } else if (rcCode === PURCHASES_ERROR_CODE.STORE_PROBLEM_ERROR) {
+  } else if (rcCode === RC.STORE_PROBLEM_ERROR) {
     e.code = "PAYMENT_FAILED";
-    e.message = "App Store / Play Store geçici sorun yaşıyor";
-  } else if (rcCode === PURCHASES_ERROR_CODE.CONFIGURATION_ERROR) {
+    e.message = `${store} geçici sorun yaşıyor — birkaç dakika sonra tekrar dene`;
+  } else if (
+    rcCode === RC.CONFIGURATION_ERROR ||
+    rcCode === RC.INVALID_CREDENTIALS_ERROR ||
+    rcCode === RC.INVALID_APPLE_SUBSCRIPTION_KEY_ERROR
+  ) {
+    // Geliştirici tarafı: RevenueCat ↔ App Store Connect bağlantısı eksik
+    // (In-App Purchase Key / Shared Secret / Paid Apps Agreement). Bkz. docs/IAP_KONTROL_LISTESI.md
     e.code = "NOT_CONFIGURED";
-    e.message = "Uygulama yapılandırması eksik. (Geliştiriciye haber ver)";
-  } else if (rcCode === PURCHASES_ERROR_CODE.OFFLINE_CONNECTION_ERROR) {
+    e.message = "Mağaza yapılandırması eksik. Lütfen daha sonra tekrar dene.";
+  } else if (rcCode === RC.OFFLINE_CONNECTION_ERROR) {
     e.code = "PAYMENT_FAILED";
     e.message = "İnternet bağlantısı yok";
   } else {
     e.code = "PAYMENT_FAILED";
   }
 
+  // UI'da küçük "teknik detay" satırı + tanılama raporu için
+  e.rcCode = rcCode;
+  e.detail = [rcCode != null ? `RC#${rcCode}` : null, under || (e.message !== msg ? msg : null)]
+    .filter(Boolean).join(" · ") || null;
   e.original = err;
   return e;
 }

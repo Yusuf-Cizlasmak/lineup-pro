@@ -22,6 +22,27 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- ★ Davet linki (custom scheme): halisahakolik://join?code=HK-XXXX -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="halisahakolik" />
+            </intent-filter>
+
+            <!-- ★ Android App Links: https://<domain>/m/HK-XXXX doğrudan app'te açılır.
+                 Doğrulama için domain'de /.well-known/assetlinks.json (public/_worker.js)
+                 Play App Signing SHA-256 parmak iziyle yayında olmalı.
+                 Domain değişirse: src/deepLink.js WEB_BASE + ios App.entitlements -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+                <data android:host="halisahakolik.com.tr" />
+                <data android:pathPrefix="/m/" />
+            </intent-filter>
+
         </activity>
 
         <provider

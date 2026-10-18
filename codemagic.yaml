@@ -25,6 +25,11 @@ workflows:
         # Yeni upload'larda otomatik tespit edersek bunu kullanmayız,
         # tespit başarısız olursa bu sayı taban olur.
         MIN_BUILD_NUMBER: "84"
+        # Universal Links (davet linki app'i doğrudan açsın) — ios/App/App/App.entitlements
+        # "true" yapmadan ÖNCE: developer.apple.com → Identifiers → com.halisahakolik.app
+        # → "Associated Domains" kutusunu işaretle → Save. Aksi halde imzalama hata verir.
+        # Sonra wrangler.toml → IOS_UNIVERSAL_LINKS = "true". Bkz. docs/DAVET_LINKI_KURULUM.md
+        ENABLE_UNIVERSAL_LINKS: "false"
 
     scripts:
 
@@ -207,6 +212,8 @@ workflows:
             abort "❌ 'App' target bulunamadı"
           end
 
+          enable_ul = '${ENABLE_UNIVERSAL_LINKS}' == 'true'
+
           target.build_configurations.each do |config|
             attrs = config.build_settings
             attrs['CODE_SIGN_STYLE'] = 'Manual'
@@ -214,7 +221,9 @@ workflows:
             attrs['DEVELOPMENT_TEAM'] = '${DEVELOPMENT_TEAM}'
             attrs['PROVISIONING_PROFILE_SPECIFIER'] = '${PROFILE_NAME}'
             attrs['PRODUCT_BUNDLE_IDENTIFIER'] = '${BUNDLE_ID}'
-            puts "✅ Patched config: #{config.name}"
+            # Universal Links: associated-domains entitlement'ı imzaya ekle
+            attrs['CODE_SIGN_ENTITLEMENTS'] = 'App/App.entitlements' if enable_ul
+            puts "✅ Patched config: #{config.name}#{enable_ul ? ' (+ Universal Links)' : ''}"
           end
 
           project.root_object.attributes['TargetAttributes'] ||= {}

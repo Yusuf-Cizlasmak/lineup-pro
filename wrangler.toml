@@ -1,7 +1,36 @@
+# Davet linki sunucusu + web app (Cloudflare Workers)
+# Deploy: npm run deploy:web   → https://halisahakolik.com.tr
+# Kurulum adımları: docs/DAVET_LINKI_KURULUM.md
 name = "halisaha-kolik"
 main = "build/_worker.js"
 compatibility_date = "2024-12-01"
 
+# Kalıcı domain. Deploy'dan ÖNCE domain'in DNS'i Cloudflare'de "Active" olmalı
+# (aksi halde wrangler "Could not find zone" hatası verir).
+# Domain değişirse: src/deepLink.js WEB_BASE + ios App.entitlements + AndroidManifest host
+routes = [
+  { pattern = "halisahakolik.com.tr", custom_domain = true },
+]
+# *.workers.dev adresi yedek olarak açık kalsın
+workers_dev = true
+
 [assets]
 directory = "./build"
 binding = "ASSETS"
+
+[vars]
+SCHEME = "halisahakolik"
+ANDROID_PACKAGE = "com.halisahakolik.app"
+IOS_TEAM_ID = "Q3BH6457BX"
+IOS_BUNDLE_ID = "com.halisahakolik.app"
+# App Store Connect → Uygulama Bilgileri → "Apple Kimliği" (sadece rakam, örn. "6741234567")
+IOS_APP_STORE_ID = ""
+# Associated Domains içeren iOS sürümü yayındaysa "true" (codemagic.yaml → ENABLE_UNIVERSAL_LINKS)
+IOS_UNIVERSAL_LINKS = "false"
+# Play Console → Uygulama bütünlüğü → Uygulama imzalama anahtarı sertifikası → SHA-256
+# Birden fazlaysa virgülle ayır. Boşken Android App Links doğrulanmaz (intent:// yine çalışır).
+ANDROID_SHA256_FINGERPRINTS = ""
+# Davet sayfasında maç bilgisini (saha, takımlar, saat) göstermek için.
+# Anon key zaten uygulama içinde herkese açık (src/LiveMatchService.js) — gizli değildir.
+SUPABASE_URL = "https://mzryetwernvtqrvbhcxp.supabase.co"
+SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im16cnlldHdlcm52dHFydmJoY3hwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc5MDM4ODcsImV4cCI6MjA5MzQ3OTg4N30.Y1rkPk-9DlmjdoBZcwqF843ZB1DGcotZbHJEgv0hnDk"

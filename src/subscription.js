@@ -20,9 +20,10 @@ export const TIER = {
 };
 
 // ═══ Feature limitleri (free tier) ═══
+// Online Halı Saha modu FREE: maça katılma sınırsız (davet edilen arkadaşlar
+// hiç takılmasın), oda kurma ayda ONLINE_CREATES_PER_MONTH kez. Fazlası Pro.
 export const FREE_LIMITS = {
-  ONLINE_MATCHES_LIFETIME: 1,    // hayatta 1 kez oda kurma hakkı
-  ONLINE_JOINS_LIFETIME:   3,    // hayatta 3 kez maça katılma hakkı
+  ONLINE_CREATES_PER_MONTH: 3,   // her ay 3 ücretsiz oda kurma (ayın 1'inde yenilenir)
   HISTORY_LIMIT: 5,              // son 5 maç geçmişi
   TEAMS_LIMIT: 1,
   ADS: true,
@@ -104,79 +105,51 @@ export function clearSubscription() {
   writeSub({ tier: TIER.FREE, until: null, plan: null });
 }
 
-// ═══ Online maç oluşturma sayacı (free tier — LIFETIME limit) ═══
-const COUNTER_KEY = "halisaha_online_matches_created";
+// ═══ Online oda kurma sayacı (free tier — AYLIK limit) ═══
+// localStorage'da { month: "2026-10", count } tutulur; ay değişince kendiliğinden
+// sıfırlanır. Sunucu tarafı doğrulama (match_sessions sayımı) → onlineUsage.js
+const MONTHLY_CREATE_KEY = "halisaha_online_creates_monthly";
+
+export const currentMonthKey = (d = new Date()) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+
+export const getMonthStart = (d = new Date()) => new Date(d.getFullYear(), d.getMonth(), 1);
+export const getNextMonthStart = (d = new Date()) => new Date(d.getFullYear(), d.getMonth() + 1, 1);
 
 export function getOnlineMatchCount() {
+  const month = currentMonthKey();
   try {
-    const raw = localStorage.getItem(COUNTER_KEY);
-    if (!raw) return { count: 0, firstAt: null };
-    const obj = JSON.parse(raw);
-    return { count: obj.count || 0, firstAt: obj.firstAt || null };
+    const obj = JSON.parse(localStorage.getItem(MONTHLY_CREATE_KEY) || "null");
+    if (!obj || obj.month !== month) return { count: 0, month };
+    return { count: obj.count || 0, month };
   } catch {
-    return { count: 0, firstAt: null };
+    return { count: 0, month };
   }
+}
+
+export function setOnlineMatchCount(count) {
+  const next = { month: currentMonthKey(), count: Math.max(0, count | 0), updatedAt: Date.now() };
+  try { localStorage.setItem(MONTHLY_CREATE_KEY, JSON.stringify(next)); } catch {}
+  window.dispatchEvent(new CustomEvent("hk:online-usage-changed", { detail: next }));
+  return next.count;
 }
 
 export function incrementOnlineMatchCount() {
-  const cur = getOnlineMatchCount();
-  const next = {
-    count: cur.count + 1,
-    firstAt: cur.firstAt || Date.now(),
-    lastAt: Date.now(),
-  };
-  try { localStorage.setItem(COUNTER_KEY, JSON.stringify(next)); } catch {}
-  return next.count;
+  return setOnlineMatchCount(getOnlineMatchCount().count + 1);
 }
 
-// Kullanıcı online maç oluşturma kotasını aşmış mı?
+// Kullanıcının bu ay oda kurma hakkı kaldı mı? (senkron, lokal cache'e bakar)
 export function canCreateOnlineMatch() {
   if (isPremium()) return { allowed: true, remaining: Infinity };
   const { count } = getOnlineMatchCount();
-  const remaining = Math.max(0, FREE_LIMITS.ONLINE_MATCHES_LIFETIME - count);
+  const limit = FREE_LIMITS.ONLINE_CREATES_PER_MONTH;
+  const remaining = Math.max(0, limit - count);
   return {
     allowed: remaining > 0,
     remaining,
     used: count,
-    limit: FREE_LIMITS.ONLINE_MATCHES_LIFETIME,
-  };
-}
-
-// ═══ Online maça KATILMA sayacı (free tier — LIFETIME limit) ═══
-const JOIN_COUNTER_KEY = "halisaha_online_matches_joined";
-
-export function getOnlineJoinCount() {
-  try {
-    const raw = localStorage.getItem(JOIN_COUNTER_KEY);
-    if (!raw) return { count: 0, firstAt: null };
-    const obj = JSON.parse(raw);
-    return { count: obj.count || 0, firstAt: obj.firstAt || null };
-  } catch {
-    return { count: 0, firstAt: null };
-  }
-}
-
-export function incrementOnlineJoinCount() {
-  const cur = getOnlineJoinCount();
-  const next = {
-    count: cur.count + 1,
-    firstAt: cur.firstAt || Date.now(),
-    lastAt: Date.now(),
-  };
-  try { localStorage.setItem(JOIN_COUNTER_KEY, JSON.stringify(next)); } catch {}
-  return next.count;
-}
-
-// Kullanıcı online maça katılma kotasını aşmış mı?
-export function canJoinOnlineMatch() {
-  if (isPremium()) return { allowed: true, remaining: Infinity };
-  const { count } = getOnlineJoinCount();
-  const remaining = Math.max(0, FREE_LIMITS.ONLINE_JOINS_LIFETIME - count);
-  return {
-    allowed: remaining > 0,
-    remaining,
-    used: count,
-    limit: FREE_LIMITS.ONLINE_JOINS_LIFETIME,
+    limit,
+    resetsAt: getNextMonthStart().getTime(),
   };
 }
 

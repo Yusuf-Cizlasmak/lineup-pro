@@ -1,18 +1,29 @@
 // ─────────────────────────────────────────────────────────────
 // HalıSaha-Kolik · Deep Link / Universal URL helpers
 // ─────────────────────────────────────────────────────────────
-// Tüm deep-link mantığı tek yerden yönetilir. Domain veya scheme
-// değiştirmek istersen sadece BURAYI düzenle — projedeki her yer
-// otomatik adapte olur.
+// Uygulama tarafındaki tüm deep-link mantığı burada. Sunucu tarafı
+// (davet sayfası, apple-app-site-association, assetlinks.json) →
+// public/_worker.js. Akış:
+//   Link / QR → https://<domain>/m/HK-AB12
+//     • App yüklü  → iOS Universal Link / Android App Link app'i açar
+//                    → App.js → queueJoinCode → doğrudan odaya katılım
+//     • App yok    → Worker davet sayfası → App Store / Google Play
 // ─────────────────────────────────────────────────────────────
 
 import { Capacitor } from '@capacitor/core';
 
 // ─── KONFİG ───────────────────────────────────────────────────
+// Davet akışının tamamı → docs/DAVET_LINKI_KURULUM.md
 
-// ★ WEB_BASE — Davet linkinin domain'i.
-//   Kendi domain'ini aldığında bu tek satırı değiştir:
-export const WEB_BASE = 'https://halisaha-kolik.ycizlasmak.workers.dev';
+// ★ WEB_BASE — Davet linkinin domain'i (Cloudflare Worker: public/_worker.js).
+//   Build sırasında REACT_APP_WEB_BASE ile ezilebilir. Domain değişirse
+//   şunlar da aynı domain'e güncellenmeli:
+//     • ios/App/App/App.entitlements          → applinks:<domain>
+//     • android/app/src/main/AndroidManifest.xml → android:host="<domain>"
+//   Not: Domain değişince eski linkler/QR'lar çalışmaz — kalıcı bir domain seç.
+export const WEB_BASE = (
+  process.env.REACT_APP_WEB_BASE || 'https://halisahakolik.com.tr'
+).replace(/\/+$/, '');
 
 // ★ CUSTOM_SCHEME — Native uygulamayı doğrudan açan URI scheme.
 //   iOS: ios/App/App/Info.plist → CFBundleURLTypes
@@ -23,18 +34,26 @@ export const CUSTOM_SCHEME = 'halisahakolik';
 //   capacitor_config.ts'deki appId ile aynı olmalı
 export const ANDROID_PACKAGE_NAME = 'com.halisahakolik.app';
 
-// ★ Store linkleri — app yüklü değilken fallback. Henüz yayında
-//   değilse boş bırak, web app'e fallback yapar.
-export const IOS_APP_URL     = ''; // örn: 'https://apps.apple.com/app/idXXXXXXXXX'
-export const ANDROID_APP_URL = ''; // örn: 'https://play.google.com/store/apps/details?id=com.halisahakolik.app'
+// ★ App Store kimliği — App Store Connect → Uygulama → Uygulama Bilgileri →
+//   "Apple Kimliği" (sadece rakamlar, örn. 6741234567). public/_worker.js'deki
+//   IOS_APP_STORE_ID (wrangler.toml [vars]) ile AYNI olmalı.
+export const IOS_APP_STORE_ID = process.env.REACT_APP_IOS_APP_STORE_ID || '';
+
+// ★ Store linkleri — app yüklü değilken yönlendirilecek sayfa
+export const IOS_APP_URL = IOS_APP_STORE_ID
+  ? `https://apps.apple.com/app/id${IOS_APP_STORE_ID}`
+  : '';
+export const ANDROID_APP_URL =
+  `https://play.google.com/store/apps/details?id=${ANDROID_PACKAGE_NAME}`;
 
 // ─── URL ÜRETİCİLERİ ─────────────────────────────────────────
 
 /**
- * Path-based maç katılım linki (Worker bu URL'yi görür ve mobile'da
- * SERVER-SIDE redirect eder — hiç ekran gözükmez).
+ * Path-based maç katılım linki — paylaşım metni ve QR kod bunu kullanır.
+ * App yüklüyse işletim sistemi linki doğrudan uygulamaya verir; değilse
+ * Worker davet sayfasını gösterip mağazaya yönlendirir.
  *
- * Format:  https://halisaha-kolik.ycizlasmak.workers.dev/m/HK-AB12
+ * Format:  https://halisahakolik.com.tr/m/HK-AB12
  */
 export const buildJoinUrl = (code) => {
   if (!code) return WEB_BASE;
@@ -162,10 +181,16 @@ const detectPlatform = () => {
 
 // ─── STORE URL RESOLVER ───────────────────────────────────────
 
-export const getStoreUrl = () => {
+// code verilirse Play Store linkine install referrer eklenir
+// (ileride "yükledikten sonra otomatik katıl" için okunabilir).
+export const getStoreUrl = (code) => {
   const p = detectPlatform();
-  if (p === 'android') return ANDROID_APP_URL || null;
-  if (p === 'ios')     return IOS_APP_URL || null;
+  if (p === 'android') {
+    return code
+      ? `${ANDROID_APP_URL}&referrer=${encodeURIComponent(`hk_code=${code}`)}`
+      : ANDROID_APP_URL;
+  }
+  if (p === 'ios') return IOS_APP_URL || null;
   return null;
 };
 
@@ -194,11 +219,15 @@ export const tryNativeRedirect = () => {
   const code = parseCodeFromUrl(window.location.href);
   if (!code) return false;
 
+  // Kullanıcı "tarayıcıda devam et" dedi ya da Worker zaten app'i denedi →
+  // tekrar yönlendirme yapma (aksi halde app ↔ web arasında döngü olur)
+  if (/[?&](?:web|fallback)=1\b/.test(window.location.search)) return false;
+
   const platform = detectPlatform();
   if (platform === 'desktop' || platform === 'unknown') return false;
 
   if (platform === 'android') {
-    const fallback = ANDROID_APP_URL || `${WEB_BASE}/?fallback=1&code=${code}`;
+    const fallback = getStoreUrl(code) || `${WEB_BASE}/?fallback=1&code=${code}`;
     const intent = buildIntentUrl(code, fallback);
     window.location.replace(intent);
     return true;
@@ -222,6 +251,37 @@ export const tryNativeRedirect = () => {
   }
 
   return false;
+};
+
+// ─── BEKLEYEN DAVET (link / QR ile gelen kod) ─────────────────
+// App.js kodu buraya koyar + event yayınlar. HaliSahaKolik event'i görünce
+// Online moda geçer; LiveMatch mount olunca kodu alıp doğrudan odaya katılır.
+// Kullanıcı o an hangi ekranda olursa olsun kod kaybolmaz.
+
+export const JOIN_CODE_EVENT = 'halisaha:join-code';
+const PENDING_TTL_MS = 15 * 60 * 1000;
+let _pendingJoin = null; // { code, at }
+
+const isValidCode = (code) => /^HK-[A-Z0-9]{4,8}$/.test(code || '');
+
+export const queueJoinCode = (rawCode) => {
+  const code = normalizeCode(rawCode || '');
+  if (!isValidCode(code)) return false;
+  _pendingJoin = { code, at: Date.now() };
+  window.dispatchEvent(new CustomEvent(JOIN_CODE_EVENT, { detail: { code } }));
+  return true;
+};
+
+export const peekPendingJoinCode = () => {
+  if (!_pendingJoin) return null;
+  if (Date.now() - _pendingJoin.at > PENDING_TTL_MS) { _pendingJoin = null; return null; }
+  return _pendingJoin.code;
+};
+
+export const takePendingJoinCode = () => {
+  const code = peekPendingJoinCode();
+  _pendingJoin = null;
+  return code;
 };
 
 // ─── HELPER ───────────────────────────────────────────────────

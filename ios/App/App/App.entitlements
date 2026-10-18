@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Universal Links: https://<domain>/m/HK-XXXX linki app yüklüyse doğrudan app'i açar.
+	     Domain'deki /.well-known/apple-app-site-association dosyası public/_worker.js'den gelir.
+	     Codemagic bu dosyayı ENABLE_UNIVERSAL_LINKS=true iken imzaya ekler (codemagic.yaml).
+	     Domain değişirse: src/deepLink.js WEB_BASE + AndroidManifest.xml host. -->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:halisahakolik.com.tr</string>
+	</array>
+</dict>
+</plist>

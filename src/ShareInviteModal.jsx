@@ -337,8 +337,8 @@ export default function ShareInviteModal({
                 marginBottom: 20,
                 padding: '0 14px',
               }}>
-                Aynı saha kenarındaki arkadaşların kameralarını
-                <br/>kodun üzerine tutsun — uygulama anında açılır.
+                Arkadaşların kameralarını kodun üzerine tutsun —
+                <br/>uygulama yüklüyse doğrudan maça girer, değilse mağaza açılır.
               </div>
 
               <div style={{
