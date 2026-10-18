@@ -41,7 +41,7 @@ const DEFAULTS = {
   // Davet sayfasında maç bilgisini göstermek için (anon key zaten herkese açık)
   SUPABASE_URL: '',
   SUPABASE_ANON_KEY: '',
-  // Davet linklerinin asıl adresi (örn. "davet.halisahakolik.com.tr"). Başka bir
+  // Davet linklerinin asıl adresi (örn. "halisahakolik.com.tr"). Başka bir
   // host'tan (kök domain route'u) gelen /m/ istekleri buraya yönlendirilir.
   // *.workers.dev adresi test için yönlendirilmeden çalışır.
   PUBLIC_HOST: '',
@@ -70,6 +70,13 @@ export default {
     // ─── Android App Links ───
     if (path === '/.well-known/assetlinks.json') {
       return json(assetLinks(c));
+    }
+
+    // ─── Davet sayfasının görselleri: /m/_a/logo192.png → build/logo192.png ───
+    // (Kök domainde sadece /m/* Worker'a gelir; site dosyaları web sitene aittir.)
+    const assetMatch = path.match(/^\/m\/_a\/(logo192\.png|logo512\.png|favicon\.ico)$/);
+    if (assetMatch && env.ASSETS) {
+      return env.ASSETS.fetch(new Request(`${url.origin}/${assetMatch[1]}`, request));
     }
 
     // ─── Davet sayfası: /m/HK-AB12 ───
@@ -269,7 +276,6 @@ function renderInvitePage({ c, url, code, session, platform }) {
   const store = storeUrls(c, code);
   const schemeUrl = `${c.SCHEME}://join?code=${encodeURIComponent(code)}`;
   const intentUrl = buildIntentUrl(c, code);
-  const webUrl = `${url.origin}/?code=${encodeURIComponent(code)}&web=1`;
 
   const finished = session?.status === 'finished';
   const teamA = session?.team_a_name || 'Takım A';
@@ -319,7 +325,6 @@ function renderInvitePage({ c, url, code, session, platform }) {
     <a class="btn primary" id="store" href="${escapeHtml(store.android)}">Google Play'den İndir</a>
     <a class="btn" id="open" href="${escapeHtml(intentUrl)}">Uygulama yüklü · Aç</a>`;
   const desktopButtons = `
-    <a class="btn primary" href="${escapeHtml(webUrl)}">🌐 Tarayıcıda Devam Et</a>
     <div class="stores">
       ${store.iosKnown ? `<a class="btn small" href="${escapeHtml(store.ios)}">🍎 App Store</a>` : ''}
       <a class="btn small" href="${escapeHtml(store.android)}">▶ Google Play</a>
@@ -335,7 +340,7 @@ function renderInvitePage({ c, url, code, session, platform }) {
       <li>Bu davet linkine tekrar dokun — doğrudan maça girersin.</li>
       <li>Ya da uygulamada <b>Online → Katıl</b> ekranına <b>${escapeHtml(code)}</b> kodunu gir.</li>
     </ol>
-    <a class="weblink" href="${escapeHtml(webUrl)}">Uygulamasız, tarayıcıda devam et →</a>` : '';
+` : '';
 
   // Sayfa açılınca otomatik deneme (sadece telefonlarda, maç bitmemişse)
   const autoScript = isPhone && !finished ? `
@@ -386,13 +391,13 @@ function renderInvitePage({ c, url, code, session, platform }) {
 <title>${escapeHtml(title)}</title>
 <meta name="description" content="${escapeHtml(description)}">
 <meta name="theme-color" content="#070a0f">
-<link rel="icon" href="/favicon.ico">
+<link rel="icon" href="/m/_a/favicon.ico">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="HalıSaha-Kolik">
 <meta property="og:title" content="${escapeHtml(title)}">
 <meta property="og:description" content="${escapeHtml(description)}">
 <meta property="og:url" content="${escapeHtml(pageUrl)}">
-<meta property="og:image" content="${escapeHtml(url.origin)}/logo512.png">
+<meta property="og:image" content="${escapeHtml(url.origin)}/m/_a/logo512.png">
 <meta property="og:image:width" content="512">
 <meta property="og:image:height" content="512">
 <meta name="twitter:card" content="summary">
@@ -434,7 +439,7 @@ h1{font-size:25px;line-height:1.2;margin:0 0 16px;letter-spacing:-.4px}
 </head>
 <body>
 <main class="wrap">
-  <img class="logo" src="/logo192.png" alt="HalıSaha-Kolik" width="88" height="88">
+  <img class="logo" src="/m/_a/logo192.png" alt="HalıSaha-Kolik" width="88" height="88">
   <div class="eyebrow">HalıSaha-Kolik · Davet</div>
   <h1>${finished ? 'Bu maç sona erdi' : 'Maça davet edildin'}</h1>
   ${matchCard}

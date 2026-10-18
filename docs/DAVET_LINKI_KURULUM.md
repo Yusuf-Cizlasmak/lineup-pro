@@ -6,7 +6,7 @@ Hedef: Davet linkine dokunan ya da QR kodu okutan kişi,
 ## Nasıl çalışıyor
 
 ```
-Paylaşılan link / QR:  https://davet.halisahakolik.com.tr/m/HK-AB12
+Paylaşılan link / QR:  https://halisahakolik.com.tr/m/HK-AB12
         │
         ├─ Uygulama yüklü
         │     iOS Universal Link / Android App Link → uygulama açılır
@@ -28,12 +28,10 @@ davet sayfası önce uygulamayı açmayı dener, açılmazsa mağazaya yönlendi
 
 ## 1. Domain'i Cloudflare'e bağla ve davet sayfasını yayınla (ücretsiz)
 
-Davet linkleri **alt alan adında**: `https://davet.halisahakolik.com.tr/m/HK-XXXX`.
-Kök domain (`halisahakolik.com.tr`) web sitene ait kalır.
-
-> **Neden alt alan adı?** `halisahakolik.com.tr/m/HK-9DZN` web sitene gitti, çünkü kök
-> domainde zaten web siten var. Cloudflare, var olan bir sitenin domainini Worker'a
-> bağlamaz; istek Worker'a hiç ulaşmaz. Alt alan adı bu çakışmayı ortadan kaldırır.
+Davet linkleri: `https://halisahakolik.com.tr/m/HK-XXXX`. Web siten kök domainde kalır;
+Worker sadece `/m/*` ve `/.well-known/` doğrulama dosyalarına cevap verir (wrangler.toml → routes).
+**Şart:** Cloudflare → DNS'te `halisahakolik.com.tr` kaydı **Proxied (turuncu bulut)** olmalı;
+gri bulutta istek Worker'a hiç uğramaz ve web sitene gider (HK-9DZN sorununun sebebi buydu).
 
 1. **Cloudflare'e ekle:** dash.cloudflare.com → *Add a domain* → `halisahakolik.com.tr`
    → **Free** plan. Cloudflare mevcut DNS kayıtlarını (web siten, e-posta/MX) tarayıp
@@ -48,14 +46,14 @@ Kök domain (`halisahakolik.com.tr`) web sitene ait kalır.
    npx wrangler login          # Cloudflare hesabınla giriş (tarayıcı açılır)
    npm run deploy:web          # build + deploy
    ```
-   `wrangler.toml` içindeki `routes` ayarı `davet.halisahakolik.com.tr`'yi Worker'a
+   `wrangler.toml` içindeki `routes` ayarı `halisahakolik.com.tr`'yi Worker'a
    bağlar; DNS kaydı ve SSL sertifikası otomatik oluşur. Kök domainde açılan eski
    `/m/...` linkleri de (kök domain kaydı Cloudflare'de turuncu bulutluysa) davet adresine
    yönlendirilir.
 
 Kontrol (tarayıcıda aç):
-- `https://davet.halisahakolik.com.tr/.well-known/apple-app-site-association` → JSON görünmeli
-- `https://davet.halisahakolik.com.tr/m/HK-TEST?sayfa=1` → davet sayfası görünmeli
+- `https://halisahakolik.com.tr/.well-known/apple-app-site-association` → JSON görünmeli
+- `https://halisahakolik.com.tr/m/HK-TEST?sayfa=1` → davet sayfası görünmeli
 
 Domain değişirse şu üç yeri aynı domain ile güncelle (eski linkler/QR'lar çalışmaz):
 

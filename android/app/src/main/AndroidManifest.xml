@@ -52,7 +52,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https" />
-                <data android:host="davet.halisahakolik.com.tr" />
+                <data android:host="halisahakolik.com.tr" />
                 <data android:pathPrefix="/m/" />
             </intent-filter>
 
