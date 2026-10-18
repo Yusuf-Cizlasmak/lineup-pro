@@ -15,7 +15,8 @@
 //       • App yüklüyse bu sayfa hiç açılmaz: iOS/Android linki doğrudan
 //         uygulamaya verir, uygulama odaya katılır.
 //       • iPhone  → (Universal Links kapalıysa önce halisahakolik:// dener) → App Store
-//       • Android → intent:// → app açılır; yüklü değilse Google Play
+//       • Android Chrome → sunucu 302 ile intent:// → app açılır; yüklü değilse
+//         Google Play (sayfa hiç görünmez). Diğer Android tarayıcılar → sayfa + intent
 //       • Masaüstü → maç bilgisi + "Tarayıcıda devam et" + mağaza butonları
 //       • WhatsApp / Telegram önizleme botları → maç bilgisiyle OG etiketleri
 //   Diğer her şey → build/ (web app)
@@ -40,6 +41,10 @@ const DEFAULTS = {
   // Davet sayfasında maç bilgisini göstermek için (anon key zaten herkese açık)
   SUPABASE_URL: '',
   SUPABASE_ANON_KEY: '',
+  // Davet linklerinin asıl adresi (örn. "davet.halisahakolik.com.tr"). Başka bir
+  // host'tan (kök domain route'u) gelen /m/ istekleri buraya yönlendirilir.
+  // *.workers.dev adresi test için yönlendirilmeden çalışır.
+  PUBLIC_HOST: '',
 };
 
 const config = (env) => {
@@ -71,9 +76,29 @@ export default {
     const codeMatch = path.match(/^\/(?:m|join)\/(HK-?[A-Z0-9]{4,8})\/?$/i);
     if (codeMatch) {
       const code = normalizeCode(codeMatch[1]);
+
+      // Kök domain gibi başka bir host'tan geldiyse asıl davet adresine taşı
+      // (Universal / App Links yalnızca PUBLIC_HOST için tanımlı)
+      if (c.PUBLIC_HOST && url.hostname !== c.PUBLIC_HOST && !url.hostname.endsWith('.workers.dev')) {
+        return Response.redirect(`https://${c.PUBLIC_HOST}/m/${code}${url.search}`, 302);
+      }
+
       const ua = (request.headers.get('user-agent') || '').toLowerCase();
+      const platform = detectPlatform(ua);
+
+      // Android Chrome: sunucu tarafı 302 → intent://. Chrome, linke dokunulmasıyla
+      // başlayan yönlendirmede intent'i her zaman açar (JS ile açmayı bazen engeller):
+      // app yüklüyse açılır, değilse browser_fallback_url → Google Play.
+      // ?sayfa=1 ile davet sayfası zorla gösterilir.
+      if (platform === 'android' && isChromeLike(ua) && !url.searchParams.has('sayfa')) {
+        return new Response(null, {
+          status: 302,
+          headers: { Location: buildIntentUrl(c, code), 'Cache-Control': 'no-store' },
+        });
+      }
+
       const session = await fetchSession(c, code);
-      return new Response(renderInvitePage({ c, url, code, session, platform: detectPlatform(ua) }), {
+      return new Response(renderInvitePage({ c, url, code, session, platform }), {
         headers: {
           'Content-Type': 'text/html; charset=utf-8',
           'Cache-Control': 'no-store',
@@ -146,6 +171,19 @@ function json(body) {
 function normalizeCode(raw) {
   const clean = String(raw).toUpperCase();
   return /^HK[A-Z0-9]{4,8}$/.test(clean) ? `HK-${clean.slice(2)}` : clean;
+}
+
+// Chrome / Chrome tabanlı tarayıcı (Samsung Internet, Custom Tabs). Uygulama içi
+// WebView'lar ("; wv)" — Instagram, Facebook) intent'i güvenilir açmaz → sayfa gösterilir.
+function isChromeLike(ua) {
+  return /chrome\/\d+/.test(ua) && !/; wv\)/.test(ua) && !/firefox|opr\//.test(ua);
+}
+
+function buildIntentUrl(c, code) {
+  const store = storeUrls(c, code);
+  return `intent://join?code=${encodeURIComponent(code)}#Intent;` +
+    `scheme=${c.SCHEME};package=${c.ANDROID_PACKAGE};` +
+    `S.browser_fallback_url=${encodeURIComponent(store.android)};end`;
 }
 
 function detectPlatform(ua) {
@@ -230,10 +268,7 @@ function renderInvitePage({ c, url, code, session, platform }) {
   const pageUrl = `${url.origin}/m/${code}`;
   const store = storeUrls(c, code);
   const schemeUrl = `${c.SCHEME}://join?code=${encodeURIComponent(code)}`;
-  const intentUrl =
-    `intent://join?code=${encodeURIComponent(code)}#Intent;` +
-    `scheme=${c.SCHEME};package=${c.ANDROID_PACKAGE};` +
-    `S.browser_fallback_url=${encodeURIComponent(store.android)};end`;
+  const intentUrl = buildIntentUrl(c, code);
   const webUrl = `${url.origin}/?code=${encodeURIComponent(code)}&web=1`;
 
   const finished = session?.status === 'finished';
