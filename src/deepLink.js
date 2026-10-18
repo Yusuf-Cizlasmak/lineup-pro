@@ -46,6 +46,11 @@ export const IOS_APP_URL = IOS_APP_STORE_ID
 export const ANDROID_APP_URL =
   `https://play.google.com/store/apps/details?id=${ANDROID_PACKAGE_NAME}`;
 
+// ★ Uygulamanın tanıtım sitesi + tüm paylaşımların alt bilgisi (büyüme döngüsü:
+//   her paylaşılan görsel/metin uygulamaya geri link verir)
+export const APP_SITE_URL = 'https://halisahakolik.com.tr';
+export const SHARE_FOOTER = '⚽ HalıSaha-Kolik ile kuruldu · halisahakolik.com.tr';
+
 // ─── URL ÜRETİCİLERİ ─────────────────────────────────────────
 
 /**
