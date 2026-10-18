@@ -26,28 +26,32 @@ davet sayfası önce uygulamayı açmayı dener, açılmazsa mağazaya yönlendi
 > `AndroidManifest.xml` değişti). Eski sürümü olanlar linke dokununca mağazaya gider ve
 > güncellemeyle sorun çözülür.
 
-## 1. Davet sayfasını yayınla (Cloudflare Workers, ücretsiz)
+## 1. Domain'i Cloudflare'e bağla ve davet sayfasını yayınla (ücretsiz)
 
-`halisaha-kolik.ycizlasmak.workers.dev` adresi şu an yayında değil — linkler bu yüzden boşa
-düşüyor. Bir kez deploy etmek yeterli:
+Davet linkleri `https://halisahakolik.com.tr/m/HK-XXXX` formatında.
 
-```bash
-npx wrangler login          # Cloudflare hesabınla giriş (tarayıcı açılır)
-npm run deploy:web          # build + deploy
-```
+1. **Cloudflare'e ekle:** dash.cloudflare.com → *Add a domain* → `halisahakolik.com.tr`
+   → **Free** plan. Cloudflare mevcut DNS kayıtlarını tarar; e-posta (MX) kaydın varsa
+   listede olduğundan emin ol.
+2. **Nameserver'ları değiştir:** Cloudflare sana iki adres verir
+   (örn. `ada.ns.cloudflare.com`, `bob.ns.cloudflare.com`). Domaini aldığın firmanın
+   panelinde (Natro, İsimtescil, Turhost vb.) *DNS / Ad sunucuları* bölümüne bu ikisini yaz,
+   eskileri sil. Birkaç dakika–24 saat sürer; Cloudflare'de domain **Active** olunca mail gelir.
+3. **Deploy:**
+   ```bash
+   npx wrangler login          # Cloudflare hesabınla giriş (tarayıcı açılır)
+   npm run deploy:web          # build + deploy
+   ```
+   `wrangler.toml` içindeki `routes` ayarı domaini Worker'a bağlar; DNS kaydı ve SSL
+   sertifikası otomatik oluşur.
 
-Komutun sonunda gerçek adres yazar: `https://halisaha-kolik.<alt-alan-adın>.workers.dev`.
-Alt alan adın `ycizlasmak` **değilse** şu üç yeri aynı domain ile güncelle:
+Domain değişirse şu üç yeri aynı domain ile güncelle (eski linkler/QR'lar çalışmaz):
 
 | Dosya | Satır |
 |-------|-------|
 | `src/deepLink.js` | `WEB_BASE` |
 | `ios/App/App/App.entitlements` | `applinks:<domain>` |
 | `android/app/src/main/AndroidManifest.xml` | `android:host="<domain>"` |
-
-**Öneri:** Uygulama yayına girmeden kendi domainini al (örn. `halisahakolik.com`, yıllık
-~10$) ve Cloudflare → Workers → *Custom Domains* ile bu Worker'a bağla. Domain sonradan
-değişirse önceki linkler ve QR kodlar çalışmaz; kalıcı bir adresle başlamak en sağlıklısı.
 
 Kontrol (tarayıcıda aç):
 - `https://<domain>/.well-known/apple-app-site-association` → JSON görünmeli

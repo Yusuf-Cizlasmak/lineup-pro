@@ -170,7 +170,7 @@ export default function App() {
     // NATIVE (iOS/Android) — Capacitor appUrlOpen
     //   Scheme:        halisahakolik://join?code=HK-AB12
     //                  halisahakolik:///m/HK-AB12
-    //   Universal:     https://halisaha-kolik.ycizlasmak.workers.dev/m/HK-AB12
+    //   Universal:     https://halisahakolik.com.tr/m/HK-AB12
     //   Tüm formatlar deepLink.js → parseCodeFromUrl ile yakalanır.
     // ═══════════════════════════════════════════════════════════
     let capListener = null;

@@ -8,7 +8,7 @@
 	     Domain değişirse: src/deepLink.js WEB_BASE + AndroidManifest.xml host. -->
 	<key>com.apple.developer.associated-domains</key>
 	<array>
-		<string>applinks:halisaha-kolik.ycizlasmak.workers.dev</string>
+		<string>applinks:halisahakolik.com.tr</string>
 	</array>
 </dict>
 </plist>

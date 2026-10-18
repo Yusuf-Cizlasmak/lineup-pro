@@ -1,9 +1,18 @@
 # Davet linki sunucusu + web app (Cloudflare Workers)
-# Deploy: npm run deploy:web   → https://halisaha-kolik.<hesap-alt-alan-adın>.workers.dev
+# Deploy: npm run deploy:web   → https://halisahakolik.com.tr
 # Kurulum adımları: docs/DAVET_LINKI_KURULUM.md
 name = "halisaha-kolik"
 main = "build/_worker.js"
 compatibility_date = "2024-12-01"
+
+# Kalıcı domain. Deploy'dan ÖNCE domain'in DNS'i Cloudflare'de "Active" olmalı
+# (aksi halde wrangler "Could not find zone" hatası verir).
+# Domain değişirse: src/deepLink.js WEB_BASE + ios App.entitlements + AndroidManifest host
+routes = [
+  { pattern = "halisahakolik.com.tr", custom_domain = true },
+]
+# *.workers.dev adresi yedek olarak açık kalsın
+workers_dev = true
 
 [assets]
 directory = "./build"
