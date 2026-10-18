@@ -48,6 +48,20 @@
     <key>UIViewControllerBasedStatusBarAppearance</key>
     <true/>
 
+    <!-- ✅ Davet linki: halisahakolik://join?code=HK-XXXX uygulamayı açar.
+         (Universal Link için ayrıca App.entitlements → associated-domains) -->
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.halisahakolik.app</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>halisahakolik</string>
+            </array>
+        </dict>
+    </array>
+
     <!-- ✅ Kamera & Fotoğraf İzinleri — ZORUNLU (olmadan iOS crash atar) -->
     <key>NSCameraUsageDescription</key>
     <string>Oyuncu profili için fotoğraf çekmek üzere kameraya erişim gereklidir.</string>

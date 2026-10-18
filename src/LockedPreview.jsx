@@ -29,7 +29,7 @@ import { hapticMedium } from "./haptics";
 
 const FEATURE_DEFAULTS = {
   cloud_sync:        { title: "Bulut Senkronu",     sub: "Telefon değiştirsen bile tüm verilerin saklı kalır.", tone: "blue" },
-  unlimited_online:  { title: "Sınırsız Online",    sub: "Sınırsız oda kur · Sınırsız maça katıl",              tone: "gold" },
+  unlimited_online:  { title: "Sınırsız Online",    sub: "Ayda 3 oda ücretsiz · Pro ile sınırsız oda kur",      tone: "gold" },
   unlimited_history: { title: "Sınırsız Geçmiş",    sub: "Tüm maçlarını ve istatistiklerini sakla",             tone: "gold" },
   no_ads:            { title: "Reklamsız Deneyim",  sub: "Banner ve geçiş reklamları kalksın",                  tone: "gold" },
   multi_team:        { title: "Sınırsız Takım",     sub: "İstediğin kadar takım yönet",                          tone: "blue" },

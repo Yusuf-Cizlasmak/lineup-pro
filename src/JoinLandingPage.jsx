@@ -2,7 +2,9 @@
 // HalıSaha-Kolik · Web Landing Page (Deep Link Fallback)
 // ─────────────────────────────────────────────────────────────
 // Bu sayfa NORMAL ŞARTLARDA görülmez:
-//   • Mobile → Worker SUNUCU-TARAFINDA redirect yapar (hiç render olmaz)
+//   • Paylaşılan linkler /m/HK-XXXX formatında → Worker'ın kendi davet
+//     sayfası karşılar (public/_worker.js). Bu React sayfası sadece eski
+//     /?code=HK-XXXX ve /#/m/HK-XXXX linkleri için yedek.
 //   • Mobile (Worker yoksa/yetişmezse) → tryNativeRedirect (index.js)
 //     React mount'tan ÖNCE redirect yapar
 //   • Mobile (yine yetişmezse) → BU sayfa mount-time'da otomatik
@@ -32,7 +34,9 @@ export default function JoinLandingPage({ code, onContinueWeb }) {
   const [appNotInstalled, setAppNotInstalled] = useState(false);
   const [platform] = useState(detectPlatform);
   const autoTried = useRef(false);
-  const storeUrl = getStoreUrl();
+  const storeUrl = getStoreUrl(code);
+  // Worker app'i zaten denedi ve buraya düştüyse (?fallback=1) tekrar deneme → döngü olmasın
+  const alreadyTried = typeof window !== 'undefined' && /[?&]fallback=1\b/.test(window.location.search);
 
   // ─── Uygulamada açma — Android intent / iOS scheme ───
   const openInApp = () => {
@@ -40,8 +44,7 @@ export default function JoinLandingPage({ code, onContinueWeb }) {
     setAppNotInstalled(false);
 
     if (platform === 'android') {
-      const fallback = ANDROID_APP_URL || window.location.href;
-      window.location.replace(buildIntentUrl(code, fallback));
+      window.location.replace(buildIntentUrl(code, storeUrl || ANDROID_APP_URL));
       return;
     }
 
@@ -69,6 +72,7 @@ export default function JoinLandingPage({ code, onContinueWeb }) {
   useEffect(() => {
     if (autoTried.current) return;
     autoTried.current = true;
+    if (alreadyTried) { setAppNotInstalled(true); return; }
 
     if (platform === 'android' || platform === 'ios') {
       const t = setTimeout(() => openInApp(), 50);

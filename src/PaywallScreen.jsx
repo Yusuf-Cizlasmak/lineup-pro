@@ -18,6 +18,59 @@ import {
 import { iap } from "./iap";
 import { hapticMedium, hapticSuccess, hapticLight } from "./haptics";
 import { hideBanner, showBanner } from "./admob";
+import { Capacitor } from "@capacitor/core";
+import { Browser } from "@capacitor/browser";
+
+// ═══════════════════════════════════════════════════════════
+// YASAL LİNKLER — App Store Guideline 3.1.2 (otomatik yenilenen abonelik)
+// ═══════════════════════════════════════════════════════════
+// Abonelik ekranında Kullanım Koşulları (EULA) + Gizlilik Politikası linki
+// ZORUNLU; eksikse Apple incelemede reddeder. Kendi EULA'n yoksa Apple'ın
+// standart EULA'sı kullanılabilir. PRIVACY_URL, App Store Connect'te girdiğin
+// gizlilik politikası adresiyle aynı olmalı.
+export const TERMS_URL   = "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/";
+export const PRIVACY_URL = ""; // örn: "https://halisahakolik.com/gizlilik"
+
+// Mağaza fiyatı yüklenemezse gösterilecek varsayılanlar (App Store Connect ile aynı tut)
+const FALLBACK_PRICES = { pro_monthly: "₺29", pro_yearly: "₺199" };
+
+const openExternal = async (url) => {
+  if (!url) return;
+  try {
+    if (Capacitor.isNativePlatform()) await Browser.open({ url });
+    else window.open(url, "_blank", "noopener");
+  } catch {
+    window.open(url, "_blank");
+  }
+};
+
+// ═══ Mağaza fiyatları hook'u — paywall + ayarlar kartı aynı fiyatı göstersin ═══
+// Native'de App Store / Play fiyatını (TL, vergiler dahil) çeker; yüklenemezse
+// FALLBACK_PRICES döner. { monthlyStr, yearlyStr, raw } şeklinde.
+export function usePlanPrices(enabled = true) {
+  const [raw, setRaw] = useState(null);
+  useEffect(() => {
+    if (!enabled) return;
+    let alive = true;
+    iap.getPlanPrices().then((p) => { if (alive && p) setRaw(p); }).catch(() => {});
+    return () => { alive = false; };
+  }, [enabled]);
+  return {
+    raw,
+    monthlyStr: raw?.pro_monthly?.priceString || FALLBACK_PRICES.pro_monthly,
+    yearlyStr:  raw?.pro_yearly?.priceString  || FALLBACK_PRICES.pro_yearly,
+  };
+}
+
+// "₺199,99" gibi bir fiyatı 12'ye bölünmüş aylık karşılığa çevirir
+const formatMonthlyFromYearly = (yearly) => {
+  if (!yearly?.price || !yearly?.currencyCode) return null;
+  try {
+    return new Intl.NumberFormat("tr-TR", {
+      style: "currency", currency: yearly.currencyCode, maximumFractionDigits: 0,
+    }).format(yearly.price / 12);
+  } catch { return null; }
+};
 
 // ═══════════════════════════════════════════════════════════
 // PROVIDER — App.js'e bir kez koy
@@ -59,7 +112,7 @@ const C = {
 // FEATURE TANIMLARI — açılış başlığı feature'a göre değişir
 // ═══════════════════════════════════════════════════════════
 const FEATURE_TITLES = {
-  unlimited_online:  "Free oyun hakkını kullandın",
+  unlimited_online:  "Bu ayki ücretsiz oda hakların bitti",
   cloud_sync:        "Verilerini bulutta sakla",
   no_ads:            "Reklamsız bir deneyim",
   unlimited_history: "Tüm maç geçmişini sakla",
@@ -76,8 +129,13 @@ function PaywallScreen({ open, feature, onClose }) {
   const { tier, plan, until, isTrial, daysLeft } = useSubscription();
   const [period, setPeriod] = useState("yearly"); // monthly | yearly
   const [loading, setLoading] = useState(null);
-  const [error, setError] = useState(null); // ★ { title, message, retry: () => void }
+  const [error, setError] = useState(null); // ★ { title, message, detail, retry: () => void }
+  const [diagText, setDiagText] = useState(null);
+  // ★ Paywall açılınca App Store / Play fiyatlarını çek (yüklenemezse varsayılanlar kalır)
+  const { raw: prices, monthlyStr, yearlyStr } = usePlanPrices(open);
   const trialAvailable = !isTrialUsed();
+  const isIOS = Capacitor.getPlatform() === "ios";
+  const isNative = Capacitor.isNativePlatform();
 
   // Modal açıkken banner gizle, kapanınca geri getir
   useEffect(() => {
@@ -140,8 +198,9 @@ function PaywallScreen({ open, feature, onClose }) {
         hapticMedium();
         setError({
           title: "Satın alma şu an kullanılamıyor",
-          message: "Uygulama bakımda. Lütfen daha sonra tekrar deneyin.",
-          retry: null,
+          message: "Mağaza bağlantısı kurulamadı. Lütfen daha sonra tekrar deneyin.",
+          detail: err.detail,
+          retry: () => handlePurchase(planId),
         });
         return;
       }
@@ -151,6 +210,7 @@ function PaywallScreen({ open, feature, onClose }) {
         setError({
           title: "Mağaza bağlantısı yok",
           message: err.message || "İnternet bağlantını kontrol et ve tekrar dene.",
+          detail: err.detail,
           retry: () => handlePurchase(planId),
         });
         return;
@@ -161,6 +221,7 @@ function PaywallScreen({ open, feature, onClose }) {
         setError({
           title: "Ürünler yüklenemedi",
           message: err.message || "Birkaç dakika sonra tekrar dene.",
+          detail: err.detail,
           retry: () => handlePurchase(planId),
         });
         return;
@@ -171,6 +232,7 @@ function PaywallScreen({ open, feature, onClose }) {
         setError({
           title: "Bu paket şu an mevcut değil",
           message: err.message || "Lütfen daha sonra tekrar dene.",
+          detail: err.detail,
           retry: null,
         });
         return;
@@ -180,6 +242,7 @@ function PaywallScreen({ open, feature, onClose }) {
       setError({
         title: "Ödeme tamamlanamadı",
         message: err.message || "Bilinmeyen bir hata oluştu.",
+        detail: err.detail,
         retry: () => handlePurchase(planId),
       });
     }
@@ -217,8 +280,9 @@ function PaywallScreen({ open, feature, onClose }) {
         hapticMedium();
         setError({
           title: "Deneme şu an kullanılamıyor",
-          message: "Uygulama bakımda. Lütfen daha sonra tekrar deneyin.",
-          retry: null,
+          message: "Mağaza bağlantısı kurulamadı. Lütfen daha sonra tekrar deneyin.",
+          detail: err.detail,
+          retry: () => handleStartTrial(),
         });
         return;
       }
@@ -227,6 +291,7 @@ function PaywallScreen({ open, feature, onClose }) {
         setError({
           title: "Mağaza bağlantısı yok",
           message: err.message || "İnternet bağlantını kontrol et ve tekrar dene.",
+          detail: err.detail,
           retry: () => handleStartTrial(),
         });
         return;
@@ -236,6 +301,7 @@ function PaywallScreen({ open, feature, onClose }) {
         setError({
           title: "Ürünler yüklenemedi",
           message: err.message || "Birkaç dakika sonra tekrar dene.",
+          detail: err.detail,
           retry: () => handleStartTrial(),
         });
         return;
@@ -245,6 +311,7 @@ function PaywallScreen({ open, feature, onClose }) {
         setError({
           title: "Bu paket şu an mevcut değil",
           message: err.message || "Lütfen daha sonra tekrar dene.",
+          detail: err.detail,
           retry: null,
         });
         return;
@@ -253,6 +320,7 @@ function PaywallScreen({ open, feature, onClose }) {
       setError({
         title: "Deneme başlatılamadı",
         message: err.message || "Bir sorun oluştu.",
+        detail: err.detail,
         retry: () => handleStartTrial(),
       });
     }
@@ -284,6 +352,7 @@ function PaywallScreen({ open, feature, onClose }) {
       setError({
         title: "Geri yükleme başarısız",
         message: err.message || "Bir sorun oluştu.",
+        detail: err.detail,
         retry: handleRestore,
       });
     }
@@ -304,6 +373,29 @@ function PaywallScreen({ open, feature, onClose }) {
       });
     }
   };
+
+  // ─── Tanılama raporu — Mac/Web Inspector olmadan sorunu görmek için ───
+  const handleDiagnose = async () => {
+    hapticLight();
+    setDiagText("Tanılama çalışıyor…");
+    try {
+      setDiagText(await iap.diagnoseReport());
+    } catch (e) {
+      setDiagText("Tanılama başarısız: " + (e?.message || String(e)));
+    }
+  };
+
+  const copyDiag = async () => {
+    try { await navigator.clipboard.writeText(diagText || ""); hapticSuccess(); } catch {}
+  };
+
+  // ─── Fiyat metinleri (mağaza > varsayılan) ───
+  const yearlyPerMonth = prices?.pro_yearly
+    ? (prices.pro_yearly.pricePerMonthString || formatMonthlyFromYearly(prices.pro_yearly))
+    : "₺17";
+  const savePct = (prices?.pro_monthly?.price && prices?.pro_yearly?.price)
+    ? Math.round((1 - prices.pro_yearly.price / (prices.pro_monthly.price * 12)) * 100)
+    : 44;
 
   // ─── DEBUG: Lokal subscription'ı temizle (sadece dev/test) ───
   const handleDebugClearLocal = async () => {
@@ -336,21 +428,40 @@ function PaywallScreen({ open, feature, onClose }) {
             <div style={S.errorIcon}>!</div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={S.errorTitle}>{error.title}</div>
-              <div style={S.errorMessage}>{error.message}</div>
-              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                <button
-                  onClick={() => { hapticMedium(); error.retry?.(); }}
-                  style={S.errorRetryBtn}
-                >
-                  ↻ Tekrar Dene
-                </button>
+              <div style={{ ...S.errorMessage, whiteSpace: "pre-line" }}>{error.message}</div>
+              {error.detail && <div style={S.errorDetail}>{error.detail}</div>}
+              <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                {error.retry && (
+                  <button
+                    onClick={() => { hapticMedium(); error.retry?.(); }}
+                    style={S.errorRetryBtn}
+                  >
+                    ↻ Tekrar Dene
+                  </button>
+                )}
                 <button
                   onClick={() => setError(null)}
                   style={S.errorDismissBtn}
                 >
                   Kapat
                 </button>
+                {isNative && (
+                  <button onClick={handleDiagnose} style={S.errorDismissBtn}>
+                    Tanılama raporu
+                  </button>
+                )}
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* ★ Tanılama raporu — kopyalayıp geliştiriciye gönderilebilir */}
+        {diagText && (
+          <div style={S.diagPanel}>
+            <pre style={S.diagPre}>{diagText}</pre>
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <button onClick={copyDiag} style={S.errorDismissBtn}>Kopyala</button>
+              <button onClick={() => setDiagText(null)} style={S.errorDismissBtn}>Kapat</button>
             </div>
           </div>
         )}
@@ -379,6 +490,8 @@ function PaywallScreen({ open, feature, onClose }) {
             until={until}
             isTrial={isTrial}
             daysLeft={daysLeft}
+            monthlyStr={monthlyStr}
+            yearlyStr={yearlyStr}
             onCancel={handleCancel}
             onClose={onClose}
           />
@@ -393,7 +506,7 @@ function PaywallScreen({ open, feature, onClose }) {
               <div style={S.heroBadge}>★ HALI SAHA · PRO</div>
               <h2 style={S.heroTitle}>{title}</h2>
               <p style={S.heroSub}>
-                Sınırsız oda kurma · Sınırsız katılma · Reklamsız · Cloud sync
+                Sınırsız oda kurma · Reklamsız · Sınırsız geçmiş · Cloud sync
               </p>
             </div>
 
@@ -403,7 +516,7 @@ function PaywallScreen({ open, feature, onClose }) {
                 <span style={S.trialBadge}>YENİ</span>
                 <div style={{ flex: 1, textAlign: "left" }}>
                   <div style={S.trialTitle}>7 gün ÜCRETSİZ Pro</div>
-                  <div style={S.trialSub}>İptal et, ücret yok. Hemen başla.</div>
+                  <div style={S.trialSub}>Sonra {yearlyStr}/yıl · Deneme bitmeden iptal edersen ücret yok.</div>
                 </div>
                 <span style={S.trialArrow}>→</span>
               </button>
@@ -421,7 +534,7 @@ function PaywallScreen({ open, feature, onClose }) {
                 onClick={() => { setPeriod("yearly"); hapticLight(); }}
                 style={{ ...S.toggleBtn, ...(period === "yearly" ? S.toggleBtnActive : {}) }}
               >
-                Yıllık <span style={S.savePill}>−44%</span>
+                Yıllık {savePct > 0 && <span style={S.savePill}>−{savePct}%</span>}
               </button>
             </div>
 
@@ -431,11 +544,13 @@ function PaywallScreen({ open, feature, onClose }) {
               name="Pro"
               tagline="Bireysel premium"
               badge="EN POPÜLER"
-              price={period === "yearly" ? 199 : 29}
+              price={period === "yearly" ? yearlyStr : monthlyStr}
               unit={period === "yearly" ? "/yıl" : "/ay"}
-              subPrice={period === "yearly" ? "₺17/ay (yıllık ödeme)" : "her ay yenilenir"}
+              subPrice={period === "yearly"
+                ? (yearlyPerMonth ? `${yearlyPerMonth}/ay (yıllık ödeme)` : "yıllık ödeme")
+                : "her ay yenilenir"}
               features={[
-                { icon: "⚡", text: "Sınırsız oda kurma + maça katılma" },
+                { icon: "⚡", text: "Sınırsız online oda kurma" },
                 { icon: "🚫", text: "Reklamsız deneyim" },
                 { icon: "☁️", text: "Cloud sync (cihazlar arası)" },
                 { icon: "📊", text: "Sınırsız maç geçmişi + gelişmiş istatistik" },
@@ -449,7 +564,7 @@ function PaywallScreen({ open, feature, onClose }) {
             {/* Free hatırlatma */}
             <div style={S.freeNote}>
               <span style={S.freeNoteLabel}>FREE</span>
-              <span>1 oda kurma · 1 maça katılma · Son {FREE_LIMITS.HISTORY_LIMIT} maç geçmişi</span>
+              <span>Ayda {FREE_LIMITS.ONLINE_CREATES_PER_MONTH} oda kurma · Sınırsız maça katılma · Son {FREE_LIMITS.HISTORY_LIMIT} maç geçmişi</span>
             </div>
 
             {/* Alt linkler */}
@@ -462,6 +577,27 @@ function PaywallScreen({ open, feature, onClose }) {
                 Şimdi değil
               </button>
             </div>
+
+            {/* ★ Otomatik yenileme açıklaması + yasal linkler (Guideline 3.1.2) */}
+            <p style={S.legalText}>
+              Abonelik, dönem bitiminden en az 24 saat önce iptal edilmezse otomatik
+              olarak yenilenir. Ödeme, satın alma onayında {isIOS ? "Apple ID" : "Google Play"} hesabından
+              alınır. Aboneliğini {isIOS ? "App Store" : "Google Play"} hesap ayarlarından yönetebilir
+              veya iptal edebilirsin.
+            </p>
+            <div style={S.legalLinks}>
+              {isIOS && (
+                <button style={S.footerLink} onClick={() => openExternal(TERMS_URL)}>
+                  Kullanım Koşulları
+                </button>
+              )}
+              {isIOS && PRIVACY_URL && <span style={S.footerDivider}>·</span>}
+              {PRIVACY_URL && (
+                <button style={S.footerLink} onClick={() => openExternal(PRIVACY_URL)}>
+                  Gizlilik Politikası
+                </button>
+              )}
+            </div>
           </>
         )}
       </div>
@@ -472,14 +608,14 @@ function PaywallScreen({ open, feature, onClose }) {
 // ═══════════════════════════════════════════════════════════
 // MANAGE SUBSCRIPTION — Pro kullanıcı yönetim ekranı
 // ═══════════════════════════════════════════════════════════
-function ManageSubscription({ tier, plan, until, isTrial, daysLeft, onCancel, onClose }) {
+function ManageSubscription({ tier, plan, until, isTrial, daysLeft, monthlyStr, yearlyStr, onCancel, onClose }) {
   const planLabel = isTrial ? "DENEME (7 GÜN)"
     : plan === "pro_monthly" ? "PRO AYLIK"
     : plan === "pro_yearly"  ? "PRO YILLIK"
     : "PRO";
 
-  const planPrice = plan === "pro_monthly" ? "₺29/ay"
-    : plan === "pro_yearly"  ? "₺199/yıl"
+  const planPrice = plan === "pro_monthly" ? `${monthlyStr}/ay`
+    : plan === "pro_yearly"  ? `${yearlyStr}/yıl`
     : isTrial ? "Ücretsiz" : "—";
 
   const renewDate = until ? new Date(until).toLocaleDateString("tr-TR", {
@@ -585,7 +721,7 @@ function ManageSubscription({ tier, plan, until, isTrial, daysLeft, onCancel, on
           AKTİF ÖZELLİKLER
         </div>
         {[
-          "Sınırsız oda kurma + maça katılma",
+          "Sınırsız online oda kurma",
           "Reklamsız deneyim",
           "Cloud sync (cihazlar arası)",
           "Sınırsız maç geçmişi",
@@ -679,8 +815,13 @@ function TierCard({ tone, name, tagline, badge, price, unit, subPrice, features,
         </div>
         <div style={{ textAlign: "right" }}>
           <div style={{ display: "inline-flex", alignItems: "baseline", gap: 3 }}>
-            <span style={{ ...S.tierPrice, color: accentCol }}>
-              ₺{price}
+            <span style={{
+              ...S.tierPrice,
+              color: accentCol,
+              // Mağaza fiyatı "₺1.199,99" gibi uzun gelebilir — dar ekranda taşmasın
+              ...(String(price).length > 6 ? { fontSize: 22 } : {}),
+            }}>
+              {price}
             </span>
             <span style={S.tierUnit}>{unit}</span>
           </div>
@@ -862,6 +1003,30 @@ const S = {
   errorMessage: {
     fontSize: 12, lineHeight: 1.45,
     color: "rgba(255,255,255,0.7)",
+  },
+  errorDetail: {
+    marginTop: 6,
+    fontSize: 10, lineHeight: 1.4,
+    color: "rgba(255,255,255,0.4)",
+    fontFamily: "'JetBrains Mono', monospace",
+    wordBreak: "break-word",
+  },
+  diagPanel: {
+    marginBottom: 14,
+    padding: "10px 12px",
+    background: "rgba(0,0,0,0.45)",
+    border: `1px solid ${C.border}`,
+    borderRadius: 10,
+  },
+  diagPre: {
+    margin: 0,
+    maxHeight: 220,
+    overflow: "auto",
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
+    fontSize: 10, lineHeight: 1.45,
+    color: "rgba(255,255,255,0.75)",
+    fontFamily: "'JetBrains Mono', monospace",
   },
   errorRetryBtn: {
     padding: "8px 14px",
@@ -1196,5 +1361,18 @@ const S = {
   footerDivider: {
     color: C.dim,
     fontSize: 14,
+  },
+  legalText: {
+    margin: "10px 4px 0",
+    fontSize: 9.5, lineHeight: 1.5,
+    color: C.dim,
+    textAlign: "center",
+  },
+  legalLinks: {
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 2,
   },
 };

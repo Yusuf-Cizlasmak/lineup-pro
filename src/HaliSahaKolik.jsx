@@ -16,9 +16,7 @@ import ModeSelectScreen from "./ModeSelectScreen";
 import {
   getSubscription,
   canCreateOnlineMatch,
-  canJoinOnlineMatch,
   getOnlineMatchCount,
-  getOnlineJoinCount,
   FREE_LIMITS,
   isPremium,
 } from "./subscription";
@@ -39,6 +37,8 @@ import AIFieldDistribution from "./AIFieldDistribution";
 import AIModeSheet from "./AIModeSheet";
 import { compatOf, TIER_LABEL } from "./aiFieldDistribute";
 import { scheduleContextNotifications } from "./notifications";
+import { usePlanPrices } from "./PaywallScreen";
+import { JOIN_CODE_EVENT, peekPendingJoinCode } from "./deepLink";
 
 // ─── SCREENSHOT & SHARE UTILITY ───
 const captureAndShare = async (element, filename = "halisaha-kolik.png") => {
@@ -1853,6 +1853,8 @@ const PlanSettingsCard = ({ onOpenPlan }) => {
   const isPro = s.tier === "pro";
   const isTrial = s.plan === "trial_7d";
   const daysLeft = s.until ? Math.max(0, Math.ceil((s.until - Date.now()) / 86400000)) : null;
+  // ★ Fiyatlar mağazadan (paywall ile aynı kaynak) — eskiden burada sabit ₺59/₺399 yazıyordu
+  const { monthlyStr, yearlyStr } = usePlanPrices();
 
   // Plan adı + fiyat metni
   const planLabel = isTrial ? "PRO · Deneme"
@@ -1861,8 +1863,8 @@ const PlanSettingsCard = ({ onOpenPlan }) => {
     : isPro                    ? "PRO · Aktif"
     : "FREE Plan";
 
-  const planPriceText = s.plan === "pro_yearly"  ? "₺399/yıl  ·  ₺33/ay değer"
-    : s.plan === "pro_monthly" ? "₺59/ay"
+  const planPriceText = s.plan === "pro_yearly"  ? `${yearlyStr}/yıl`
+    : s.plan === "pro_monthly" ? `${monthlyStr}/ay`
     : isTrial                   ? "Ücretsiz deneme"
     : "Ücretsiz";
 
@@ -1875,7 +1877,6 @@ const PlanSettingsCard = ({ onOpenPlan }) => {
 
   // ═══ FREE — kullanım sayaçları ═══
   const onlineCreated = getOnlineMatchCount().count;
-  const onlineJoined  = getOnlineJoinCount().count;
   // history limit free için ilk N maçtan oluşur — getAllMatches()'ı saysın (sadece count için ucuz)
   let historyUsed = 0;
   try { historyUsed = getAllMatches().length; } catch {}
@@ -1907,9 +1908,8 @@ const PlanSettingsCard = ({ onOpenPlan }) => {
   );
 
   // Progress bar (yüzde değil, kullanılan/toplam görselleştirme)
-  const UsageBar = ({ label, used, limit }) => {
-    const isLifetime = limit === FREE_LIMITS.ONLINE_MATCHES_LIFETIME || limit === FREE_LIMITS.ONLINE_JOINS_LIFETIME;
-    const cap = isLifetime ? limit : limit;
+  const UsageBar = ({ label, used, limit, suffix }) => {
+    const cap = limit;
     const pct = Math.min(100, (used / cap) * 100);
     const exhausted = used >= cap;
     return (
@@ -1924,7 +1924,7 @@ const PlanSettingsCard = ({ onOpenPlan }) => {
             color: exhausted ? "#f87171" : "rgba(255,255,255,0.7)",
             fontFamily: "'JetBrains Mono',monospace",
             letterSpacing: 0.4,
-          }}>{used}/{cap}{isLifetime ? "  (toplam)" : ""}</span>
+          }}>{used}/{cap}{suffix ? `  (${suffix})` : ""}</span>
         </div>
         <div style={{
           height: 4, width: "100%",
@@ -2114,13 +2114,23 @@ const PlanSettingsCard = ({ onOpenPlan }) => {
             <UsageBar
               label="Online oda kurma"
               used={onlineCreated}
-              limit={FREE_LIMITS.ONLINE_MATCHES_LIFETIME}
+              limit={FREE_LIMITS.ONLINE_CREATES_PER_MONTH}
+              suffix="bu ay"
             />
-            <UsageBar
-              label="Online maça katılma"
-              used={onlineJoined}
-              limit={FREE_LIMITS.ONLINE_JOINS_LIFETIME}
-            />
+            <div style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              marginBottom: 9,
+            }}>
+              <span style={{ fontSize: 11, color: "rgba(255,255,255,0.6)" }}>
+                Online maça katılma
+              </span>
+              <span style={{
+                fontSize: 10, fontWeight: 700,
+                color: "rgba(255,255,255,0.7)",
+                fontFamily: "'JetBrains Mono',monospace",
+                letterSpacing: 0.4,
+              }}>Sınırsız</span>
+            </div>
 
             {/* Geçmiş satırı: bir bar değil, bir bilgi satırı — kullanıcı 5+ maç oynayabilir,
                 sadece görünür olan son 5 maç. Yanıltıcı progress yerine düz bilgi gösterelim. */}
@@ -2336,6 +2346,16 @@ export default function LineupPro() {
   const [showAIMode, setShowAIMode] = useState(false);     // ★ AI Modu seçim menüsü
   const [showAISplit, setShowAISplit] = useState(false);   // ★ AI A&B böl (tüm havuz → kadrolar)
   const [showAppSettings, setShowAppSettings] = useState(false); // ★ Genel ayarlar modal
+
+  // ★ Davet linki / QR ile gelindi → hangi ekrandaysa Online moda geç.
+  //   Kodu LiveMatch alır ve doğrudan odaya katılır (bkz. deepLink.queueJoinCode).
+  useEffect(() => {
+    const goOnline = () => { setShowAppSettings(false); setMode("online"); };
+    if (peekPendingJoinCode()) goOnline();
+    window.addEventListener(JOIN_CODE_EVENT, goOnline);
+    return () => window.removeEventListener(JOIN_CODE_EVENT, goOnline);
+  }, []);
+
   const [hapticsOn, setHapticsOnState] = useState(isHapticsEnabled());
   // ★ Rehber turu — App.js'teki tek Tour instance'ı window event ile yönetilir
   const tourActive = false; // sadece banner kontrolü için placeholder
@@ -2542,13 +2562,11 @@ export default function LineupPro() {
         try { hasPlayed = (getAllMatches() || []).length > 0; } catch {}
         let usedAI = false;
         try { usedAI = localStorage.getItem("halisaha_used_ai") === "1"; } catch {}
-        // Online hak bitti mi? (premium değilse, hem katılma hem oluşturma hakkı tükenmişse)
+        // Bu ayki ücretsiz oda kurma hakkı bitti mi? (katılım zaten sınırsız)
         let onlineQuotaOut = false;
         try {
           if (!isPremium()) {
-            const joinLeft = canJoinOnlineMatch()?.allowed;
-            const createLeft = canCreateOnlineMatch()?.allowed;
-            onlineQuotaOut = (joinLeft === false && createLeft === false);
+            onlineQuotaOut = canCreateOnlineMatch()?.allowed === false;
           }
         } catch {}
         scheduleContextNotifications({

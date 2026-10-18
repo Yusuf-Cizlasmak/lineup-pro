@@ -31,10 +31,10 @@ import {
 } from './LiveMatchService';
 import { hapticMedium, hapticHeavy, hapticSuccess, hapticLight, hapticSelection } from './haptics';
 import {
-  canCreateOnlineMatch, canJoinOnlineMatch,
-  incrementOnlineMatchCount, incrementOnlineJoinCount,
+  canCreateOnlineMatch, incrementOnlineMatchCount,
   isPremium, openPaywall,
 } from './subscription';
+import { canCreateOnline, syncOnlineUsage, formatResetDate } from './onlineUsage';
 import SpiderChart from './SpiderChart';
 import {
   getAttrKeys, generateDefaultAttributes, computeOverallFromAttributes,
@@ -44,7 +44,7 @@ import { Capacitor } from '@capacitor/core';
 
 // ★ NEW — Profesyonel paylaşım sistemi
 import ShareInviteModal from './ShareInviteModal';
-import { buildJoinUrl, buildShareText } from './deepLink';
+import { buildJoinUrl, buildShareText, takePendingJoinCode, JOIN_CODE_EVENT } from './deepLink';
 
 // ═══════════════════════════════════════════════════════════
 // DEEP LINK — Tüm yapılandırma deepLink.js dosyasında.
@@ -851,6 +851,9 @@ export default function LiveMatch() {
   // Join form
   const [joinCode, setJoinCode] = useState('');
 
+  // ★ Free tier: bu ayki oda kurma hakkı (Maç Kur kartında gösterilir)
+  const [createQuota, setCreateQuota] = useState(() => canCreateOnlineMatch());
+
   // Rating
   const [myRatings, setMyRatings] = useState({});
   const [ratingsSubmitted, setRatingsSubmitted] = useState(false);
@@ -952,22 +955,38 @@ export default function LiveMatch() {
   }, []);
   useEffect(() => { loadMySessions(); }, [loadMySessions]);
 
-  // ─── Deep link auto-join: sadece custom event dinle ───
-  // (window.location.href native'de http://localhost olur — kullanılmaz)
-  // Dispatch: App.js'deki appUrlOpen veya web'deki URL param işleme
+  // ─── Aylık oda kurma kotası: sunucuyla senkronla + değişince tazele ───
   useEffect(() => {
-    if (!nicknameSet) return;
-    const onCode = (e) => {
-      const code = e.detail?.code;
-      if (code) {
-        setJoinCode(code.toUpperCase().trim());
-        setScreen('join');
-      }
+    const refreshQuota = () => setCreateQuota(canCreateOnlineMatch());
+    syncOnlineUsage().then(refreshQuota).catch(() => {});
+    window.addEventListener('hk:online-usage-changed', refreshQuota);
+    window.addEventListener('hk:subscription-changed', refreshQuota);
+    return () => {
+      window.removeEventListener('hk:online-usage-changed', refreshQuota);
+      window.removeEventListener('hk:subscription-changed', refreshQuota);
     };
-    window.addEventListener('halisaha:join-code', onCode);
-    return () => window.removeEventListener('halisaha:join-code', onCode);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nicknameSet]);
+  }, []);
+
+  // ─── Deep link (davet linki / QR) → doğrudan odaya katıl ───
+  // App.js kodu deepLink.queueJoinCode ile sıraya koyar. LiveMatch o an
+  // mount değilse (kullanıcı ana ekrandaysa) kod bekler; mount olunca alınır.
+  // Takma ad yoksa önce takma ad sorulur, sonra otomatik katılınır.
+  const handleJoinRef = useRef(null);
+  const pendingAutoJoinRef = useRef(null);
+  useEffect(() => {
+    const consume = () => {
+      const code = takePendingJoinCode();
+      if (!code) return;
+      setJoinCode(code);
+      setError('');
+      setScreen('join');
+      if (getNickname()) handleJoinRef.current?.(code);
+      else pendingAutoJoinRef.current = code;
+    };
+    consume();
+    window.addEventListener(JOIN_CODE_EVENT, consume);
+    return () => window.removeEventListener(JOIN_CODE_EVENT, consume);
+  }, []);
 
   // ─── Connect & realtime ───
   const connectToSession = useCallback(async (sess) => {
@@ -1057,29 +1076,41 @@ export default function LiveMatch() {
     setNicknameSet(true);
     setError('');
     setLoading(false);
+    // Davet linkiyle gelindiyse takma ad sonrası doğrudan odaya gir
+    const pending = pendingAutoJoinRef.current;
+    if (pending) {
+      pendingAutoJoinRef.current = null;
+      handleJoinRef.current?.(pending);
+    }
   };
 
   const handleCreate = async () => {
     if (!fieldName.trim()) { setError('Saha adı gir.'); return; }
 
-    // ★ FREE TIER QUOTA: kullanıcının oda kurma hakkı kaldı mı?
+    setLoading(true); setError('');
+
+    // ★ FREE TIER QUOTA: bu ay oda kurma hakkı kaldı mı? (sunucudaki sayımla doğrulanır)
     if (!isPremium()) {
-      const quota = canCreateOnlineMatch();
+      const quota = await canCreateOnline();
+      setCreateQuota(quota);
       if (!quota.allowed) {
-        setError(`Free üyelikte ${quota.limit} oda kurma hakkın var. Pro'ya geç, sınırsız oyna.`);
+        setLoading(false);
+        setError(
+          `Bu ayki ${quota.limit} ücretsiz oda hakkını kullandın. ` +
+          `Hakların ${formatResetDate(quota.resetsAt)} tarihinde yenilenir — Pro ile sınırsız oda kur.`
+        );
         // Kısa bir gecikme ile paywall'ı aç — kullanıcı errored UI'ı görsün
         setTimeout(() => openPaywall('unlimited_online'), 600);
         return;
       }
     }
 
-    setLoading(true); setError('');
     try {
       const sess = await createSession({
         fieldName, location, teamAName, teamBName,
         teamAColor, teamBColor, durationMinutes: duration,
       });
-      // ★ Free user sayacını artır (Premium kullanıcılar etkilenmez — yine de say, sorun değil)
+      // ★ Free kullanıcının aylık sayacını artır (lokal cache; sunucu satırı zaten eklendi)
       if (!isPremium()) {
         incrementOnlineMatchCount();
       }
@@ -1089,31 +1120,21 @@ export default function LiveMatch() {
     setLoading(false);
   };
 
-  const handleJoin = async () => {
-    if (!joinCode.trim()) { setError('Kodu gir.'); return; }
-
-    // ★ FREE TIER QUOTA: maça katılma hakkı kaldı mı?
-    if (!isPremium()) {
-      const quota = canJoinOnlineMatch();
-      if (!quota.allowed) {
-        setError(`Free üyelikte ${quota.limit} maça katılma hakkın var. Pro'ya geç, sınırsız oyna.`);
-        setTimeout(() => openPaywall('unlimited_online'), 600);
-        return;
-      }
-    }
+  // Maça katılma herkes için ücretsiz ve sınırsız.
+  // codeArg: deep link'ten gelen kod (buton onClick'inde event gelir → yok sayılır)
+  const handleJoin = async (codeArg) => {
+    const code = (typeof codeArg === 'string' ? codeArg : joinCode).trim().toUpperCase();
+    if (!code) { setError('Kodu gir.'); return; }
 
     setLoading(true); setError('');
     try {
-      const sess = await joinSessionByCode(joinCode);
-      // ★ Free user katılma sayacını artır
-      if (!isPremium()) {
-        incrementOnlineJoinCount();
-      }
+      const sess = await joinSessionByCode(code);
       await connectToSession(sess);
       hapticMedium();
     } catch (e) { setError(e.message); }
     setLoading(false);
   };
+  handleJoinRef.current = handleJoin;
 
   const handleAssignTeam = async (targetDeviceId, team) => {
     if (!session) return;
@@ -1584,7 +1605,11 @@ export default function LiveMatch() {
             margin: '14px 0 6px', fontSize: 22, fontWeight: 800,
             letterSpacing: -0.4,
           }}>Hoş geldin</h2>
-          <p style={{ color: C.muted, fontSize: 13.5 }}>Önce bir takma ad belirle</p>
+          <p style={{ color: C.muted, fontSize: 13.5 }}>
+            {screen === 'join' && joinCode
+              ? <>Maça (<strong style={{ color: C.accent, fontFamily: "'JetBrains Mono',monospace" }}>{joinCode}</strong>) katılmak için takma adını belirle</>
+              : 'Önce bir takma ad belirle'}
+          </p>
         </div>
         <Input value={myNickname} onChange={setMyNickname} placeholder="Takma adın (örn: Mehmet)" maxLength={20} />
         {error && <p style={{ color: C.danger, fontSize: 13, marginTop: 8 }}>{error}</p>}
@@ -1634,12 +1659,19 @@ export default function LiveMatch() {
           <button onClick={() => { setScreen('create'); setError(''); }} style={bigActionBtn(C.accent)}>
             <span style={{ fontSize: 28 }}>🏟️</span>
             <span style={{ fontSize: 14, fontWeight: 800 }}>Maç Kur</span>
-            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)' }}>Admin ol</span>
+            <span style={{
+              fontSize: 11,
+              color: !isPremium() && !createQuota.allowed ? C.warn : 'rgba(255,255,255,0.55)',
+            }}>
+              {isPremium() ? 'Admin ol'
+                : createQuota.allowed ? `Bu ay ${createQuota.remaining}/${createQuota.limit} ücretsiz`
+                : 'Bu ayki hakların bitti'}
+            </span>
           </button>
           <button onClick={() => { setScreen('join'); setError(''); }} style={bigActionBtn(C.blue)}>
             <span style={{ fontSize: 28 }}>🔗</span>
             <span style={{ fontSize: 14, fontWeight: 800 }}>Katıl</span>
-            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)' }}>Kodu gir</span>
+            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)' }}>Kodu gir · Ücretsiz</span>
           </button>
         </div>
 

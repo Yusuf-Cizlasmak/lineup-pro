@@ -243,14 +243,14 @@ const CONTEXT_RULES = {
       { title: "Dengeli kadro bir tık uzakta ⚖️", body: "AI Modu ile oyuncuları adil böl. Hadi bir dene!" },
     ],
   },
-  // Online maç hakkı bitmiş (free kullanıcı, hak tükendi)
+  // Bu ayki ücretsiz online oda kurma hakkı bitmiş (free kullanıcı)
   online_quota_out: {
     id: CTX_BASE + 4,
     delayDays: 1,
     cooldownDays: 10,
     messages: [
-      { title: "Online maç hakkın doldu 🔓", body: "Sınırsız online maç için Pro'ya geç, sahalara geri dön!" },
-      { title: "Daha fazla maç ister misin? 🚀", body: "Online hakkın bitti. Pro ile dilediğin kadar maç kur." },
+      { title: "Bu ayki oda hakların doldu 🔓", body: "Pro ile sınırsız online oda kur, sahalara geri dön!" },
+      { title: "Daha fazla maç ister misin? 🚀", body: "Ücretsiz oda hakların ay başında yenilenir. Beklemek istemezsen Pro ile dilediğin kadar oda kur." },
     ],
   },
 };

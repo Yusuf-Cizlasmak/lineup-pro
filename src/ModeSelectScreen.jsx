@@ -30,7 +30,6 @@ import { getAllMatches, computePlayerStats } from "./matchHistoryStore";
 import { getNickname, setNickname, registerDevice, getMyActiveSessions } from "./LiveMatchService";
 import { hideBanner, showBanner } from "./admob";
 import { useSubscription, canCreateOnlineMatch } from "./subscription";
-import LockedPreview from "./LockedPreview";
 
 // ═══════════════════════════════════════════════════════════
 // BRAND — Onboarding ile birebir aynı palet
@@ -87,7 +86,8 @@ const buildModes = (T) => [
     detail: "REALTIME · ÇOKLU CİHAZ · PUANLAMA",
     accent: C.blue,
     badge: { label: "CANLI", color: C.red, pulse: true },
-    premium: true,
+    // Online mod artık FREE (ayda 3 oda kurma, sınırsız katılım) — Pro çerçevesi yok
+    premium: false,
   },
   {
     key: "history",
@@ -345,35 +345,26 @@ export default function ModeSelectScreen({ onSelectMode, onOpenSettings }) {
           </div>
           <div style={S.modes}>
             {modes.map((m, i) => {
-              // Online mod kartı — Free kullanıcı 1 hayatta-bir hakkını kullandıysa lock göster
-              // Pro/Trial veya henüz hakkı varsa normal render → ilk deneyim ücretsiz kalsın
-              const isOnlineExhausted =
-                m.key === "online" &&
-                !isPremium &&
-                !canCreateOnlineMatch().allowed;
+              // Online mod herkese açık (katılım her zaman ücretsiz) — Free kullanıcıya
+              // kilit yerine bu ayki oda kurma hakkını göster.
+              let mode = m;
+              if (m.key === "online" && !isPremium) {
+                const q = canCreateOnlineMatch();
+                mode = {
+                  ...m,
+                  detail: q.allowed
+                    ? `BU AY ${q.remaining}/${q.limit} ODA ÜCRETSİZ · SINIRSIZ KATILIM`
+                    : "BU AYKİ ODA HAKLARIN BİTTİ · KATILIM ÜCRETSİZ",
+                };
+              }
 
-              const card = (
+              return (
                 <ModeCard
-                  mode={m}
+                  key={m.key}
+                  mode={mode}
                   delay={0.16 + i * 0.07}
                   onSelect={() => handleSelect(m)}
                 />
-              );
-
-              return isOnlineExhausted ? (
-                <LockedPreview
-                  key={m.key}
-                  feature="unlimited_online"
-                  blur="soft"
-                  title="1 hakkını kullandın"
-                  subtitle="Pro ile sınırsız oda kur · Sınırsız maça katıl"
-                  ctaLabel="Pro'ya Geç"
-                  style={{ borderRadius: 16 }}
-                >
-                  {card}
-                </LockedPreview>
-              ) : (
-                <React.Fragment key={m.key}>{card}</React.Fragment>
               );
             })}
           </div>
@@ -899,13 +890,13 @@ function PlanCard({ isPremium, isTrial, daysLeft, onOpen }) {
   const benefits = isPremium
     ? [
         { ok: true,  text: "Sınırsız maç oynama" },
-        { ok: true,  text: "Online halı saha modu" },
+        { ok: true,  text: "Sınırsız online oda kurma" },
         { ok: true,  text: "Reklamsız deneyim" },
         { ok: true,  text: "Tüm premium özellikler" },
       ]
     : [
         { ok: false, text: "2 maç / gün limit" },
-        { ok: false, text: "Online mod kilitli" },
+        { ok: true,  text: "Online: ayda 3 ücretsiz oda" },
         { ok: false, text: "Reklam görüntülenir" },
         { ok: false, text: "Premium istatistikler yok" },
       ];

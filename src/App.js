@@ -11,7 +11,7 @@ import { Capacitor } from "@capacitor/core";
 
 // ★ NEW — Deep link / Landing page
 import JoinLandingPage from "./JoinLandingPage";
-import { parseCodeFromUrl } from "./deepLink";
+import { parseCodeFromUrl, queueJoinCode } from "./deepLink";
 import { initNotifications, scheduleReengagement, scheduleWelcome } from "./notifications";
 import { initPush } from "./push";
 
@@ -148,14 +148,19 @@ export default function App() {
     initPush();
 
     // ─── Deep link join code dispatcher ───
+    // queueJoinCode kodu saklar + event yayınlar → HaliSahaKolik Online moda
+    // geçer, LiveMatch mount olunca kodu alıp doğrudan odaya katılır.
+    // Aynı link hem appUrlOpen hem getLaunchUrl ile gelebilir → kısa süreli dedupe.
+    let lastCode = null, lastCodeAt = 0;
     const dispatchJoinCode = (code) => {
       if (!code?.trim()) return;
-      const dispatch = () => window.dispatchEvent(
-        new CustomEvent('halisaha:join-code', { detail: { code: code.trim().toUpperCase() } })
-      );
+      const clean = code.trim().toUpperCase();
+      if (clean === lastCode && Date.now() - lastCodeAt < 5000) return;
+      lastCode = clean; lastCodeAt = Date.now();
+      const dispatch = () => queueJoinCode(clean);
       const isOnboarded = localStorage.getItem(ONBOARDING_KEY) === "1";
       if (isOnboarded) {
-        setTimeout(dispatch, 800);   // LiveMatch mount olsun diye kısa bekle
+        setTimeout(dispatch, 300);   // ilk render tamamlansın
       } else {
         window.addEventListener('halisaha:onboarded', dispatch, { once: true });
       }
@@ -165,7 +170,7 @@ export default function App() {
     // NATIVE (iOS/Android) — Capacitor appUrlOpen
     //   Scheme:        halisahakolik://join?code=HK-AB12
     //                  halisahakolik:///m/HK-AB12
-    //   Universal:     https://halisaha-kolik.pages.dev/#/m/HK-AB12
+    //   Universal:     https://halisaha-kolik.ycizlasmak.workers.dev/m/HK-AB12
     //   Tüm formatlar deepLink.js → parseCodeFromUrl ile yakalanır.
     // ═══════════════════════════════════════════════════════════
     let capListener = null;
@@ -175,6 +180,13 @@ export default function App() {
         const code = parseCodeFromUrl(data.url);
         if (code) dispatchJoinCode(code);
       }).then(listener => { capListener = listener; });
+
+      // ★ Soğuk başlatma: app KAPALIYKEN linke/QR'a dokunulduysa Android
+      //   appUrlOpen tetiklemez — açılış URL'sini ayrıca okumak gerekir.
+      CapApp.getLaunchUrl().then((res) => {
+        const code = parseCodeFromUrl(res?.url);
+        if (code) dispatchJoinCode(code);
+      }).catch(() => {});
 
       // ★ Uygulama öne gelince geri-getirme planını tazele (sayaç sıfırlanır)
       CapApp.addListener('resume', () => {
@@ -191,7 +203,13 @@ export default function App() {
       // ═══════════════════════════════════════════════════════════
       try {
         const code = parseCodeFromUrl(window.location.href);
-        if (code) {
+        // Davet sayfasında "Tarayıcıda devam et" seçildiyse (?web=1) landing'i
+        // atla — kod doğrudan web app'teki Online moda aktarılsın.
+        const continueWeb = /[?&]web=1\b/.test(window.location.search);
+        if (code && continueWeb) {
+          dispatchJoinCode(code);
+          window.history.replaceState({}, '', window.location.pathname);
+        } else if (code) {
           setPendingLandingCode(code);
           // URL'yi temizle — refresh'te tekrar landing açılmasın
           const u = new URL(window.location.href);
@@ -249,10 +267,8 @@ export default function App() {
     setPendingLandingCode(null);
     if (!code) return;
     const isOnboarded = localStorage.getItem(ONBOARDING_KEY) === "1";
-    const dispatch = () => window.dispatchEvent(
-      new CustomEvent('halisaha:join-code', { detail: { code } })
-    );
-    if (isOnboarded) setTimeout(dispatch, 600);
+    const dispatch = () => queueJoinCode(code);
+    if (isOnboarded) setTimeout(dispatch, 300);
     else window.addEventListener('halisaha:onboarded', dispatch, { once: true });
   };
 
