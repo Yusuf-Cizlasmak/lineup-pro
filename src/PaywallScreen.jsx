@@ -6,13 +6,17 @@
 //
 // Kullanım:
 //   1) App.js root'una <PaywallProvider /> ekle (bir kez yeter)
-//   2) Herhangi bir yerden: openPaywall('cloud_sync')  veya
-//      const { openPaywall } = useSubscription(); openPaywall('unlimited_online');
+//   2) Herhangi bir yerden: openPaywall('unlimited_online')  veya
+//      const { openPaywall } = useSubscription(); openPaywall('unlimited_history');
+//
+// ★ DÜRÜST PRO: Burada (ve her yerde) sadece GERÇEKTEN olan Pro avantajları yazılır →
+//   PRO_FEATURES. Olmayan özellik (cloud sync, sınırsız takım, gelişmiş istatistik...)
+//   vaat edilmez. Ücretsiz katmanda her zaman açık olanlar → FREE_FEATURES.
 // ─────────────────────────────────────────────────────────────
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import {
   TIER, FREE_LIMITS,
-  isTrialUsed, startTrial, activateSubscription, clearSubscription,
+  isTrialUsed, clearSubscription,
   useSubscription,
 } from "./subscription";
 import { iap } from "./iap";
@@ -20,6 +24,7 @@ import { hapticMedium, hapticSuccess, hapticLight } from "./haptics";
 import { hideBanner, showBanner } from "./admob";
 import { Capacitor } from "@capacitor/core";
 import { Browser } from "@capacitor/browser";
+import { track, EVENTS } from "./analytics";
 
 // ═══════════════════════════════════════════════════════════
 // YASAL LİNKLER — App Store Guideline 3.1.2 (otomatik yenilenen abonelik)
@@ -29,7 +34,7 @@ import { Browser } from "@capacitor/browser";
 // standart EULA'sı kullanılabilir. PRIVACY_URL, App Store Connect'te girdiğin
 // gizlilik politikası adresiyle aynı olmalı.
 export const TERMS_URL   = "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/";
-export const PRIVACY_URL = ""; // örn: "https://halisahakolik.com/gizlilik"
+export const PRIVACY_URL = ""; // örn: "https://halisahakolik.com.tr/gizlilik"
 
 // Mağaza fiyatı yüklenemezse gösterilecek varsayılanlar (App Store Connect ile aynı tut)
 const FALLBACK_PRICES = { pro_monthly: "₺29", pro_yearly: "₺199" };
@@ -81,9 +86,11 @@ export function PaywallProvider() {
 
   useEffect(() => {
     const handler = (e) => {
-      setFeature(e.detail?.feature || "general");
+      const f = e.detail?.feature || "general";
+      setFeature(f);
       setOpen(true);
       hapticMedium();
+      track(EVENTS.PAYWALL_OPENED, { feature: f });
     };
     window.addEventListener("hk:open-paywall", handler);
     return () => window.removeEventListener("hk:open-paywall", handler);
@@ -109,17 +116,32 @@ const C = {
 };
 
 // ═══════════════════════════════════════════════════════════
+// DÜRÜST PRO LİSTESİ — paywall, yönetim ekranı ve LockedPreview aynı listeyi kullanır
+// ═══════════════════════════════════════════════════════════
+export const PRO_FEATURES = [
+  { icon: "🚫", text: "Reklamsız" },
+  { icon: "⚡", text: "Sınırsız online oda kurma" },
+  { icon: "📚", text: "Tüm maç geçmişi" },
+  { icon: "✨", text: "Paylaşımlarda logo/alt bilgi yok" },
+];
+// ★ Ücretsiz katmanda HER ZAMAN açık (Pro'ya kilitli değil)
+export const FREE_FEATURES = [
+  "AI takım dengeleme",
+  "Sınırsız maça katılım",
+  "Haftalık maç planı ve hatırlatmalar",
+  "Kasa",
+];
+
+// ═══════════════════════════════════════════════════════════
 // FEATURE TANIMLARI — açılış başlığı feature'a göre değişir
+// (bilinmeyen/eski anahtarlar → general)
 // ═══════════════════════════════════════════════════════════
 const FEATURE_TITLES = {
   unlimited_online:  "Bu ayki ücretsiz oda hakların bitti",
-  cloud_sync:        "Verilerini bulutta sakla",
   no_ads:            "Reklamsız bir deneyim",
-  unlimited_history: "Tüm maç geçmişini sakla",
-  multi_team:        "Birden fazla takım yönet",
-  brand_team:        "Takımına özel kimlik kazandır",
-  league_mode:       "Lig kur, sezon yönet",
-  general:           "Pro'ya geç, sınırsız oyna",
+  unlimited_history: "Tüm maç geçmişini gör",
+  branding:          "Paylaşımlarında logo/alt bilgi olmasın",
+  general:           "HalıSaha-Kolik Pro",
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -166,6 +188,7 @@ function PaywallScreen({ open, feature, onClose }) {
 
       hapticSuccess();
       setLoading(null);
+      track(EVENTS.PURCHASE_SUCCESS, { plan: planId, feature });
 
       // ★ Pro state'in yayılması için subscription change event'ini garanti tetikle.
       // iap.purchase başarılı olduysa subscription.js zaten dispatch etti, ama
@@ -261,6 +284,7 @@ function PaywallScreen({ open, feature, onClose }) {
 
       hapticSuccess();
       setLoading(null);
+      track(EVENTS.PURCHASE_SUCCESS, { plan: "trial_7d", feature });
       onClose();
     } catch (err) {
       setLoading(null);
@@ -506,7 +530,7 @@ function PaywallScreen({ open, feature, onClose }) {
               <div style={S.heroBadge}>★ HALI SAHA · PRO</div>
               <h2 style={S.heroTitle}>{title}</h2>
               <p style={S.heroSub}>
-                Sınırsız oda kurma · Reklamsız · Sınırsız geçmiş · Cloud sync
+                {PRO_FEATURES.map((f) => f.text).join(" · ")}
               </p>
             </div>
 
@@ -549,22 +573,24 @@ function PaywallScreen({ open, feature, onClose }) {
               subPrice={period === "yearly"
                 ? (yearlyPerMonth ? `${yearlyPerMonth}/ay (yıllık ödeme)` : "yıllık ödeme")
                 : "her ay yenilenir"}
-              features={[
-                { icon: "⚡", text: "Sınırsız online oda kurma" },
-                { icon: "🚫", text: "Reklamsız deneyim" },
-                { icon: "☁️", text: "Cloud sync (cihazlar arası)" },
-                { icon: "📊", text: "Sınırsız maç geçmişi + gelişmiş istatistik" },
-                { icon: "🛡", text: "Sınırsız takım" },
-              ]}
+              features={PRO_FEATURES.map((f) =>
+                f.text === "Sınırsız online oda kurma"
+                  ? { ...f, text: `${f.text} (ücretsiz: ayda ${FREE_LIMITS.ONLINE_CREATES_PER_MONTH})` }
+                  : f.text === "Tüm maç geçmişi"
+                  ? { ...f, text: `${f.text} (ücretsiz: son ${FREE_LIMITS.HISTORY_LIMIT} maç listesi)` }
+                  : f
+              )}
               ctaLabel={loading === (period === "yearly" ? "pro_yearly" : "pro_monthly") ? "İşleniyor..." : "Pro'ya Geç"}
               onCta={() => handlePurchase(period === "yearly" ? "pro_yearly" : "pro_monthly")}
               loading={loading === (period === "yearly" ? "pro_yearly" : "pro_monthly")}
             />
 
-            {/* Free hatırlatma */}
+            {/* Free hatırlatma — ücretsizde her zaman açık olanlar */}
             <div style={S.freeNote}>
-              <span style={S.freeNoteLabel}>FREE</span>
-              <span>Ayda {FREE_LIMITS.ONLINE_CREATES_PER_MONTH} oda kurma · Sınırsız maça katılma · Son {FREE_LIMITS.HISTORY_LIMIT} maç geçmişi</span>
+              <span style={S.freeNoteLabel}>ÜCRETSİZ</span>
+              <span>
+                {FREE_FEATURES.join(" · ")} · Ayda {FREE_LIMITS.ONLINE_CREATES_PER_MONTH} oda kurma · Krallıklar tüm maçlardan
+              </span>
             </div>
 
             {/* Alt linkler */}
@@ -720,13 +746,7 @@ function ManageSubscription({ tier, plan, until, isTrial, daysLeft, monthlyStr, 
         }}>
           AKTİF ÖZELLİKLER
         </div>
-        {[
-          "Sınırsız online oda kurma",
-          "Reklamsız deneyim",
-          "Cloud sync (cihazlar arası)",
-          "Sınırsız maç geçmişi",
-          "Sınırsız takım",
-        ].map((feat, i) => (
+        {PRO_FEATURES.map((f) => f.text).map((feat, i) => (
           <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, marginTop: i === 0 ? 0 : 7 }}>
             <span style={{
               width: 16, height: 16, borderRadius: 4,

@@ -5,7 +5,11 @@
 	<!-- Universal Links: https://<domain>/m/HK-XXXX linki app yüklüyse doğrudan app'i açar.
 	     Domain'deki /.well-known/apple-app-site-association dosyası public/_worker.js'den gelir.
 	     Codemagic bu dosyayı ENABLE_UNIVERSAL_LINKS=true iken imzaya ekler (codemagic.yaml).
-	     Domain değişirse: src/deepLink.js WEB_BASE + AndroidManifest.xml host. -->
+	     Domain değişirse: src/deepLink.js WEB_BASE + AndroidManifest.xml host.
+	     ★ Codemagic bu dosyayı build sırasında bayraklara göre YENİDEN ÜRETİR:
+	       ENABLE_UNIVERSAL_LINKS=true → aşağıdaki associated-domains korunur
+	       ENABLE_PUSH=true            → aps-environment = production eklenir
+	     Buraya aps-environment EKLEME (Push capability açılmadan imza kırılır). -->
 	<key>com.apple.developer.associated-domains</key>
 	<array>
 		<string>applinks:davet.halisahakolik.com.tr</string>

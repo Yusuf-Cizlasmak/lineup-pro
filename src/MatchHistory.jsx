@@ -414,23 +414,26 @@ export default function MatchHistoryView({ teamA, teamB, onBack, onOpenPlayerSta
     return () => window.removeEventListener("halisaha:history-updated", refresh);
   }, []);
 
-  // ★ FREE TIER: sadece son N maç görünür (getAllMatches en yeni → en eski sıralı geliyor)
-  // Premium ise tüm geçmiş, free ise FREE_LIMITS.HISTORY_LIMIT kadarı
-  const matches = useMemo(() => {
+  // ═══ ADİL KRALLIK ═══
+  // ★ Gol krallığı, MVP, asist, form tabloları, toplamlar ve sezon raporu HERKES
+  //   için TÜM maçlardan hesaplanır (grubun tablosu Pro'ya göre değişmez).
+  // ★ FREE TIER: sadece görünen maç LİSTESİ son N maçla sınırlı
+  //   (getAllMatches en yeni → en eski sıralı geliyor). Pro → tüm liste.
+  const visibleMatches = useMemo(() => {
     if (isPremium) return allMatches;
     return allMatches.slice(0, FREE_LIMITS.HISTORY_LIMIT);
   }, [allMatches, isPremium]);
 
-  // Free user için "gizlenen" maç sayısı — paywall upsell banner'da kullanılacak
+  // Free user için listede "gizlenen" maç sayısı — paywall upsell satırında kullanılır
   const hiddenCount = isPremium ? 0 : Math.max(0, allMatches.length - FREE_LIMITS.HISTORY_LIMIT);
 
-  const leaderboards = useMemo(() => computeLeaderboards(matches, [teamA, teamB]), [matches, teamA, teamB]);
+  const leaderboards = useMemo(() => computeLeaderboards(allMatches, [teamA, teamB]), [allMatches, teamA, teamB]);
 
   const totalGoals = useMemo(() => {
     let total = 0;
-    matches.forEach((m) => total += m.teamA.score + m.teamB.score);
+    allMatches.forEach((m) => total += (m.teamA?.score || 0) + (m.teamB?.score || 0));
     return total;
-  }, [matches]);
+  }, [allMatches]);
 
   const totalAssists = useMemo(() => {
     return Object.values(leaderboards.allStats).reduce((a, s) => a + s.assists, 0);
@@ -441,7 +444,7 @@ export default function MatchHistoryView({ teamA, teamB, onBack, onOpenPlayerSta
     const now = Date.now();
     const week = 7 * 24 * 60 * 60 * 1000;
     const month = 30 * 24 * 60 * 60 * 1000;
-    return matches.filter((m) => {
+    return visibleMatches.filter((m) => {
       // Kullanıcının takımının sonucunu bulmaya çalış
       // Ana takımın isim eşleşmesiyle (en güvenilir)
       const userIsA = m.teamA.name === teamA.name;
@@ -461,14 +464,14 @@ export default function MatchHistoryView({ teamA, teamB, onBack, onOpenPlayerSta
         default:          return true;
       }
     });
-  }, [matches, filter, teamA.name]);
+  }, [visibleMatches, filter, teamA.name]);
 
   const filterCounts = useMemo(() => {
-    const counts = { all: matches.length, wins: 0, losses: 0, draws: 0, thisWeek: 0, thisMonth: 0 };
+    const counts = { all: visibleMatches.length, wins: 0, losses: 0, draws: 0, thisWeek: 0, thisMonth: 0 };
     const now = Date.now();
     const week = 7 * 24 * 60 * 60 * 1000;
     const month = 30 * 24 * 60 * 60 * 1000;
-    matches.forEach((m) => {
+    visibleMatches.forEach((m) => {
       const userIsA = m.teamA.name === teamA.name;
       const userIsB = m.teamB.name === teamA.name;
       const userScore = userIsA ? m.teamA.score : userIsB ? m.teamB.score : null;
@@ -482,7 +485,7 @@ export default function MatchHistoryView({ teamA, teamB, onBack, onOpenPlayerSta
       if (now - m.playedAt <= month) counts.thisMonth++;
     });
     return counts;
-  }, [matches, teamA.name]);
+  }, [visibleMatches, teamA.name]);
 
   const myPlayers = useMemo(() => {
     const all = [
@@ -560,15 +563,15 @@ export default function MatchHistoryView({ teamA, teamB, onBack, onOpenPlayerSta
         </div>
         <button
           onClick={() => { hapticLight(); setShowSeasonShare(true); }}
-          disabled={matches.length === 0}
+          disabled={allMatches.length === 0}
           style={{
-            background: matches.length === 0 ? "rgba(255,255,255,0.04)" : "linear-gradient(135deg, #fbbf24, #d49a26)",
-            color: matches.length === 0 ? "rgba(255,255,255,0.3)" : "#0a0805",
+            background: allMatches.length === 0 ? "rgba(255,255,255,0.04)" : "linear-gradient(135deg, #fbbf24, #d49a26)",
+            color: allMatches.length === 0 ? "rgba(255,255,255,0.3)" : "#0a0805",
             border: "none", borderRadius: 8, padding: "6px 10px",
             fontSize: 10, fontWeight: 800, letterSpacing: 0.5,
-            cursor: matches.length === 0 ? "not-allowed" : "pointer",
+            cursor: allMatches.length === 0 ? "not-allowed" : "pointer",
             fontFamily: "inherit",
-            boxShadow: matches.length === 0 ? "none" : "0 4px 10px rgba(251,191,36,0.3)",
+            boxShadow: allMatches.length === 0 ? "none" : "0 4px 10px rgba(251,191,36,0.3)",
           }}
         >
           📊 RAPOR
@@ -610,12 +613,12 @@ export default function MatchHistoryView({ teamA, teamB, onBack, onOpenPlayerSta
       }}>
         {tab === "overview" && (
           <div style={{ padding: 13 }}>
-            {matches.length === 0 ? (
+            {allMatches.length === 0 ? (
               <EmptyState />
             ) : (
               <>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 14 }}>
-                  <StatCard icon="📅" value={matches.length} label={t("stats_total_matches")} />
+                  <StatCard icon="📅" value={allMatches.length} label={t("stats_total_matches")} />
                   <StatCard icon="⚽" value={totalGoals} label={t("stats_total_goals")} />
                   <StatCard icon="🎯" value={totalAssists} label={t("stats_total_assists")} />
                 </div>
@@ -638,9 +641,9 @@ export default function MatchHistoryView({ teamA, teamB, onBack, onOpenPlayerSta
                   fontSize: 10, color: "rgba(255,255,255,0.4)", fontWeight: 700,
                   textTransform: "uppercase", letterSpacing: 1, marginBottom: 8,
                 }}>
-                  {filteredMatches.length === matches.length
-                    ? t("history_match_count", { n: matches.length })
-                    : `${filteredMatches.length} / ${matches.length} ${t("full_match")}`}
+                  {filteredMatches.length === visibleMatches.length
+                    ? t("history_match_count", { n: visibleMatches.length })
+                    : `${filteredMatches.length} / ${visibleMatches.length} ${t("full_match")}`}
                 </div>
 
                 {filteredMatches.length === 0 ? (
@@ -701,7 +704,7 @@ export default function MatchHistoryView({ teamA, teamB, onBack, onOpenPlayerSta
                             {hiddenCount} maç daha var
                           </div>
                           <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)" }}>
-                            Free: son {FREE_LIMITS.HISTORY_LIMIT} maç · Pro ile sınırsız geçmiş
+                            Listede son {FREE_LIMITS.HISTORY_LIMIT} maç · Krallıklar tüm maçlardan · Pro ile tüm liste
                           </div>
                         </div>
                         <span style={{ fontSize: 18, color: "#fbbf24" }}>→</span>
@@ -716,7 +719,7 @@ export default function MatchHistoryView({ teamA, teamB, onBack, onOpenPlayerSta
 
         {tab === "leaderboards" && (
           <div style={{ padding: 13 }}>
-            {matches.length === 0 ? (
+            {allMatches.length === 0 ? (
               <EmptyState />
             ) : (
               <>
@@ -830,7 +833,7 @@ export default function MatchHistoryView({ teamA, teamB, onBack, onOpenPlayerSta
       {showSeasonShare && (
         <ShareCard
           mode="season"
-          data={{ matches, leaderboards: { ...leaderboards, totalGoals } }}
+          data={{ matches: allMatches, leaderboards: { ...leaderboards, totalGoals } }}
           onClose={() => setShowSeasonShare(false)}
         />
       )}

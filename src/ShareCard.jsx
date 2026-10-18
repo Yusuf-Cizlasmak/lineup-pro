@@ -2,7 +2,8 @@
 // HalıSaha-Kolik · ShareCard
 // ─────────────────────────────────────────────────────────────
 // Maç sonu / Oyuncu kartı / Sezon raporu için paylaşım kartı üretir.
-// Free: watermark + alt bant. Pro: temiz + (gelecekte) takım brand'i.
+// Free: kartın altında tek satır sade alt bilgi (SHARE_FOOTER — uygulamaya geri link).
+// Pro : logo / alt bilgi yok.
 //
 // Kullanım:
 //   <ShareCard mode="match" data={{ teamA, teamB, scoreA, scoreB, mvp }} onClose={...} />
@@ -14,6 +15,8 @@ import { Share } from "@capacitor/share";
 import { Capacitor } from "@capacitor/core";
 import { useSubscription } from "./subscription";
 import { hapticMedium, hapticSuccess } from "./haptics";
+import { SHARE_FOOTER } from "./deepLink";
+import { track, EVENTS } from "./analytics";
 
 // ─── Image capture — html-to-image (primary) → html2canvas (fallback) ───
 // html2canvas iOS WebView'da gradient/transform/filter ile sessizce başarısız oluyor.
@@ -72,7 +75,8 @@ async function captureNode(node) {
   }
 }
 
-async function shareImage(dataUrl, title = "HalıSaha-Kolik") {
+// shareText: paylaşım metni (Free'de SHARE_FOOTER eklenir → görseli alan uygulamayı bulur)
+async function shareImage(dataUrl, title = "HalıSaha-Kolik", shareText = title) {
   if (!dataUrl) return false;
   try {
     if (Capacitor.isNativePlatform()) {
@@ -87,7 +91,7 @@ async function shareImage(dataUrl, title = "HalıSaha-Kolik") {
       });
       await Share.share({
         title,
-        text: title,
+        text: shareText,
         url: result.uri,
         dialogTitle: "Paylaş",
       });
@@ -121,11 +125,15 @@ export default function ShareCard({ mode = "match", data = {}, onClose }) {
     hapticMedium();
     try {
       const dataUrl = await captureNode(cardRef.current);
-      const ok = await shareImage(
-        dataUrl,
-        mode === "match" ? "Maç Sonucu" : mode === "player" ? "Oyuncu Kartı" : "Sezon Raporu"
-      );
-      if (ok) { hapticSuccess(); setDone(true); setTimeout(() => onClose?.(), 600); }
+      const title = mode === "match" ? "Maç Sonucu" : mode === "player" ? "Oyuncu Kartı" : "Sezon Raporu";
+      const ok = await shareImage(dataUrl, title, isPremium ? title : `${title}\n\n${SHARE_FOOTER}`);
+      if (ok) {
+        track(EVENTS.LINEUP_SHARED, {
+          kind: mode === "season" ? "season" : mode === "match" ? "result" : "image",
+          card: mode,
+        });
+        hapticSuccess(); setDone(true); setTimeout(() => onClose?.(), 600);
+      }
     } catch (e) {
       console.error("Share error:", e);
       // Fallback: screenshot yönlendirmesi göster
@@ -141,98 +149,14 @@ export default function ShareCard({ mode = "match", data = {}, onClose }) {
         <button onClick={onClose} style={S.closeBtn}>×</button>
 
         <div style={S.previewWrap}>
-          <div ref={cardRef} style={S.card}>
+          <div ref={cardRef} style={{ ...S.card, paddingBottom: isPremium ? 18 : 46 }}>
             {mode === "match"  && <MatchCard data={data} isPremium={isPremium} />}
             {mode === "player" && <PlayerCard data={data} isPremium={isPremium} />}
             {mode === "season" && <SeasonCard data={data} isPremium={isPremium} />}
 
-            {/* ═══ MULTI-LAYER WATERMARK (kırpılamaz katmanlar) ═══ */}
-            {!isPremium ? (
-              <>
-                {/* DIAGONAL — kartın orta-arka planında */}
-                <div style={{
-                  position: "absolute",
-                  inset: 0,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  pointerEvents: "none",
-                  overflow: "hidden",
-                  zIndex: 1,
-                }} aria-hidden>
-                  <div style={{
-                    fontFamily: "'Bebas Neue','Inter Tight',sans-serif",
-                    fontSize: 64,
-                    letterSpacing: 8,
-                    color: "rgba(255,255,255,0.055)",
-                    transform: "rotate(-32deg)",
-                    whiteSpace: "nowrap",
-                    textTransform: "uppercase",
-                    lineHeight: 0.85,
-                    textAlign: "center",
-                  }}>
-                    HALISAHA<br/>KOLIK
-                    <div style={{
-                      fontSize: 14,
-                      letterSpacing: 5,
-                      marginTop: 6,
-                      color: "rgba(251,191,36,0.10)",
-                      fontFamily: "'JetBrains Mono', monospace",
-                    }}>
-                      ★ FREE EDITION ★
-                    </div>
-                  </div>
-                </div>
-                {/* KÖŞE ROZETİ */}
-                <div style={{
-                  position: "absolute",
-                  top: 8, right: 10,
-                  zIndex: 4,
-                  padding: "3px 8px",
-                  background: "rgba(0,0,0,0.45)",
-                  border: "1px solid rgba(255,255,255,0.10)",
-                  borderRadius: 4,
-                  fontSize: 8,
-                  fontWeight: 800,
-                  letterSpacing: 1.5,
-                  color: "rgba(255,255,255,0.55)",
-                  fontFamily: "'JetBrains Mono', monospace",
-                  pointerEvents: "none",
-                }}>
-                  HK · FREE
-                </div>
-                {/* ALT STRIP */}
-                <div style={S.watermark}>
-                  <span style={{ opacity: 0.75, fontWeight: 700 }}>HALISAHA-KOLIK</span>
-                  <span style={S.wmCta}>★ PRO İLE KALDIR</span>
-                </div>
-              </>
-            ) : (
-              <>
-                {/* PRO köşe rozeti — prestij */}
-                <div style={{
-                  position: "absolute",
-                  top: 8, right: 10,
-                  zIndex: 4,
-                  fontSize: 8.5,
-                  fontWeight: 800,
-                  letterSpacing: 1.8,
-                  color: "#fbbf24",
-                  fontFamily: "'JetBrains Mono', monospace",
-                  padding: "3px 8px",
-                  background: "rgba(251,191,36,0.08)",
-                  border: "1px solid rgba(251,191,36,0.3)",
-                  borderRadius: 4,
-                  pointerEvents: "none",
-                  textShadow: "0 0 6px rgba(251,191,36,0.4)",
-                }}>
-                  ★ PRO
-                </div>
-                {/* Alt brand strip */}
-                <div style={S.brandStrip}>
-                  <span style={{ color: "#fbbf24", fontWeight: 800, letterSpacing: 2 }}>★ HALI SAHA · PRO</span>
-                </div>
-              </>
+            {/* ★ Free: sade alt bilgi (uygulamaya geri link) · Pro: hiçbir şey */}
+            {!isPremium && (
+              <div style={S.footer}>{SHARE_FOOTER}</div>
             )}
           </div>
         </div>
@@ -256,7 +180,7 @@ export default function ShareCard({ mode = "match", data = {}, onClose }) {
 
         {!isPremium && !fallbackMode && (
           <div style={S.proHint}>
-            Pro ile watermark kalkar, takım logon görünür
+            Pro ile paylaşımlarda logo/alt bilgi olmaz
           </div>
         )}
       </div>
@@ -469,7 +393,6 @@ const S = {
     overflow: "hidden",
     minHeight: 280,
     position: "relative",
-    paddingBottom: 50,
   },
   cardTitle: {
     fontSize: 11, fontWeight: 900, letterSpacing: 3,
@@ -523,27 +446,14 @@ const S = {
     color: "rgba(255,255,255,0.6)",
     fontFamily: "'JetBrains Mono', monospace",
   },
-  watermark: {
+  // Free alt bilgi — tek satır, sakin (reklam bandı değil)
+  footer: {
     position: "absolute", bottom: 0, left: 0, right: 0,
-    padding: "8px 14px",
-    background: "rgba(0,0,0,0.6)",
+    padding: "9px 14px 10px",
     borderTop: "1px solid rgba(255,255,255,0.05)",
-    display: "flex", justifyContent: "space-between", alignItems: "center",
-    fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.5)",
-    letterSpacing: 0.5,
-  },
-  wmCta: {
-    fontSize: 8.5, fontWeight: 900, letterSpacing: 0.8,
-    color: "#fbbf24",
-  },
-  brandStrip: {
-    position: "absolute", bottom: 0, left: 0, right: 0,
-    padding: "8px 14px",
-    background: "linear-gradient(90deg, rgba(251,191,36,0.10), rgba(251,191,36,0.02))",
-    borderTop: "1px solid rgba(251,191,36,0.25)",
     textAlign: "center",
-    fontSize: 9.5,
-    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 10, fontWeight: 600, letterSpacing: 0.3,
+    color: "rgba(255,255,255,0.45)",
   },
 
   shareBtn: {

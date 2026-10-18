@@ -44,6 +44,8 @@ import { hapticLight, hapticMedium, hapticHeavy, hapticSuccess, hapticSelection 
 import { saveMatch, buildMatch, newEvent, getAllMatches } from "./matchHistoryStore";
 import { showInterstitial } from "./admob";
 import { useSubscription } from "./subscription";
+import { track, EVENTS } from "./analytics";
+import { SHARE_FOOTER } from "./deepLink";
 import MatchInsightsPanel from "./MatchInsightsPanel";
 
 // ═══════════════════════════════════════════════════════════
@@ -1048,6 +1050,23 @@ export default function MatchResultModal({
     setSaved(true);
     setSavedMatchObj(match); // insights paneli bu objeden besleniyor
 
+    // ★ Ölçüm — haftalık döngü çalışıyor mu? (sadece örnek oyunculu maç sayılmaz)
+    if (!match.isDemo) {
+      let hasSchedule = false;
+      try { hasSchedule = !!localStorage.getItem("halisaha_match_schedule"); } catch {}
+      track(EVENTS.MATCH_SAVED, {
+        kind: "offline",
+        players: typeof match.attendeeCount === "number"
+          ? match.attendeeCount
+          : Object.keys(match.playerSnapshots || {}).length,
+        has_schedule: hasSchedule,
+      });
+    }
+
+    // ★ Kayıt başına TEK geçiş reklamı — politika (ilk oturum yok, oturumda 1,
+    //   3 dk aralık, Pro'ya yok) admob.js içinde uygulanır
+    const showSaveAd = () => setTimeout(() => { showInterstitial("match_saved"); }, 500);
+
     setSavedSummary({
       scoreA, scoreB,
       teamAName: teamA.name,
@@ -1071,19 +1090,20 @@ export default function MatchResultModal({
           //    Skor pop animasyonu (240ms) tamamen bitsin.
           await new Promise((res) => setTimeout(res, 320));
           try {
-            await captureAndShare(shareRef.current, "mac-sonucu.png");
+            const ok = await captureAndShare(shareRef.current, "mac-sonucu.png");
+            if (ok !== false) track(EVENTS.LINEUP_SHARED, { kind: "result" });
           } catch (e) {
             console.warn("capture error:", e);
           } finally {
             setIsCapturing(false);
             setShowSuccessPopup(true);
-            setTimeout(() => { showInterstitial(); }, 500);
+            showSaveAd();
           }
         });
       });
     } else {
       setTimeout(() => setShowSuccessPopup(true), 200);
-      setTimeout(() => { showInterstitial(); }, 500);
+      showSaveAd();
     }
   };
 
@@ -1261,9 +1281,6 @@ export default function MatchResultModal({
               position: "relative",
               overflow: "hidden",
             }}>
-              {/* ═══ MULTI-LAYER WATERMARK (Free için kırpılamaz) ═══ */}
-              <ShareWatermarkLayers />
-
               {/* Dekoratif gradient ışık halkası */}
               <div style={{
                 position: "absolute",
@@ -1385,8 +1402,8 @@ export default function MatchResultModal({
                 acB={acB}
               />
 
-              {/* ★ Watermark / Pro brand strip — paylaşım kartında görünür */}
-              <ShareWatermark />
+              {/* ★ Free: uygulamaya geri link veren sade alt bilgi · Pro: hiçbir şey */}
+              <ShareFooter />
             </div>
 
             {/* TAP-TO-SCORE: Takım strip */}
@@ -2188,153 +2205,32 @@ export default function MatchResultModal({
   );
 }
 // ═══════════════════════════════════════════════════════════
+// SHARE FOOTER — paylaşılan görsel uygulamaya geri link versin
+//   ★ Free: tek satır sade alt bilgi (SHARE_FOOTER — "HalıSaha-Kolik ile kuruldu · site")
+//   ★ Pro : hiçbir logo / alt bilgi yok ("Paylaşımlarda logo/alt bilgi yok")
+// Eski "FREE EDITION" çapraz filigranı ve "PRO İLE KALDIR" rozetleri kaldırıldı:
+// paylaşılan görsel reklam panosu değil, grubun maç kartı.
 // ═══════════════════════════════════════════════════════════
-// SHARE WATERMARK LAYERS — Free için KIRPILAMAZ 3 katman:
-//   1. Diagonal merkez (kartın orta-arka planında, 45° dönmüş)
-//   2. Köşe rozeti (sağ üst köşede subtle)
-//   3. Alt brand strip (ShareWatermark fonksiyonunun döndürdüğü)
-// Kullanıcı altı kırparsa diagonal görünür; diagonal'i çıkarsa
-// köşe görünür → Pro almadan watermark'sız paylaşım imkânsız.
-// ═══════════════════════════════════════════════════════════
-function ShareWatermarkLayers() {
+function ShareFooter() {
   const { isPremium } = useSubscription();
-
-  // Pro: hiçbir katman gözükmesin (köşede minik prestij rozeti)
-  if (isPremium) {
-    return (
-      <div style={{
-        position: "absolute",
-        top: 8,
-        right: 10,
-        fontSize: 8.5,
-        fontWeight: 800,
-        letterSpacing: 1.8,
-        color: "#fbbf24",
-        fontFamily: "'JetBrains Mono', monospace",
-        padding: "3px 8px",
-        background: "rgba(251,191,36,0.08)",
-        border: "1px solid rgba(251,191,36,0.3)",
-        borderRadius: 4,
-        pointerEvents: "none",
-        zIndex: 5,
-        textShadow: "0 0 6px rgba(251,191,36,0.4)",
-      }}>
-        ★ PRO
-      </div>
-    );
-  }
-
-  // Free: 2 katman (3'üncüsü zaten ShareWatermark olarak ayrı render)
-  return (
-    <>
-      {/* ── 1) DIAGONAL ORTA WATERMARK (kart genelinde, çapraz) ── */}
-      <div style={{
-        position: "absolute",
-        inset: 0,
-        pointerEvents: "none",
-        overflow: "hidden",
-        zIndex: 1,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      }} aria-hidden>
-        <div style={{
-          fontFamily: "'Bebas Neue', 'Inter Tight', sans-serif",
-          fontSize: 56,
-          fontWeight: 400,
-          letterSpacing: 6,
-          color: "rgba(255,255,255,0.045)",
-          transform: "rotate(-32deg)",
-          whiteSpace: "nowrap",
-          textTransform: "uppercase",
-          userSelect: "none",
-          lineHeight: 0.9,
-          textAlign: "center",
-        }}>
-          HALISAHA<br/>KOLIK
-          <div style={{
-            fontSize: 16,
-            letterSpacing: 4,
-            marginTop: 6,
-            color: "rgba(251,191,36,0.10)",
-            fontFamily: "'JetBrains Mono', monospace",
-          }}>
-            ★ FREE EDITION ★
-          </div>
-        </div>
-      </div>
-
-      {/* ── 2) KÖŞE ROZETİ (sağ üst, kart kırpılırsa görünür kalır) ── */}
-      <div style={{
-        position: "absolute",
-        top: 8,
-        right: 10,
-        zIndex: 4,
-        padding: "3px 8px",
-        background: "rgba(0,0,0,0.45)",
-        border: "1px solid rgba(255,255,255,0.10)",
-        borderRadius: 4,
-        fontSize: 8,
-        fontWeight: 800,
-        letterSpacing: 1.5,
-        color: "rgba(255,255,255,0.55)",
-        fontFamily: "'JetBrains Mono', monospace",
-        pointerEvents: "none",
-      }}>
-        HK · FREE
-      </div>
-    </>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════
-// SHARE WATERMARK — Free=alt strip (3. katman), Pro=brand strip
-// Yukarıdaki ShareWatermarkLayers ile birlikte çalışır.
-// ═══════════════════════════════════════════════════════════
-function ShareWatermark() {
-  const { isPremium } = useSubscription();
-  if (isPremium) {
-    return (
-      <div style={{
-        textAlign: "center",
-        marginTop: 12,
-        padding: "8px 12px",
-        fontSize: 9,
-        fontWeight: 800,
-        letterSpacing: 2.5,
-        color: "#fbbf24",
-        fontFamily: "'JetBrains Mono', monospace",
-        borderTop: "1px solid rgba(251,191,36,0.2)",
-      }}>
-        ★ HALI SAHA · PRO
-      </div>
-    );
-  }
+  if (isPremium) return null;
   return (
     <div style={{
       textAlign: "center",
       marginTop: 12,
-      padding: "10px 12px 8px",
-      fontSize: 9.5,
-      fontWeight: 700,
-      letterSpacing: 1.2,
-      color: "rgba(255,255,255,0.45)",
-      fontFamily: "'JetBrains Mono', monospace",
-      borderTop: "1px solid rgba(255,255,255,0.08)",
-      background: "linear-gradient(180deg, transparent, rgba(0,0,0,0.25))",
+      // ★ Alt boşluk: captureAndShare'in sağ-alt köşe filigranı bu satırın üstüne binmesin
+      marginBottom: 14,
+      paddingTop: 9,
+      fontSize: 10,
+      fontWeight: 600,
+      letterSpacing: 0.3,
+      color: "rgba(255,255,255,0.42)",
+      fontFamily: "'DM Sans', sans-serif",
+      borderTop: "1px solid rgba(255,255,255,0.06)",
+      position: "relative",
+      zIndex: 2,
     }}>
-      <div style={{ marginBottom: 3 }}>
-        HALISAHA-KOLIK <span style={{ color: "rgba(255,255,255,0.30)" }}>·</span> halisahakolik.com
-      </div>
-      <div style={{
-        fontSize: 8.5,
-        fontWeight: 800,
-        letterSpacing: 2,
-        color: "rgba(251,191,36,0.95)",
-        textShadow: "0 0 8px rgba(251,191,36,0.35)",
-      }}>
-        ★ PRO İLE WATERMARK KALKAR
-      </div>
+      {SHARE_FOOTER}
     </div>
   );
 }

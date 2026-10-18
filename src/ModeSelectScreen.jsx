@@ -26,10 +26,40 @@ import logo from "./ssssss.png";
 import { t, useLang } from "./i18n";
 // (LangToggle ve setLang artık burada kullanılmıyor; dil ayarı Settings sheet'te.)
 import { hapticLight, hapticMedium, hapticSelection, hapticSuccess } from "./haptics";
-import { getAllMatches, computePlayerStats } from "./matchHistoryStore";
-import { getNickname, setNickname, registerDevice, getMyActiveSessions } from "./LiveMatchService";
+import { getAllMatches, computePlayerStats, matchKindOf } from "./matchHistoryStore";
+import { getNickname, setNickname, registerDevice, getMyActiveSessions, getDeviceId } from "./LiveMatchService";
 import { hideBanner, showBanner } from "./admob";
 import { useSubscription, canCreateOnlineMatch } from "./subscription";
+import { getSchedule, formatSchedule, nextMatchDate, countdownLabel, SCHEDULE_CHANGED_EVENT } from "./matchSchedule";
+import { openRoute } from "./notifications";
+
+// ★ "GALİBİYET" tanımı — KULLANICININ takımının kazandığı maç sayısı.
+//   (Eskiden her oyuncunun galibiyeti toplanıyordu → 1 maç = 7 galibiyet gibi
+//    şişik sayılar çıkıyordu.)
+//   • Offline maç (Maç / Takımım modu): Takım A = "Benim takımım". Uygulama
+//     Takımım modunda kendi kadronu teamA'ya yazar; Maç modunda da A tarafı
+//     kullanıcının kurduğu ilk takımdır → A kazandıysa galibiyet.
+//   • Online maç (LiveMatch): oyuncu kimlikleri cihaz UUID'si → bu cihazın
+//     snapshot'ındaki side ("A"|"B") kullanıcının takımıdır. Bu cihaz maçta
+//     oyuncu olarak yoksa (sadece hakem/organizatör) maç sayılmaz.
+//   • Beraberlik galibiyet değildir.
+function countMyWins(matches) {
+  let myId = null;
+  try { myId = getDeviceId(); } catch {}
+  let wins = 0;
+  for (const m of matches || []) {
+    if (!m || !m.teamA || !m.teamB) continue;
+    let side = "A";
+    if (matchKindOf(m) === "online") {
+      side = (myId && m.playerSnapshots?.[myId]?.side) || null;
+      if (!side) continue;
+    }
+    const mine = Number(side === "A" ? m.teamA.score : m.teamB.score) || 0;
+    const theirs = Number(side === "A" ? m.teamB.score : m.teamA.score) || 0;
+    if (mine > theirs) wins++;
+  }
+  return wins;
+}
 
 // ═══════════════════════════════════════════════════════════
 // BRAND — Onboarding ile birebir aynı palet
@@ -127,19 +157,27 @@ export default function ModeSelectScreen({ onSelectMode, onOpenSettings }) {
     hapticLight();
   };
 
+  // ★ Haftalık maç planı (ana ekran kartı) — plan değişince tazelenir
+  const [schedule, setScheduleState] = useState(() => getSchedule());
+  useEffect(() => {
+    const onChange = () => setScheduleState(getSchedule());
+    window.addEventListener(SCHEDULE_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(SCHEDULE_CHANGED_EVENT, onChange);
+  }, []);
+
   useEffect(() => {
     try {
       const matches = getAllMatches();
       if (matches.length > 0) {
         const { stats: s } = computePlayerStats(matches);
-        let totalGoals = 0, totalAssists = 0, totalWins = 0;
+        let totalGoals = 0, totalAssists = 0;
         Object.values(s).forEach((v) => {
           totalGoals += v.goals || 0;
           totalAssists += v.assists || 0;
-          totalWins += v.wins || 0;
         });
-        setStats({ matches: matches.length, goals: totalGoals, assists: totalAssists, wins: totalWins });
-        const sorted = [...matches].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        // GALİBİYET = kullanıcının takımının kazandığı maç (bkz. countMyWins)
+        setStats({ matches: matches.length, goals: totalGoals, assists: totalAssists, wins: countMyWins(matches) });
+        const sorted = [...matches].sort((a, b) => (b.playedAt || b.createdAt || 0) - (a.playedAt || a.createdAt || 0));
         setLastMatches(sorted.slice(0, 3));
       }
     } catch {}
@@ -320,6 +358,9 @@ export default function ModeSelectScreen({ onSelectMode, onOpenSettings }) {
           )}
 
         </section>
+
+        {/* ═══ HAFTALIK MAÇ — grubun her hafta döndüğü kart ═══ */}
+        <WeeklyMatchCard schedule={schedule} />
 
         {/* ═══ PLANIM kaldırıldı — artık ⚙️ Ayarlar > Plan & Üyelik üzerinden erişiliyor ═══ */}
 
@@ -702,6 +743,150 @@ const ES = {
 };
 
 // ═══════════════════════════════════════════════════════════
+// HAFTALIK MAÇ KARTI
+//   Plan yok → "Maçınız hangi gün?" CTA (ScheduleSheet açar)
+//   Plan var → "Perşembe 21:00 · Yıldız Halı Saha · 2 gün kaldı"
+//              + Kim var? / Takımları kur / Kasa (ücret > 0 ise)
+// ═══════════════════════════════════════════════════════════
+const openSchedule = () => {
+  hapticLight();
+  try { window.dispatchEvent(new CustomEvent("halisaha:open-schedule")); } catch {}
+};
+
+function WeeklyMatchCard({ schedule }) {
+  if (!schedule) {
+    return (
+      <button onClick={openSchedule} style={WK.ctaCard} data-tour="weekly-match">
+        <span aria-hidden style={WK.rib} />
+        <span style={WK.iconBox}><ClockGlyph /></span>
+        <div style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
+          <div style={WK.eyebrow}>HAFTALIK MAÇ</div>
+          <div style={WK.ctaTitle}>Maçınız hangi gün? ⏰ Saatini ayarla</div>
+          <div style={WK.ctaSub}>Kim geliyor, takımlar, skor — zamanında hatırlatırım.</div>
+        </div>
+        <span style={WK.chev}>›</span>
+      </button>
+    );
+  }
+
+  const next = nextMatchDate(new Date(), schedule);
+  const countdown = countdownLabel(next);
+  const isToday = countdown === "Bugün";
+  const go = (route) => { hapticMedium(); openRoute(route); };
+
+  return (
+    <section style={WK.card} data-tour="weekly-match">
+      <span aria-hidden style={WK.rib} />
+      <button onClick={openSchedule} style={WK.headBtn} aria-label="Haftalık maç planını düzenle">
+        <span style={WK.iconBox}><ClockGlyph /></span>
+        <div style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
+          <div style={WK.eyebrow}>
+            HAFTALIK MAÇ
+            {isToday && <span style={{ ...WK.countdown, ...WK.countdownToday }}>BUGÜN MAÇ VAR</span>}
+          </div>
+          <div style={WK.title}>
+            {formatSchedule(schedule)} · {countdown}
+          </div>
+        </div>
+        <span style={WK.edit}>DÜZENLE</span>
+      </button>
+      <div style={WK.actions}>
+        <button onClick={() => go("attendance")} style={WK.actBtn}>Kim var?</button>
+        <button onClick={() => go("ai_split")} style={{ ...WK.actBtn, ...WK.actPrimary }}>Takımları kur</button>
+        {schedule.fee > 0 && (
+          <button onClick={() => go("kasa")} style={WK.actBtn}>Kasa</button>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function ClockGlyph() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={C.primary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
+    </svg>
+  );
+}
+
+const WK = {
+  card: {
+    position: "relative",
+    padding: "12px 14px 12px 16px",
+    background: `linear-gradient(135deg, ${C.primary}10, ${C.surfaceHi} 65%)`,
+    border: `1px solid ${C.primary}33`,
+    borderRadius: 14,
+    overflow: "hidden",
+    animation: "msCardIn 0.5s cubic-bezier(.2,.85,.3,1) both",
+    boxShadow: "0 10px 26px rgba(0,0,0,0.45)",
+  },
+  ctaCard: {
+    position: "relative",
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    width: "100%",
+    padding: "13px 14px 13px 16px",
+    background: `linear-gradient(135deg, ${C.primary}12, ${C.surfaceHi} 70%)`,
+    border: `1px dashed ${C.primary}66`,
+    borderRadius: 14,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    color: C.ink,
+    overflow: "hidden",
+    animation: "msCardIn 0.5s cubic-bezier(.2,.85,.3,1) both",
+    WebkitTapHighlightColor: "transparent",
+  },
+  rib: {
+    position: "absolute", left: 0, top: "18%", bottom: "18%", width: 3,
+    background: `linear-gradient(180deg, ${C.primary}, ${C.primary}55 50%, ${C.primary})`,
+    boxShadow: `0 0 10px ${C.primary}66`, borderRadius: "0 2px 2px 0",
+  },
+  iconBox: {
+    width: 38, height: 38, borderRadius: 11, flexShrink: 0,
+    display: "inline-flex", alignItems: "center", justifyContent: "center",
+    background: `${C.primary}14`, border: `1px solid ${C.primary}40`,
+  },
+  eyebrow: {
+    display: "flex", alignItems: "center", gap: 8,
+    fontSize: 9.5, fontWeight: 800, letterSpacing: 2, color: C.primary,
+    fontFamily: "'JetBrains Mono','SF Mono',monospace",
+  },
+  countdown: {
+    fontSize: 9, letterSpacing: 1, color: C.inkDim, padding: "1px 6px",
+    border: `1px solid ${C.lineHi}`, borderRadius: 5,
+  },
+  countdownToday: { color: "#0a1410", background: C.primary, borderColor: C.primary },
+  ctaTitle: { fontSize: 14.5, fontWeight: 800, marginTop: 3, lineHeight: 1.25 },
+  ctaSub: { fontSize: 11.5, color: C.inkDim, marginTop: 2, lineHeight: 1.35 },
+  title: {
+    fontSize: 14.5, fontWeight: 800, marginTop: 3, lineHeight: 1.25,
+    whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+  },
+  headBtn: {
+    display: "flex", alignItems: "center", gap: 12, width: "100%", padding: 0,
+    background: "none", border: "none", color: C.ink, cursor: "pointer", fontFamily: "inherit",
+    WebkitTapHighlightColor: "transparent",
+  },
+  edit: {
+    fontSize: 9.5, fontWeight: 800, letterSpacing: 1.2, color: C.inkFaint, flexShrink: 0,
+    fontFamily: "'JetBrains Mono','SF Mono',monospace",
+  },
+  chev: { fontSize: 20, color: C.primary, flexShrink: 0 },
+  actions: { display: "flex", gap: 8, marginTop: 11 },
+  actBtn: {
+    flex: 1, minWidth: 0, minHeight: 40, padding: "9px 8px", borderRadius: 10, cursor: "pointer",
+    background: "rgba(255,255,255,0.04)", border: `1px solid ${C.lineHi}`, color: C.ink,
+    fontSize: 12.5, fontWeight: 800, fontFamily: "inherit", whiteSpace: "nowrap",
+  },
+  actPrimary: {
+    background: `linear-gradient(135deg, ${C.primary}, ${C.primaryDim})`, border: "none", color: "#0a1410",
+    boxShadow: `0 6px 18px ${C.primary}40`,
+  },
+};
+
+// ═══════════════════════════════════════════════════════════
 // STAT CELL — editorial number display
 // ═══════════════════════════════════════════════════════════
 function StatCell({ label, value, accent }) {
@@ -886,19 +1071,21 @@ function PlanCard({ isPremium, isTrial, daysLeft, onOpen }) {
   const accent = isPremium ? C.gold : C.primary;
   const accentDim = isPremium ? C.goldDim : C.primaryDim;
 
-  // Özellik listesi
+  // Özellik listesi — DÜRÜST Pro listesi (başka avantaj yazılmaz):
+  //   Reklamsız · Sınırsız online oda kurma · Tüm maç geçmişi · Paylaşımlarda logo/alt bilgi yok
+  //   Free her zaman: AI takım dengeleme, sınırsız maça katılım, haftalık plan + hatırlatmalar, Kasa
   const benefits = isPremium
     ? [
-        { ok: true,  text: "Sınırsız maç oynama" },
+        { ok: true,  text: "Reklamsız" },
         { ok: true,  text: "Sınırsız online oda kurma" },
-        { ok: true,  text: "Reklamsız deneyim" },
-        { ok: true,  text: "Tüm premium özellikler" },
+        { ok: true,  text: "Tüm maç geçmişi" },
+        { ok: true,  text: "Paylaşımlarda logo/alt bilgi yok" },
       ]
     : [
-        { ok: false, text: "2 maç / gün limit" },
-        { ok: true,  text: "Online: ayda 3 ücretsiz oda" },
-        { ok: false, text: "Reklam görüntülenir" },
-        { ok: false, text: "Premium istatistikler yok" },
+        { ok: true,  text: "AI takım dengeleme · sınırsız maça katılım" },
+        { ok: true,  text: "Haftalık maç planı, hatırlatmalar ve Kasa" },
+        { ok: true,  text: "Online: ayda 3 oda kurma" },
+        { ok: false, text: "Reklamlı · geçmişte son 5 maç listelenir" },
       ];
 
   // CTA metni
@@ -1037,8 +1224,11 @@ function formatRelativeDate(ts) {
 function RecentMatchCard({ match, onClick }) {
   const a = match.teamA || {};
   const b = match.teamB || {};
-  const aWin = (match.scoreA || 0) > (match.scoreB || 0);
-  const bWin = (match.scoreB || 0) > (match.scoreA || 0);
+  // Skor şemada teamA.score / teamB.score'da (eski scoreA/scoreB alanları yedek)
+  const scoreA = a.score ?? match.scoreA ?? 0;
+  const scoreB = b.score ?? match.scoreB ?? 0;
+  const aWin = scoreA > scoreB;
+  const bWin = scoreB > scoreA;
   const draw = !aWin && !bWin;
   const colA = a.color?.secondary || C.primary;
   const colB = b.color?.secondary || C.red;
@@ -1055,7 +1245,7 @@ function RecentMatchCard({ match, onClick }) {
             {a.name || "Takım A"}
           </span>
           <span style={{ ...S.recentScore, color: aWin ? colA : draw ? C.ink : C.inkGhost }}>
-            {match.scoreA ?? 0}
+            {scoreA}
           </span>
         </div>
         <div style={S.recentRow}>
@@ -1063,11 +1253,11 @@ function RecentMatchCard({ match, onClick }) {
             {b.name || "Takım B"}
           </span>
           <span style={{ ...S.recentScore, color: bWin ? colB : draw ? C.ink : C.inkGhost }}>
-            {match.scoreB ?? 0}
+            {scoreB}
           </span>
         </div>
       </div>
-      <div style={S.recentDate}>{formatRelativeDate(match.createdAt)}</div>
+      <div style={S.recentDate}>{formatRelativeDate(match.playedAt || match.createdAt)}</div>
     </button>
   );
 }

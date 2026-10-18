@@ -15,9 +15,10 @@
 //   onClose          : () => void
 //   onShare?         : (result) => void
 // ─────────────────────────────────────────────────────────────
-import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { buildBalancedTeams, playerStrength } from "./teamBalancer";
 import { hapticLight, hapticMedium, hapticSuccess } from "./haptics";
+import { presentPlayers } from "./roster";
 
 const C = {
   bg: "#06090e", bgDeep: "#04070b", surface: "#0a1118", surfaceHi: "#0d1620",
@@ -127,11 +128,16 @@ export default function TeamBalancerAI({ players = [], formByPlayerId = null, on
   const [revealed, setRevealed] = useState(0);
   const [statusIdx, setStatusIdx] = useState(0);
 
-  const tooFew = players.length < 4;
+  // ★ Sadece bu hafta GELENLER dağıtılır (p.absent === true olanlar dışarıda)
+  const present = useMemo(() => presentPlayers(players), [players]);
+  const absentCount = (players?.length || 0) - present.length;
+  const attendanceLine = `${present.length} kişi geliyor${absentCount > 0 ? ` · ${absentCount} kişi yok` : ""}`;
+
+  const tooFew = present.length < 4;
 
   const result = useMemo(
-    () => buildBalancedTeams(players, { formByPlayerId, seed }),
-    [players, formByPlayerId, seed]
+    () => buildBalancedTeams(present, { formByPlayerId, seed }),
+    [present, formByPlayerId, seed]
   );
 
   // Güç önbelleği
@@ -292,8 +298,8 @@ export default function TeamBalancerAI({ players = [], formByPlayerId = null, on
             </div>
             <div style={{ fontSize: 12, color: C.inkDim, marginTop: 3 }}>
               {phase === "done"
-                ? `Denge %${result.balance} · fark ${result.diff} puan`
-                : "Güç ve mevkiye göre canlı dağıtım"}
+                ? `Denge %${result.balance} · fark ${result.diff} puan · ${attendanceLine}`
+                : `${attendanceLine} · güç ve mevkiye göre dağıtım`}
             </div>
           </div>
           <button
@@ -311,8 +317,8 @@ export default function TeamBalancerAI({ players = [], formByPlayerId = null, on
 
         {tooFew ? (
           <div style={{ padding: "48px 20px", textAlign: "center", color: C.inkDim, fontSize: 14, zIndex: 2 }}>
-            AI dağıtımı için en az <b style={{ color: C.ink }}>4 oyuncu</b> seç.<br />
-            Şu an: {players.length} oyuncu.
+            AI dağıtımı için bu hafta en az <b style={{ color: C.ink }}>4 oyuncu</b> gelmeli.<br />
+            Şu an: {present.length} kişi geliyor{absentCount > 0 ? ` · ${absentCount} kişi "bu hafta yok"` : ""}.
           </div>
         ) : (
           <>

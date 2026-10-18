@@ -16,7 +16,7 @@
 //
 // Props:
 //   - locked   : boolean — false ise children olduğu gibi render edilir
-//   - feature  : paywall feature key (cloud_sync, unlimited_online, vb.)
+//   - feature  : paywall feature key (unlimited_online, unlimited_history, no_ads, branding)
 //   - title    : (opsiyonel) override başlık
 //   - subtitle : (opsiyonel) override açıklama
 //   - ctaLabel : (opsiyonel) CTA buton metni
@@ -24,18 +24,19 @@
 //   - tone     : "gold" | "blue" — accent rengi
 // ─────────────────────────────────────────────────────────────
 import React from "react";
-import { useSubscription } from "./subscription";
+import { useSubscription, FREE_LIMITS } from "./subscription";
 import { hapticMedium } from "./haptics";
+import { PRO_FEATURES } from "./PaywallScreen";
 
+// ★ DÜRÜST PRO — sadece gerçekten Pro'ya özel olanlar (bkz. PaywallScreen PRO_FEATURES).
+//   AI takım dengeleme, maça katılım, haftalık plan/hatırlatma ve Kasa ücretsizdir →
+//   onlar için kilit KULLANILMAZ. Bilinmeyen/eski anahtarlar → general.
 const FEATURE_DEFAULTS = {
-  cloud_sync:        { title: "Bulut Senkronu",     sub: "Telefon değiştirsen bile tüm verilerin saklı kalır.", tone: "blue" },
-  unlimited_online:  { title: "Sınırsız Online",    sub: "Ayda 3 oda ücretsiz · Pro ile sınırsız oda kur",      tone: "gold" },
-  unlimited_history: { title: "Sınırsız Geçmiş",    sub: "Tüm maçlarını ve istatistiklerini sakla",             tone: "gold" },
-  no_ads:            { title: "Reklamsız Deneyim",  sub: "Banner ve geçiş reklamları kalksın",                  tone: "gold" },
-  multi_team:        { title: "Sınırsız Takım",     sub: "İstediğin kadar takım yönet",                          tone: "blue" },
-  brand_team:        { title: "Takım Brand'i",      sub: "Logo, renk, sponsor — paylaşımlarda görünsün",        tone: "blue" },
-  ai_coach:          { title: "AI Antrenör",        sub: "Maç sonrası taktiksel analiz — sana özel",            tone: "blue" },
-  general:           { title: "Premium Özellik",    sub: "Bu özellik Pro üyeler içindir",                       tone: "gold" },
+  unlimited_online:  { title: "Sınırsız Oda Kurma",       sub: `Ayda ${FREE_LIMITS.ONLINE_CREATES_PER_MONTH} oda ücretsiz · Maça katılmak her zaman ücretsiz`, tone: "gold" },
+  unlimited_history: { title: "Tüm Maç Geçmişi",          sub: `Ücretsizde listede son ${FREE_LIMITS.HISTORY_LIMIT} maç · Krallıklar herkes için tüm maçlardan`, tone: "gold" },
+  no_ads:            { title: "Reklamsız",                sub: "Banner ve geçiş reklamları kalksın",                                  tone: "gold" },
+  branding:          { title: "Logosuz Paylaşım",         sub: "Paylaşımlarda logo/alt bilgi olmasın",                                tone: "gold" },
+  general:           { title: "Pro Özelliği",             sub: PRO_FEATURES.map((f) => f.text).join(" · "),                         tone: "gold" },
 };
 
 const TONES = {

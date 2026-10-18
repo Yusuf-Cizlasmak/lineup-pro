@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ★ Bildirim ikonu (status bar) — beyaz top silueti, şeffaf zemin.
+     Android bildirim ikonları tek renk olmalı; uygulama ikonu kullanılırsa beyaz kare görünür.
+     Kullananlar: FCM (AndroidManifest default_notification_icon) + LocalNotifications (smallIcon: "ic_stat_icon"). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- dış halka -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2"
+        android:pathData="M12,2.5a9.5,9.5 0,1 1,0 19a9.5,9.5 0,1 1,0 -19z" />
+    <!-- orta beşgen -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,7.6L16.18,10.64L14.59,15.56L9.41,15.56L7.82,10.64Z" />
+    <!-- dikişler -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round"
+        android:pathData="M12,7.6L12,3.4M16.18,10.64L20.18,9.34M14.59,15.56L17.05,18.96M9.41,15.56L6.95,18.96M7.82,10.64L3.82,9.34" />
+</vector>

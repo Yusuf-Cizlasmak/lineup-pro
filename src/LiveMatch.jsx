@@ -39,8 +39,12 @@ import SpiderChart from './SpiderChart';
 import {
   getAttrKeys, generateDefaultAttributes, computeOverallFromAttributes,
 } from './playerAttributes';
-import { buildMatch, saveMatch } from './matchHistoryStore';
+import { buildMatch, saveMatch, getMatch } from './matchHistoryStore';
 import { Capacitor } from '@capacitor/core';
+// ★ Haftalık rutin — sabit maç planı, AI dengeli bölüş, analitik
+import { getSchedule, nextMatchDate } from './matchSchedule';
+import { buildBalancedTeams } from './teamBalancer';
+import { track, EVENTS } from './analytics';
 
 // ★ NEW — Profesyonel paylaşım sistemi
 import ShareInviteModal from './ShareInviteModal';
@@ -279,6 +283,163 @@ const POS_SHORT = {
 };
 
 const POSITIONS = ['KALECİ', 'STOPER', 'SOL BEK', 'SAĞ BEK', 'DEFANS', 'ORTA SAHA', 'FORVET'];
+
+// ═══════════════════════════════════════════════════════════
+// ★ MAÇ TARİHİ / SAATİ YARDIMCILARI (haftalık rutin)
+// ═══════════════════════════════════════════════════════════
+const TR_DAYS = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
+const TR_MONTHS_SHORT = ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara'];
+const DAY_MS = 86400000;
+const pad2 = (n) => String(n).padStart(2, '0');
+
+// Date → "2026-10-22" (yerel saat, <input type="date"> formatı)
+const toDateInput = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+// Date → "21:00" (<input type="time"> formatı)
+const toTimeInput = (d) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+
+// "2026-10-22" + "21:00" → Date (yerel) · geçersizse null
+const fromDateTimeInputs = (dateStr, timeStr) => {
+  const dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr || '');
+  if (!dm) return null;
+  const tm = /^(\d{1,2}):(\d{2})/.exec(timeStr || '') || [null, '21', '00'];
+  const d = new Date(+dm[1], +dm[2] - 1, +dm[3], +tm[1], +tm[2], 0, 0);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
+// Varsayılan maç anı: haftalık plan varsa bir sonraki maç, yoksa yarın 21:00
+const defaultKickoff = () => {
+  try {
+    const next = nextMatchDate();
+    if (next && !Number.isNaN(new Date(next).getTime())) return new Date(next);
+  } catch {}
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  d.setHours(21, 0, 0, 0);
+  return d;
+};
+
+// Bir önceki maçın tarihi + 7 gün (geçmişte kalıyorsa haftalık ileri sar).
+// Tarihsiz odada: maçın başladığı an (started_at) + 7 gün, o da yoksa şimdi + 7 gün
+// (çeyrek saate aşağı yuvarlanır → 21:07 başlayan maç → 21:00).
+const nextWeekKickoff = (prevIso, fallbackIso = null) => {
+  const valid = (iso) => {
+    if (!iso) return null;
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
+  const prev = valid(prevIso);
+  let next;
+  if (prev) {
+    next = new Date(prev);
+  } else {
+    const q = 15 * 60000;
+    const base = valid(fallbackIso) || new Date();
+    next = new Date(Math.floor(base.getTime() / q) * q);
+  }
+  next.setSeconds(0, 0);
+  // Takvim günüyle ilerle (saat dilimi/yaz saati kaymasın)
+  next.setDate(next.getDate() + 7);
+  let guard = 0;
+  while (next.getTime() <= Date.now() && guard < 60) {
+    next.setDate(next.getDate() + 7);
+    guard++;
+  }
+  return next;
+};
+
+// ISO → "Perşembe 21:00" (önümüzdeki 7 gün dışında ise "Perşembe 30 Eki 21:00")
+const formatKickoff = (iso) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const day0 = new Date(d); day0.setHours(0, 0, 0, 0);
+  const diffDays = Math.round((day0.getTime() - today.getTime()) / DAY_MS);
+  const datePart = diffDays >= 0 && diffDays < 7 ? '' : ` ${d.getDate()} ${TR_MONTHS_SHORT[d.getMonth()]}`;
+  return `${TR_DAYS[d.getDay()]}${datePart} ${toTimeInput(d)}`;
+};
+
+// ISO → "bugün" / "yarın" / "3 gün sonra" / "" (geçmişse boş)
+const kickoffCountdown = (iso) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const day0 = new Date(d); day0.setHours(0, 0, 0, 0);
+  const n = Math.round((day0.getTime() - today.getTime()) / DAY_MS);
+  if (n < 0) return '';
+  if (n === 0) return 'bugün';
+  if (n === 1) return 'yarın';
+  return `${n} gün sonra`;
+};
+
+// ★ B'nin uygulama içi bildirim izni ön-sorusu (tekrar/sıklık kontrolünü o yapar)
+const askNotifPermission = (context = 'online') => {
+  try {
+    window.dispatchEvent(new CustomEvent('halisaha:ask-notif-permission', { detail: { context } }));
+  } catch {}
+};
+
+// ★ Online maç sonu takım arkadaşı puanları (1-10) → AI dengeleme için küçük form etkisi.
+//   Geçen haftanın puanları bu haftanın bölüşünde kullanılsın diye cihazda tutulur.
+const PEER_RATINGS_KEY = 'halisaha_online_peer_ratings';
+const readPeerRatings = () => {
+  try {
+    const obj = JSON.parse(localStorage.getItem(PEER_RATINGS_KEY) || '{}');
+    return obj && typeof obj === 'object' ? obj : {};
+  } catch { return {}; }
+};
+const cachePeerRatings = (avgMap) => {
+  try {
+    const all = readPeerRatings();
+    const now = Date.now();
+    Object.entries(avgMap || {}).forEach(([id, r]) => {
+      const avg = parseFloat(r?.avg);
+      if (Number.isFinite(avg)) all[id] = { avg, count: r.count || 1, at: now };
+    });
+    // Boyut sınırı — en yeni 300 oyuncu
+    const trimmed = Object.fromEntries(
+      Object.entries(all).sort((a, b) => (b[1].at || 0) - (a[1].at || 0)).slice(0, 300)
+    );
+    localStorage.setItem(PEER_RATINGS_KEY, JSON.stringify(trimmed));
+  } catch {}
+};
+// ★ "Gelecek hafta aynı kadroyla" ile kurulan oda → önceki odaya bağlanır.
+//   Admin bitmiş maçı tekrar açıp butona basarsa ikinci oda kurulup ücretsiz
+//   hakkı boşa gitmesin; mevcut oda açılır.
+const NEXT_ROOMS_KEY = 'halisaha_online_next_rooms';
+const readNextRooms = () => {
+  try {
+    const obj = JSON.parse(localStorage.getItem(NEXT_ROOMS_KEY) || '{}');
+    return obj && typeof obj === 'object' ? obj : {};
+  } catch { return {}; }
+};
+const getNextWeekRoom = (prevSessionId) => (prevSessionId && readNextRooms()[prevSessionId]) || null;
+const rememberNextWeekRoom = (prevSessionId, sess) => {
+  if (!prevSessionId || !sess?.id) return;
+  try {
+    const all = readNextRooms();
+    all[prevSessionId] = { id: sess.id, join_code: sess.join_code, scheduled_at: sess.scheduled_at || null, at: Date.now() };
+    const trimmed = Object.fromEntries(
+      Object.entries(all).sort((a, b) => (b[1].at || 0) - (a[1].at || 0)).slice(0, 30)
+    );
+    localStorage.setItem(NEXT_ROOMS_KEY, JSON.stringify(trimmed));
+  } catch {}
+};
+const forgetNextWeekRoom = (prevSessionId) => {
+  try {
+    const all = readNextRooms();
+    delete all[prevSessionId];
+    localStorage.setItem(NEXT_ROOMS_KEY, JSON.stringify(all));
+  } catch {}
+};
+
+// Ortalama puan (1-10) → güç deltası (-3 .. +3) · 6.5 nötr
+const peerFormDelta = (avg) => {
+  const a = parseFloat(avg);
+  if (!Number.isFinite(a)) return null;
+  return Math.max(-3, Math.min(3, Math.round(a - 6.5)));
+};
 
 // Renk paleti — admin takım rengi seçerken
 const TEAM_COLORS = [
@@ -847,6 +1008,19 @@ export default function LiveMatch() {
   const [teamAColor, setTeamAColor] = useState(C.defaultA);
   const [teamBColor, setTeamBColor] = useState(C.defaultB);
   const [duration, setDuration] = useState(60);
+  // ★ Maç tarihi/saati — varsayılan: haftalık plan → sonraki maç, yoksa yarın 21:00
+  const [matchDate, setMatchDate] = useState(() => toDateInput(defaultKickoff()));
+  const [matchTime, setMatchTime] = useState(() => toTimeInput(defaultKickoff()));
+  const [scheduleEnabled, setScheduleEnabled] = useState(true);
+  const [kickoffFromPlan, setKickoffFromPlan] = useState(false);
+
+  // ★ AI dengeli bölüş (lobby) + "Gelecek hafta aynı kadroyla" (maç sonu)
+  const [aiBalancing, setAiBalancing] = useState(false);
+  const [lastBalance, setLastBalance] = useState(null); // { sessionId, ratingA, ratingB, diff, balance }
+  const [creatingNextWeek, setCreatingNextWeek] = useState(false);
+  const [nextWeekError, setNextWeekError] = useState('');
+  // Share modal kapanınca bildirim izni ön-sorusu (iki modal üst üste binmesin)
+  const askNotifAfterShareRef = useRef(false);
 
   // Join form
   const [joinCode, setJoinCode] = useState('');
@@ -879,6 +1053,8 @@ export default function LiveMatch() {
   const screenRef = useRef(screen);
   const fieldRef = useRef(null);
   const historySavedRef = useRef(false);
+  // Geçmişe en son hangi MVP ile yazıldı (MVP sonradan seçilince kayıt güncellenir)
+  const savedMvpRef = useRef(undefined);
   // Hazır bildirim için: önceki ready set'i + bildirim izni
   const prevReadyRef = useRef(new Set());
   const notifPermRef = useRef(false);
@@ -993,6 +1169,10 @@ export default function LiveMatch() {
     setSession(sess);
     setError('');
     historySavedRef.current = false;
+    savedMvpRef.current = undefined;
+    // Başka bir odaya geçildi → önceki maçın puanlama durumu taşınmasın
+    setMyRatings({});
+    setRatingsSubmitted(false);
     if (unsubRef.current) unsubRef.current();
 
     const refresh = async () => {
@@ -1055,18 +1235,28 @@ export default function LiveMatch() {
   }, []);
   useEffect(() => () => { if (unsubRef.current) unsubRef.current(); }, []);
 
-  // Status finished olunca matchHistoryStore'a kaydet (bir kez)
+  // Status finished olunca matchHistoryStore'a kaydet.
+  // ★ Kayıt kimliği odaya bağlı (online_<session.id>) → aynı maç geçmişten tekrar
+  //   açılınca kopya oluşmaz; MVP maç bittikten SONRA seçilince kayıt güncellenir.
+  const sessionMvpId = session?.mvp_device_id || null;
   useEffect(() => {
-    if (session?.status === 'finished' && !historySavedRef.current && players.length > 0) {
-      historySavedRef.current = true;
-      try {
-        persistMatchToHistory(session, players, events);
-        showToast('📊 Maç istatistiklerine kaydedildi');
-      } catch (e) {
-        console.warn('[persistMatchToHistory]', e);
-      }
+    if (session?.status !== 'finished' || players.length === 0) return;
+    if (historySavedRef.current && savedMvpRef.current === sessionMvpId) return;
+    historySavedRef.current = true;
+    savedMvpRef.current = sessionMvpId;
+    try {
+      const { isNew } = persistMatchToHistory(session, players, events);
+      if (isNew) showToast('📊 Maç istatistiklerine kaydedildi');
+    } catch (e) {
+      console.warn('[persistMatchToHistory]', e);
     }
-  }, [session?.status, players, events, showToast]);
+  }, [session?.status, sessionMvpId, players, events, showToast]);
+
+  // ★ Maç sonu takım arkadaşı puanlarını cihazda tut → gelecek haftanın AI bölüşünde kullanılır
+  useEffect(() => {
+    if (session?.status !== 'finished' || ratings.length === 0) return;
+    cachePeerRatings(avgRatings);
+  }, [session?.status, ratings.length, avgRatings]);
 
   // ─── Handlers ───
   const handleSetNickname = async () => {
@@ -1084,46 +1274,146 @@ export default function LiveMatch() {
     }
   };
 
+  // ★ "Maç Kur" ekranını aç — tarih/saat ve saha adını haftalık plandan ön doldur
+  const openCreateScreen = () => {
+    let plan = null;
+    try { plan = getSchedule(); } catch {}
+    const kickoff = defaultKickoff();
+    setMatchDate(toDateInput(kickoff));
+    setMatchTime(toTimeInput(kickoff));
+    setScheduleEnabled(true);
+    setKickoffFromPlan(!!plan);
+    if (plan?.pitch && !fieldName.trim()) setFieldName(plan.pitch);
+    if (plan && [30, 45, 60, 90].includes(plan.durationMin)) setDuration(plan.durationMin);
+    setError('');
+    setScreen('create');
+  };
+
+  // ★ FREE TIER QUOTA: bu ay oda kurma hakkı kaldı mı? (sunucudaki sayımla doğrulanır)
+  //   Hak yoksa hata metnini onError'a verir, kısa gecikmeyle paywall'ı açar → false
+  const ensureCreateQuota = async (onError) => {
+    if (isPremium()) return true;
+    const quota = await canCreateOnline();
+    setCreateQuota(quota);
+    if (quota.allowed) return true;
+    onError(
+      `Bu ayki ${quota.limit} ücretsiz oda hakkını kullandın. ` +
+      `Hakların ${formatResetDate(quota.resetsAt)} tarihinde yenilenir — Pro ile sınırsız oda kur.`
+    );
+    // Kısa bir gecikme ile paywall'ı aç — kullanıcı errored UI'ı görsün
+    setTimeout(() => openPaywall('unlimited_online'), 600);
+    return false;
+  };
+
   const handleCreate = async () => {
     if (!fieldName.trim()) { setError('Saha adı gir.'); return; }
 
-    setLoading(true); setError('');
-
-    // ★ FREE TIER QUOTA: bu ay oda kurma hakkı kaldı mı? (sunucudaki sayımla doğrulanır)
-    if (!isPremium()) {
-      const quota = await canCreateOnline();
-      setCreateQuota(quota);
-      if (!quota.allowed) {
-        setLoading(false);
-        setError(
-          `Bu ayki ${quota.limit} ücretsiz oda hakkını kullandın. ` +
-          `Hakların ${formatResetDate(quota.resetsAt)} tarihinde yenilenir — Pro ile sınırsız oda kur.`
-        );
-        // Kısa bir gecikme ile paywall'ı aç — kullanıcı errored UI'ı görsün
-        setTimeout(() => openPaywall('unlimited_online'), 600);
+    // ★ Maç tarihi/saati (opsiyonel) — geçmiş bir an seçilmesin
+    let scheduledAt = null;
+    if (scheduleEnabled) {
+      const when = fromDateTimeInputs(matchDate, matchTime);
+      if (!when) { setError('Maç tarihi ve saatini seç.'); return; }
+      if (when.getTime() < Date.now() - 60 * 60000) {
+        setError('Maç tarihi geçmişte kalıyor — ileri bir tarih seç.');
         return;
       }
+      scheduledAt = when.toISOString();
     }
+
+    setLoading(true); setError('');
+
+    if (!(await ensureCreateQuota((msg) => { setLoading(false); setError(msg); }))) return;
 
     try {
       const sess = await createSession({
         fieldName, location, teamAName, teamBName,
         teamAColor, teamBColor, durationMinutes: duration,
+        scheduledAt,
       });
       // ★ Free kullanıcının aylık sayacını artır (lokal cache; sunucu satırı zaten eklendi)
       if (!isPremium()) {
         incrementOnlineMatchCount();
       }
+      track(EVENTS.ROOM_CREATED, { scheduled: !!scheduledAt, source: 'form' });
       await connectToSession(sess);
       hapticSuccess();
+      // Tarihli oda → maç günü hatırlatması için bildirim izni ön-sorusu
+      if (scheduledAt) setTimeout(() => askNotifPermission('online'), 900);
     } catch (e) { setError(e.message); }
     setLoading(false);
   };
 
+  // ★ "Gelecek hafta aynı kadroyla kur" — maç sonu ekranından, admin
+  //   Aynı saha/konum/takım adı-rengi/formasyon/süre; tarih = önceki maç + 7 gün.
+  //   Aylık ücretsiz oda kotası normal akıştaki gibi uygulanır.
+  const handleCreateNextWeek = async () => {
+    if (!session || creatingNextWeek) return;
+    const prev = session;
+    setNextWeekError('');
+    setCreatingNextWeek(true);
+
+    // Bu maçtan zaten gelecek haftanın odası kurulduysa onu aç (kota harcanmaz)
+    const existing = getNextWeekRoom(prev.id);
+    if (existing?.id) {
+      try {
+        const sess = await getSession(existing.id);
+        if (sess && sess.status !== 'finished') {
+          await connectToSession(sess);
+          hapticLight();
+          setShowShareModal(true);
+          setCreatingNextWeek(false);
+          return;
+        }
+      } catch {}
+      forgetNextWeekRoom(prev.id); // oda silinmiş / bitmiş → yenisini kur
+    }
+
+    if (!(await ensureCreateQuota((msg) => { setCreatingNextWeek(false); setNextWeekError(msg); }))) return;
+
+    try {
+      const kickoff = nextWeekKickoff(prev.scheduled_at, prev.started_at);
+      const sess = await createSession({
+        fieldName: prev.field_name || '',
+        location: prev.location || '',
+        scheduledAt: kickoff.toISOString(),
+        teamAName: prev.team_a_name || 'Takım A',
+        teamBName: prev.team_b_name || 'Takım B',
+        formationA: prev.formation_a || '3-2-1',
+        formationB: prev.formation_b || '3-2-1',
+        teamAColor: prev.team_a_color || C.defaultA,
+        teamBColor: prev.team_b_color || C.defaultB,
+        durationMinutes: prev.duration_minutes || 60,
+      });
+      if (!isPremium()) {
+        incrementOnlineMatchCount();
+      }
+      track(EVENTS.ROOM_CREATED, { scheduled: true, source: 'next_week' });
+      rememberNextWeekRoom(prev.id, sess);
+      await connectToSession(sess);
+      hapticSuccess();
+      showToast(`📅 ${formatKickoff(sess.scheduled_at || kickoff.toISOString())} maçı kuruldu — linki gruba at!`, 3200);
+      // Yeni linki WhatsApp grubuna atsın; izin sorusu share modal kapanınca
+      askNotifAfterShareRef.current = true;
+      setShowShareModal(true);
+    } catch (e) {
+      setNextWeekError(e.message || 'Yeni maç kurulamadı.');
+    }
+    setCreatingNextWeek(false);
+  };
+
+  const handleCloseShareModal = useCallback(() => {
+    setShowShareModal(false);
+    if (askNotifAfterShareRef.current) {
+      askNotifAfterShareRef.current = false;
+      setTimeout(() => askNotifPermission('online'), 450);
+    }
+  }, []);
+
   // Maça katılma herkes için ücretsiz ve sınırsız.
   // codeArg: deep link'ten gelen kod (buton onClick'inde event gelir → yok sayılır)
   const handleJoin = async (codeArg) => {
-    const code = (typeof codeArg === 'string' ? codeArg : joinCode).trim().toUpperCase();
+    const fromLink = typeof codeArg === 'string';
+    const code = (fromLink ? codeArg : joinCode).trim().toUpperCase();
     if (!code) { setError('Kodu gir.'); return; }
 
     setLoading(true); setError('');
@@ -1131,6 +1421,9 @@ export default function LiveMatch() {
       const sess = await joinSessionByCode(code);
       await connectToSession(sess);
       hapticMedium();
+      track(EVENTS.JOIN_SUCCESS, { source: fromLink ? 'link' : 'code' });
+      // Davet linkiyle gelen oyuncu → maç hatırlatmaları için izin ön-sorusu
+      if (fromLink) setTimeout(() => askNotifPermission('online'), 1200);
     } catch (e) { setError(e.message); }
     setLoading(false);
   };
@@ -1142,6 +1435,89 @@ export default function LiveMatch() {
     try { await assignTeam(session.id, targetDeviceId, team); }
     catch (e) { setError(e.message); }
     setAdminMenuFor(null);
+  };
+
+  // ★ "⚖️ AI ile dengeli böl" — admin/co-admin, lobby
+  //   Odadaki herkesi yetenek kartı (OVR) + pozisyon + geçmiş takım arkadaşı
+  //   puanlarına göre iki dengeli takıma ayırır. Sadece takımı DEĞİŞEN oyuncular
+  //   güncellenir (aynı takımda kalanın slotu/kaptanlığı korunur). Manuel atama
+  //   (A/B butonları, uzun basma menüsü, sürükle-bırak) aynen çalışmaya devam eder.
+  const handleAIBalance = async () => {
+    if (!session || !amIFullPower || aiBalancing) return;
+    if (players.length < 2) { showToast('⚖️ En az 2 oyuncu gerekli'); return; }
+
+    const alreadySplit = players.some(p => p.team);
+    if (alreadySplit && !window.confirm(
+      'Takımlar AI ile yeniden dengelensin mi?\nTakımı değişen oyuncular yedeğe alınır.'
+    )) return;
+
+    // session_players satırı → teamBalancer oyuncu şekli
+    // Profil (pozisyon + yetenek) yoksa OVR 70 kabul edilir.
+    const peer = readPeerRatings();
+    const formByPlayerId = {};
+    const pool = players.map(p => {
+      const live = avgRatings[p.device_id]?.avg;
+      const delta = peerFormDelta(live != null ? live : peer[p.device_id]?.avg);
+      if (delta != null) formByPlayerId[p.device_id] = delta;
+      return {
+        id: p.device_id,
+        name: p.nickname || 'Misafir',
+        position: p.position || null,
+        // OVR'i burada hesaplıyoruz: pozisyonsuz yetenek kartı yanlış hesaplanmasın
+        attributes: null,
+        rating: ovrByPlayer[p.device_id] || 70,
+      };
+    });
+
+    const result = buildBalancedTeams(pool, { formByPlayerId });
+    if (result.error || !result.teamB.length) {
+      showToast('⚖️ Takımlar bölünemedi');
+      return;
+    }
+
+    hapticMedium();
+    setAiBalancing(true);
+    setError('');
+    setSelectedPlayerId(null);
+
+    const currentTeam = Object.fromEntries(players.map(p => [p.device_id, p.team || null]));
+    const changes = [
+      ...result.teamA.map(p => [p.id, 'A']),
+      ...result.teamB.map(p => [p.id, 'B']),
+    ].filter(([id, team]) => currentTeam[id] !== team);
+
+    let failed = 0;
+    try {
+      // Küçük gruplar halinde (Supabase'i boğmadan, yine de hızlı)
+      for (let i = 0; i < changes.length; i += 4) {
+        const batch = changes.slice(i, i + 4);
+        const res = await Promise.allSettled(
+          batch.map(([id, team]) => assignTeam(session.id, id, team))
+        );
+        failed += res.filter(r => r.status === 'rejected').length;
+      }
+    } finally {
+      setAiBalancing(false);
+    }
+
+    track(EVENTS.AI_BALANCE_USED, { surface: 'online', players: pool.length });
+    setLastBalance({
+      sessionId: session.id,
+      ratingA: result.ratingA, ratingB: result.ratingB,
+      diff: result.diff, balance: result.balance,
+    });
+
+    if (failed > 0) {
+      setError(`${failed} oyuncu takıma atanamadı. Tekrar dene.`);
+      return;
+    }
+    hapticSuccess();
+    showToast(
+      result.diff === 0
+        ? `⚖️ Kusursuz denge! ${result.ratingA} – ${result.ratingB} OVR`
+        : `⚖️ Dengelendi · ${result.ratingA} – ${result.ratingB} OVR (fark ${result.diff})`,
+      3200
+    );
   };
 
   const handleRemovePlayer = async (targetDeviceId) => {
@@ -1583,7 +1959,7 @@ export default function LiveMatch() {
         {/* ★ NEW — Profesyonel davet paylaşım modal'ı */}
         <ShareInviteModal
           open={showShareModal}
-          onClose={() => setShowShareModal(false)}
+          onClose={handleCloseShareModal}
           session={session}
           hostNickname={getNickname()}
           onToast={showToast}
@@ -1656,7 +2032,7 @@ export default function LiveMatch() {
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 24 }}>
-          <button onClick={() => { setScreen('create'); setError(''); }} style={bigActionBtn(C.accent)}>
+          <button onClick={openCreateScreen} style={bigActionBtn(C.accent)}>
             <span style={{ fontSize: 28 }}>🏟️</span>
             <span style={{ fontSize: 14, fontWeight: 800 }}>Maç Kur</span>
             <span style={{
@@ -1683,6 +2059,14 @@ export default function LiveMatch() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <div style={{ fontWeight: 700, fontSize: 15 }}>{s.field_name || 'Halı Saha'}</div>
+                    {s.scheduled_at && formatKickoff(s.scheduled_at) && (
+                      <div style={{ fontSize: 12, color: C.accent, fontWeight: 700, marginTop: 2 }}>
+                        🗓 {formatKickoff(s.scheduled_at)}
+                        {kickoffCountdown(s.scheduled_at) && (
+                          <span style={{ color: C.muted, fontWeight: 600 }}> · {kickoffCountdown(s.scheduled_at)}</span>
+                        )}
+                      </div>
+                    )}
                     <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
                       🔑 {s.join_code} · {s.team_a_name} vs {s.team_b_name}
                     </div>
@@ -1704,6 +2088,7 @@ export default function LiveMatch() {
                     <div style={{ fontWeight: 700, fontSize: 14 }}>{s.field_name || 'Halı Saha'}</div>
                     <div style={{ fontSize: 12, color: C.muted }}>
                       {s.team_a_name} {s.score_a} - {s.score_b} {s.team_b_name}
+                      {s.scheduled_at && formatKickoff(s.scheduled_at) && <> · 🗓 {formatKickoff(s.scheduled_at)}</>}
                     </div>
                   </div>
                   <StatusBadge status={s.status} />
@@ -1740,6 +2125,50 @@ export default function LiveMatch() {
             <Input value={fieldName} onChange={setFieldName} placeholder="Saha adı (zorunlu)" />
           </div>
           <Input value={location} onChange={setLocation} placeholder="Konum (opsiyonel)" />
+
+          {/* ★ Maç zamanı — haftalık plan varsa bir sonraki maç, yoksa yarın 21:00 */}
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <label style={lbl}>Maç zamanı</label>
+              <button
+                onClick={() => { hapticLight(); setScheduleEnabled(v => !v); setError(''); }}
+                style={{
+                  background: 'none', border: 'none', padding: '0 0 6px',
+                  color: scheduleEnabled ? C.muted : C.accent,
+                  fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                  fontFamily: "'DM Sans',sans-serif",
+                  WebkitTapHighlightColor: 'transparent',
+                }}
+              >{scheduleEnabled ? 'Tarihsiz kur' : '+ Tarih ekle'}</button>
+            </div>
+            {scheduleEnabled ? (
+              <>
+                <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr', gap: 8 }}>
+                  <Input type="date" value={matchDate} onChange={setMatchDate}
+                         style={{ colorScheme: 'dark', minWidth: 0, minHeight: 46 }} />
+                  <Input type="time" value={matchTime} onChange={setMatchTime}
+                         style={{ colorScheme: 'dark', minWidth: 0, minHeight: 46 }} />
+                </div>
+                {(() => {
+                  const when = fromDateTimeInputs(matchDate, matchTime);
+                  if (!when) return null;
+                  const iso = when.toISOString();
+                  const cd = kickoffCountdown(iso);
+                  return (
+                    <p style={{ margin: '6px 2px 0', fontSize: 11.5, color: C.muted }}>
+                      🗓 <strong style={{ color: C.text }}>{formatKickoff(iso)}</strong>
+                      {cd && ` · ${cd}`}
+                      {kickoffFromPlan && <span style={{ color: C.accent }}> · haftalık planından</span>}
+                    </p>
+                  );
+                })()}
+              </>
+            ) : (
+              <p style={{ margin: 0, fontSize: 11.5, color: C.muted }}>
+                Tarih olmadan kurulur — davet mesajında gün/saat görünmez.
+              </p>
+            )}
+          </div>
 
           <div>
             <label style={lbl}>Takım A</label>
@@ -1932,6 +2361,17 @@ export default function LiveMatch() {
                     fontFamily: "'JetBrains Mono',monospace",
                     lineHeight: 1.1,
                   }}>{session.join_code}</div>
+                  {session.scheduled_at && formatKickoff(session.scheduled_at) && (
+                    <div style={{
+                      fontSize: 12.5, fontWeight: 800, color: C.text, marginTop: 6,
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    }}>
+                      🗓 {formatKickoff(session.scheduled_at)}
+                      {kickoffCountdown(session.scheduled_at) && (
+                        <span style={{ color: C.accent, fontWeight: 700 }}> · {kickoffCountdown(session.scheduled_at)}</span>
+                      )}
+                    </div>
+                  )}
                   <div style={{ fontSize: 10.5, color: C.muted, marginTop: 4 }}>
                     {session.field_name && <>📍 {session.field_name} · </>}
                     {players.length} oyuncu · {readyCount} hazır
@@ -2354,10 +2794,69 @@ export default function LiveMatch() {
                 {readyCount === players.length && players.length > 1 && ' 🎉 Herkes hazır!'}
               </p>
             )}
+            {/* ★ Profil (pozisyon + yetenek) → AI bölüşü daha adil olsun */}
+            <button
+              onClick={() => { hapticLight(); setShowMyProfile(true); }}
+              style={{
+                display: 'block', margin: '8px auto 0',
+                background: 'none', border: 'none', padding: '4px 8px',
+                color: (!me.attributes || !me.position) ? C.accent : C.muted,
+                fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                fontFamily: "'DM Sans',sans-serif",
+                WebkitTapHighlightColor: 'transparent',
+              }}
+            >
+              {(!me.attributes || !me.position)
+                ? '👤 Profilini doldur — takımlar daha adil bölünsün'
+                : '👤 Profilim (pozisyon & yetenek)'}
+            </button>
           </div>
         )}
 
         {/* ═══ MAÇI BAŞLAT BUTONU (admin/co-admin, lobby) ═══ */}
+        {/* ═══ ★ AI İLE DENGELİ BÖL (admin/co-admin, lobby) ═══ */}
+        {isLobby && amIFullPower && players.length >= 2 && (
+          <div style={{ padding: '12px 16px 0' }}>
+            <button
+              onClick={handleAIBalance}
+              disabled={aiBalancing}
+              style={{
+                width: '100%', padding: '13px 16px', borderRadius: 12,
+                border: `1px solid ${C.purple}55`,
+                background: `linear-gradient(135deg, ${C.purple}22, ${C.blue}10)`,
+                color: aiBalancing ? C.muted : C.text,
+                cursor: aiBalancing ? 'wait' : 'pointer',
+                fontFamily: "'DM Sans',sans-serif",
+                display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left',
+                WebkitTapHighlightColor: 'transparent',
+              }}
+            >
+              <span style={{ fontSize: 22, lineHeight: 1 }}>⚖️</span>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ display: 'block', fontSize: 14.5, fontWeight: 800 }}>
+                  {aiBalancing ? 'Takımlar dengeleniyor…' : 'AI ile dengeli böl'}
+                </span>
+                <span style={{ display: 'block', fontSize: 11, color: C.muted, marginTop: 2 }}>
+                  {players.length} oyuncu · yetenek kartı + pozisyon + maç puanlarına göre
+                </span>
+              </span>
+              {lastBalance?.sessionId === session.id && !aiBalancing && (
+                <span style={{
+                  flexShrink: 0, fontSize: 10.5, fontWeight: 800, color: C.accent,
+                  background: `${C.accent}14`, border: `1px solid ${C.accent}44`,
+                  borderRadius: 999, padding: '3px 8px',
+                  fontFamily: "'JetBrains Mono',monospace",
+                }}>%{lastBalance.balance}</span>
+              )}
+            </button>
+            {players.some(p => !p.attributes || !p.position) && (
+              <p style={{ fontSize: 10.5, color: C.muted, textAlign: 'center', margin: '6px 0 0' }}>
+                Profilini doldurmayanlar 70 güçte sayılır.
+              </p>
+            )}
+          </div>
+        )}
+
         {isLobby && amIFullPower && (
           <div style={{ padding: '12px 16px 0' }}>
             <Btn onClick={handleStartMatch} disabled={loading || players.length < 2}>
@@ -3162,6 +3661,49 @@ export default function LiveMatch() {
           </Card>
         )}
 
+        {/* ═══ ★ GELECEK HAFTA AYNI KADROYLA (admin) ═══ */}
+        {amIAdmin && session.status === 'finished' && (() => {
+          const existingNext = getNextWeekRoom(session.id);
+          const kickoffIso = nextWeekKickoff(session.scheduled_at, session.started_at).toISOString();
+          return (
+            <Card style={{
+              marginBottom: 12, padding: '14px',
+              background: `linear-gradient(135deg, ${C.accent}16, ${C.blue}08)`,
+              border: `1px solid ${C.accent}44`,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                <span style={{ fontSize: 26, lineHeight: 1 }}>📅</span>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontWeight: 800, fontSize: 14.5 }}>Gelecek hafta aynı kadroyla</div>
+                  <div style={{ fontSize: 11.5, color: C.muted, marginTop: 2, lineHeight: 1.4 }}>
+                    🗓 {formatKickoff(existingNext?.scheduled_at || kickoffIso)}
+                    {session.field_name && <> · 📍 {session.field_name}</>}
+                    <br />Aynı takım adları, renkler ve süre · yeni linki gruba at
+                  </div>
+                </div>
+              </div>
+              <Btn onClick={handleCreateNextWeek} color={C.accent} variant="solid" disabled={creatingNextWeek}>
+                {creatingNextWeek ? 'Hazırlanıyor…'
+                  : existingNext ? '📅 Gelecek haftanın odasını aç'
+                  : '📅 Gelecek hafta aynı kadroyla kur'}
+              </Btn>
+              {!existingNext && !isPremium() && createQuota.limit !== Infinity && (
+                <p style={{
+                  margin: '8px 0 0', fontSize: 11, textAlign: 'center',
+                  color: createQuota.allowed ? C.muted : C.warn,
+                }}>
+                  {createQuota.allowed
+                    ? `Bu ay ${createQuota.remaining}/${createQuota.limit} ücretsiz oda hakkın var`
+                    : 'Bu ayki ücretsiz oda hakların bitti — Pro ile sınırsız'}
+                </p>
+              )}
+              {nextWeekError && (
+                <p style={{ margin: '8px 0 0', fontSize: 12, color: C.danger, textAlign: 'center' }}>{nextWeekError}</p>
+              )}
+            </Card>
+          );
+        })()}
+
         {/* ═══ AKSİYON BUTONLARI ═══ */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 6 }}>
           <Btn onClick={handleShareResult} color={C.accent} variant="solid">
@@ -3271,8 +3813,38 @@ function persistMatchToHistory(session, players, events) {
     events: histEvents,
     isMatch: true,
     mvpId: session.mvp_device_id || null,
+    source: 'online',
   });
+
+  // ★ Kayıt kimliği odaya bağlı → aynı oda tekrar açılınca kopya yerine güncelleme.
+  //   (saveMatch yeni kimlikte "halisaha:match-saved" yayınlar → kind: "online")
+  const id = `online_${session.id}`;
+  const existing = getMatch(id);
+  m.id = id;
+  m.source = 'online';
+  if (existing?.playedAt) {
+    m.playedAt = existing.playedAt;
+  } else if (session.started_at) {
+    // Maç sonu ≈ başlangıç + süre (geçmişten geç açılsa bile doğru güne yazılsın)
+    const end = new Date(session.started_at).getTime() + (session.duration_minutes || 60) * 60000;
+    if (Number.isFinite(end)) m.playedAt = Math.min(Date.now(), end);
+  }
+
   saveMatch(m);
+
+  const isNew = !existing && !m.isDemo;
+  if (isNew) {
+    let hasSchedule = false;
+    try { hasSchedule = !!getSchedule(); } catch {}
+    track(EVENTS.MATCH_SAVED, {
+      kind: 'online',
+      players: typeof m.attendeeCount === 'number' ? m.attendeeCount : players.length,
+      has_schedule: hasSchedule,
+      scheduled_room: !!session.scheduled_at,
+      is_admin: isAdmin(session),
+    });
+  }
+  return { isNew, match: m };
 }
 
 // ─── ScoreBoard ──────────────────────────────────────────────
@@ -3589,6 +4161,11 @@ function AdminSettingsSheet({
   const [aColor, setAColor] = useState(session.team_a_color || C.defaultA);
   const [bColor, setBColor] = useState(session.team_b_color || C.defaultB);
   const [fieldName, setFieldName] = useState(session.field_name || '');
+  // ★ Maç tarihi/saati (boş = tarihsiz)
+  const initialKickoff = session.scheduled_at ? new Date(session.scheduled_at) : null;
+  const hasInitialKickoff = !!initialKickoff && !Number.isNaN(initialKickoff.getTime());
+  const [kDate, setKDate] = useState(hasInitialKickoff ? toDateInput(initialKickoff) : '');
+  const [kTime, setKTime] = useState(hasInitialKickoff ? toTimeInput(initialKickoff) : '21:00');
 
   const captainA = players.find(p => p.team === 'A' && p.is_captain);
   const captainB = players.find(p => p.team === 'B' && p.is_captain);
@@ -3601,13 +4178,19 @@ function AdminSettingsSheet({
   const otherPlayers = players.filter(p => p.device_id !== session.admin_id);
 
   const persist = () => {
-    onUpdate({
+    const meta = {
       team_a_name: aName.trim() || 'Takım A',
       team_b_name: bName.trim() || 'Takım B',
       team_a_color: aColor,
       team_b_color: bColor,
       field_name: fieldName.trim(),
-    });
+    };
+    // Tarih/saat sadece değiştiyse yazılır
+    const when = kDate ? fromDateTimeInputs(kDate, kTime) : null;
+    const nextIso = when ? when.toISOString() : null;
+    const prevIso = hasInitialKickoff ? initialKickoff.toISOString() : null;
+    if (nextIso !== prevIso) meta.scheduled_at = nextIso;
+    onUpdate(meta);
     onClose();
   };
 
@@ -3627,6 +4210,31 @@ function AdminSettingsSheet({
           <label style={profileLabel}>Saha adı</label>
           <input value={fieldName} onChange={e => setFieldName(e.target.value)}
                  maxLength={40} style={profileInput} />
+        </div>
+
+        {/* ★ Maç zamanı */}
+        <div style={{ marginBottom: 14 }}>
+          <label style={profileLabel}>Maç zamanı</label>
+          <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr', gap: 8 }}>
+            <input type="date" value={kDate} onChange={e => setKDate(e.target.value)}
+                   style={{ ...profileInput, colorScheme: 'dark', minWidth: 0 }} />
+            <input type="time" value={kTime} onChange={e => setKTime(e.target.value)}
+                   disabled={!kDate}
+                   style={{ ...profileInput, colorScheme: 'dark', minWidth: 0, opacity: kDate ? 1 : 0.5 }} />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 5 }}>
+            <span style={{ fontSize: 11, color: C.muted }}>
+              {kDate && fromDateTimeInputs(kDate, kTime)
+                ? `🗓 ${formatKickoff(fromDateTimeInputs(kDate, kTime).toISOString())}`
+                : 'Tarihsiz'}
+            </span>
+            {kDate && (
+              <button onClick={() => setKDate('')} style={{
+                background: 'none', border: 'none', color: C.muted,
+                fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: 0,
+              }}>Tarihi kaldır</button>
+            )}
+          </div>
         </div>
 
         {/* Takım A */}
