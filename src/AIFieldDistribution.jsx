@@ -230,6 +230,10 @@ export default function AIFieldDistribution({
     });
 
   const tooFew = result.error === "min_2_players";
+  // ★ Katılım bağlamı — sadece bu hafta gelenler dağıtılır
+  const presentCount = result.error ? (result.pool || []).length : result.poolSize;
+  const absentCount = result.absentCount || 0;
+  const attendanceLine = `${presentCount} kişi geliyor${absentCount > 0 ? ` · ${absentCount} kişi yok` : ""}`;
 
   return (
     <div style={{
@@ -256,8 +260,8 @@ export default function AIFieldDistribution({
             </div>
             <div style={{ fontSize: 11, color: C.inkDim, marginTop: 2 }}>
               {tooFew ? "Yetersiz oyuncu" :
-               phase === "done" ? `Denge %${result.balance} · ${result.poolSize} oyuncu havuzu` :
-               "Tüm oyuncular dengeli iki kadroya dağıtılıyor"}
+               phase === "done" ? `Denge %${result.balance} · ${attendanceLine}` :
+               `${attendanceLine} · dengeli iki kadroya dağıtılıyor`}
             </div>
           </div>
           <button onClick={() => { hapticLight(); onClose(); }} disabled={phase === "dealing"} style={{
@@ -284,7 +288,8 @@ export default function AIFieldDistribution({
       {/* SAHA */}
       {tooFew ? (
         <div style={{ flex: 1, display: "grid", placeItems: "center", color: C.inkDim, fontSize: 14, textAlign: "center", padding: 24 }}>
-          AI dağıtımı için iki takımda toplam en az 2 oyuncu olmalı.
+          AI dağıtımı için bu hafta en az 2 oyuncu gelmeli.
+          {absentCount > 0 ? ` (${absentCount} oyuncu "bu hafta yok" işaretli)` : ""}
         </div>
       ) : (
         <div style={{ flex: 1, position: "relative", overflow: "hidden", margin: "0 10px" }}>

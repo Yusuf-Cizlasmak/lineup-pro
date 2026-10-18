@@ -1,6 +1,8 @@
 import { AdMob, BannerAdSize, BannerAdPosition, MaxAdContentRating, AdmobConsentStatus } from '@capacitor-community/admob';
 import { Capacitor } from '@capacitor/core';
 import { isPremium } from './subscription';
+import { getAllMatches } from './matchHistoryStore';
+import { track, EVENTS } from './analytics';
 
 const IS_TESTING = false;
 
@@ -23,16 +25,50 @@ const AD_IDS = {
 
 const AD_CONFIG = AD_IDS[PLATFORM] || AD_IDS.android;
 
-// ═══ COOLDOWN & SESSION LIMITS ═══
-const INTERSTITIAL_COOLDOWN_MS = 20000;
+// ═══ REKLAM POLİTİKASI — ilk deneyimi reklamla bozma ═══
+// Geçiş (interstitial) reklamı SADECE şu koşulların hepsi sağlanınca:
+//   ★ Pro değil
+//   ★ İlk oturum değil (halisaha_launch_count > 1 — App.js açılışta artırır)
+//   ★ En az 1 kayıtlı maç var (kullanıcı değeri gördü)
+//   ★ Bu oturumda henüz gösterilmedi (oturum başına en fazla 1)
+//   ★ Bir öncekinden en az 3 dk geçti (hızlı kapat-aç'ta da korunur → localStorage)
+// ATT (iOS izin penceresi) de ilk açılışta SORULMAZ → 2. açılışta, reklam SDK'sı
+// başlamadan önce sorulur. Sorulana kadar reklamlar kişiselleştirilmemiş (npa) gelir.
+const INTERSTITIAL_MIN_GAP_MS = 3 * 60 * 1000;
 const REWARDED_COOLDOWN_MS = 20000;
-const MAX_INTERSTITIALS_PER_SESSION = 6;
+const MAX_INTERSTITIALS_PER_SESSION = 1;
 const MAX_REWARDED_PER_SESSION = 10;
+const LAUNCH_COUNT_KEY = 'halisaha_launch_count';
+const LAST_INTERSTITIAL_KEY = 'halisaha_last_interstitial_at';
 
 let lastInterstitialTime = 0;
 let lastRewardedTime = 0;
 let interstitialCount = 0;
 let rewardedCount = 0;
+let bannerTracked = false;             // ★ Analytics: banner oturumda ilk kez görününce 1 olay
+
+// ─── Politika yardımcıları ───
+const readInt = (key) => {
+  try { return parseInt(localStorage.getItem(key) || '0', 10) || 0; } catch { return 0; }
+};
+const getLaunchCount = () => readInt(LAUNCH_COUNT_KEY);
+// launch_count <= 1 → ilk oturum (App.js boot'ta artırır; okunamazsa da ilk oturum say)
+const isFirstSession = () => getLaunchCount() <= 1;
+const savedMatchCount = () => {
+  try { return getAllMatches().length; } catch { return 0; }
+};
+const lastInterstitialAt = () => Math.max(lastInterstitialTime, readInt(LAST_INTERSTITIAL_KEY));
+
+// Geçiş reklamı neden gösterilemez? null → gösterilebilir
+function interstitialBlockReason() {
+  if (isPremium()) return 'premium';
+  if (interstitialCount >= MAX_INTERSTITIALS_PER_SESSION) return 'session_cap';
+  if (isFirstSession()) return 'first_session';
+  if (savedMatchCount() < 1) return 'no_saved_match';
+  const last = lastInterstitialAt();
+  if (last > 0 && Date.now() - last < INTERSTITIAL_MIN_GAP_MS) return 'cooldown';
+  return null;
+}
 
 let isInitialized = false;
 let isBannerShowing = false;
@@ -50,24 +86,43 @@ const isNative = () => Capacitor.isNativePlatform();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ─── ATT (App Tracking Transparency) — Sadece iOS ───
+// ★ İlk açılışta izin penceresi YOK (kullanıcı uygulamayı tanımadan "takip" sorusu
+//   güven kırıyor). 2. açılıştan itibaren, AdMob başlamadan ÖNCE sorulur.
+//   Sorulmadıysa (notDetermined) veya durum okunamadıysa → npa (kişiselleştirilmemiş).
+let attStatus = null; // iOS: 'authorized' | 'denied' | 'restricted' | 'notDetermined' | null
 async function requestATT() {
   if (!isNative() || PLATFORM !== 'ios') return;
 
   try {
     // UI'ın tam render olması ve app'in "active" state'e geçmesi için kısa bekleme
+    // (bu sürede App.js açılış sayacını da artırmış olur)
     await sleep(500);
 
     const trackingInfo = await AdMob.trackingAuthorizationStatus();
-    console.log('ℹ️ ATT mevcut durum:', trackingInfo.status);
+    attStatus = trackingInfo?.status || null;
+    console.log('ℹ️ ATT mevcut durum:', attStatus);
 
-    if (trackingInfo.status === 'notDetermined') {
-      const result = await AdMob.requestTrackingAuthorization();
-      console.log('ℹ️ ATT yeni durum:', result?.status || 'tamamlandı');
+    if (attStatus === 'notDetermined') {
+      if (getLaunchCount() < 2) {
+        console.log('ℹ️ ATT ilk oturumda sorulmuyor — reklamlar kişiselleştirilmemiş');
+        return;
+      }
+      await AdMob.requestTrackingAuthorization();
+      const after = await AdMob.trackingAuthorizationStatus();
+      attStatus = after?.status || attStatus;
+      console.log('ℹ️ ATT yeni durum:', attStatus);
     }
   } catch (e) {
     console.warn('⚠️ ATT hatası:', e);
   }
 }
+
+// Kişiselleştirilmemiş reklam mı? — UMP onayı yoksa veya (iOS) ATT henüz sorulmadıysa
+const wantsNpa = () => {
+  if (!canShowAds) return true;
+  if (PLATFORM === 'ios' && (attStatus === null || attStatus === 'notDetermined')) return true;
+  return false;
+};
 
 // ═══ EVENT LISTENERS ═══
 // ★ KRİTİK: Listener'lar initialize()'dan ÖNCE eklenmeli — Android'de aksi
@@ -97,9 +152,10 @@ function attachAdListeners() {
     setTimeout(() => prepareInterstitial(), 3000);
   });
   AdMob.addListener('onInterstitialAdDismissed', () => {
-    console.log('ℹ️ Interstitial kapatıldı — yenisi hazırlanıyor');
+    console.log('ℹ️ Interstitial kapatıldı');
     isInterstitialReady = false;
     isInterstitialLoading = false;
+    // ★ Oturum kotası dolduysa prepareInterstitial zaten no-op (boşuna istek atılmaz)
     setTimeout(() => prepareInterstitial(), 1000);
   });
 
@@ -208,9 +264,13 @@ export async function showBanner() {
       position: BannerAdPosition.BOTTOM_CENTER,
       margin: 0,
       isTesting: IS_TESTING,
-      npa: !canShowAds,
+      npa: wantsNpa(),
     });
     isBannerShowing = true;
+    if (!bannerTracked) {
+      bannerTracked = true;
+      track(EVENTS.AD_SHOWN, { placement: 'banner', type: 'banner' });
+    }
   } catch (e) {
     console.error('❌ Banner:', e);
     isBannerShowing = false;
@@ -245,6 +305,8 @@ export async function prepareInterstitial() {
   if (!isNative() || !isInitialized) return;
   if (isPremium()) return; // ★ Premium: interstitial hazırlama
   if (isInterstitialReady || isInterstitialLoading) return; // ★ Çift yükleme önleme
+  // ★ Bu oturumda zaten gösterilemeyecekse (ilk oturum / kota doldu) boşuna yükleme
+  if (isFirstSession() || interstitialCount >= MAX_INTERSTITIALS_PER_SESSION) return;
 
   isInterstitialLoading = true;
   console.log('ℹ️ Interstitial hazırlanıyor...');
@@ -252,7 +314,7 @@ export async function prepareInterstitial() {
     await AdMob.prepareInterstitial({
       adId: AD_CONFIG.interstitial,
       isTesting: IS_TESTING,
-      npa: !canShowAds,
+      npa: wantsNpa(),
     });
     // ★ NOT: Bazı plugin versiyonlarında prepareInterstitial Promise resolve
     //    ettiğinde reklam zaten hazırdır ama event tetiklenmez. Bu yüzden
@@ -274,16 +336,16 @@ export async function prepareInterstitial() {
   }
 }
 
-export async function showInterstitial() {
+// placement: reklamın nerede istendiği (analytics için, örn. "match_saved")
+export async function showInterstitial(placement = 'unknown') {
   if (!isNative() || !isInitialized) return false;
-  if (isPremium()) return false; // ★ Premium: interstitial gösterme
 
-  const now = Date.now();
-  if (now - lastInterstitialTime < INTERSTITIAL_COOLDOWN_MS && lastInterstitialTime > 0) {
-    console.log('ℹ️ Interstitial cooldown — atlanıyor');
+  // ★ Politika (Pro, ilk oturum, kayıtlı maç, oturum kotası, 3 dk aralık)
+  const blocked = interstitialBlockReason();
+  if (blocked) {
+    console.log(`ℹ️ Interstitial atlandı (${placement}): ${blocked}`);
     return false;
   }
-  if (interstitialCount >= MAX_INTERSTITIALS_PER_SESSION) return false;
 
   // ★ Hazır değilse: prepare'ı tetikle ve kısa bir süre bekle (Android için kritik)
   if (!isInterstitialReady) {
@@ -303,13 +365,22 @@ export async function showInterstitial() {
     }
   }
 
+  // Bekleme sırasında Pro olunmuş / başka bir çağrı reklamı göstermiş olabilir
+  if (interstitialBlockReason()) return false;
+
   try {
-    await AdMob.showInterstitial();
-    lastInterstitialTime = Date.now();
+    // ★ Sayaçları göstermeden ÖNCE işaretle → eşzamanlı iki çağrı iki reklam açamaz
     interstitialCount++;
+    lastInterstitialTime = Date.now();
+    await AdMob.showInterstitial();
+    try { localStorage.setItem(LAST_INTERSTITIAL_KEY, String(lastInterstitialTime)); } catch {}
     isInterstitialReady = false;
+    track(EVENTS.AD_SHOWN, { placement, type: 'interstitial' });
     return true;
   } catch (e) {
+    // Gösterilemedi → kota/aralık harcanmasın
+    interstitialCount = Math.max(0, interstitialCount - 1);
+    lastInterstitialTime = 0;
     console.error('❌ Interstitial show:', e);
     isInterstitialReady = false;
     setTimeout(() => prepareInterstitial(), 1000);
@@ -328,7 +399,7 @@ export async function prepareRewarded() {
     await AdMob.prepareRewardVideoAd({
       adId: AD_CONFIG.rewarded,
       isTesting: IS_TESTING,
-      npa: !canShowAds,
+      npa: wantsNpa(),
     });
     if (PLATFORM === 'android') {
       setTimeout(() => {
@@ -371,6 +442,7 @@ export async function showRewarded(onReward) {
     lastRewardedTime = Date.now();
     rewardedCount++;
     isRewardedReady = false;
+    track(EVENTS.AD_SHOWN, { placement: 'rewarded', type: 'rewarded' });
     return true;
   } catch (e) {
     console.error('❌ Rewarded show:', e);
@@ -412,5 +484,9 @@ export function getAdStats() {
     isRewardedReady,
     interstitialCount,
     rewardedCount,
+    attStatus,
+    npa: wantsNpa(),
+    launchCount: getLaunchCount(),
+    interstitialBlockedBy: interstitialBlockReason(),
   };
 }

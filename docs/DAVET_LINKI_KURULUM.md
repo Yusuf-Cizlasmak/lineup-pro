@@ -6,7 +6,7 @@ Hedef: Davet linkine dokunan ya da QR kodu okutan kişi,
 ## Nasıl çalışıyor
 
 ```
-Paylaşılan link / QR:  https://<domain>/m/HK-AB12
+Paylaşılan link / QR:  https://davet.halisahakolik.com.tr/m/HK-AB12
         │
         ├─ Uygulama yüklü
         │     iOS Universal Link / Android App Link → uygulama açılır
@@ -14,7 +14,7 @@ Paylaşılan link / QR:  https://<domain>/m/HK-AB12
         │
         └─ Uygulama yüklü değil → Worker davet sayfası (public/_worker.js)
               iPhone  → App Store
-              Android → Google Play
+              Android (Chrome) → sunucu doğrudan uygulamayı açar, yoksa Google Play
               Bilgisayar → maç bilgisi + "Tarayıcıda devam et"
               WhatsApp önizlemesi → saha, takımlar, saat ve kod
 ```
@@ -28,22 +28,34 @@ davet sayfası önce uygulamayı açmayı dener, açılmazsa mağazaya yönlendi
 
 ## 1. Domain'i Cloudflare'e bağla ve davet sayfasını yayınla (ücretsiz)
 
-Davet linkleri `https://halisahakolik.com.tr/m/HK-XXXX` formatında.
+Davet linkleri **alt alan adında**: `https://davet.halisahakolik.com.tr/m/HK-XXXX`.
+Kök domain (`halisahakolik.com.tr`) web sitene ait kalır.
+
+> **Neden alt alan adı?** `halisahakolik.com.tr/m/HK-9DZN` web sitene gitti, çünkü kök
+> domainde zaten web siten var. Cloudflare, var olan bir sitenin domainini Worker'a
+> bağlamaz; istek Worker'a hiç ulaşmaz. Alt alan adı bu çakışmayı ortadan kaldırır.
 
 1. **Cloudflare'e ekle:** dash.cloudflare.com → *Add a domain* → `halisahakolik.com.tr`
-   → **Free** plan. Cloudflare mevcut DNS kayıtlarını tarar; e-posta (MX) kaydın varsa
-   listede olduğundan emin ol.
+   → **Free** plan. Cloudflare mevcut DNS kayıtlarını (web siten, e-posta/MX) tarayıp
+   kopyalar. Listeyi kontrol et; web sitenin ve e-postanın kayıtları orada olmalı.
 2. **Nameserver'ları değiştir:** Cloudflare sana iki adres verir
    (örn. `ada.ns.cloudflare.com`, `bob.ns.cloudflare.com`). Domaini aldığın firmanın
    panelinde (Natro, İsimtescil, Turhost vb.) *DNS / Ad sunucuları* bölümüne bu ikisini yaz,
    eskileri sil. Birkaç dakika–24 saat sürer; Cloudflare'de domain **Active** olunca mail gelir.
-3. **Deploy:**
+   Web siten bu sırada çalışmaya devam eder.
+3. **Deploy** (Android Studio → Terminal, proje ana klasöründe):
    ```bash
    npx wrangler login          # Cloudflare hesabınla giriş (tarayıcı açılır)
    npm run deploy:web          # build + deploy
    ```
-   `wrangler.toml` içindeki `routes` ayarı domaini Worker'a bağlar; DNS kaydı ve SSL
-   sertifikası otomatik oluşur.
+   `wrangler.toml` içindeki `routes` ayarı `davet.halisahakolik.com.tr`'yi Worker'a
+   bağlar; DNS kaydı ve SSL sertifikası otomatik oluşur. Kök domainde açılan eski
+   `/m/...` linkleri de (kök domain kaydı Cloudflare'de turuncu bulutluysa) davet adresine
+   yönlendirilir.
+
+Kontrol (tarayıcıda aç):
+- `https://davet.halisahakolik.com.tr/.well-known/apple-app-site-association` → JSON görünmeli
+- `https://davet.halisahakolik.com.tr/m/HK-TEST?sayfa=1` → davet sayfası görünmeli
 
 Domain değişirse şu üç yeri aynı domain ile güncelle (eski linkler/QR'lar çalışmaz):
 
@@ -52,10 +64,7 @@ Domain değişirse şu üç yeri aynı domain ile güncelle (eski linkler/QR'lar
 | `src/deepLink.js` | `WEB_BASE` |
 | `ios/App/App/App.entitlements` | `applinks:<domain>` |
 | `android/app/src/main/AndroidManifest.xml` | `android:host="<domain>"` |
-
-Kontrol (tarayıcıda aç):
-- `https://<domain>/.well-known/apple-app-site-association` → JSON görünmeli
-- `https://<domain>/m/HK-TEST` → davet sayfası görünmeli
+| `wrangler.toml` | `routes` + `PUBLIC_HOST` |
 
 ## 2. Mağaza bilgilerini gir — `wrangler.toml` → `[vars]`
 
@@ -82,13 +91,22 @@ olmadan açılır ve QR okutunca iOS doğrudan "HaliSahaKolik'te aç" der.
 ## 4. Android App Links
 
 Manifest hazır (`autoVerify`). 2. adımdaki SHA-256 parmak izi yayındayken yeni Android sürümü
-yüklendiğinde Android domaini otomatik doğrular. Kontrol:
+yüklendiğinde Android domaini otomatik doğrular.
+
+**Android Studio'dan yüklediğin test sürümü** debug anahtarıyla imzalanır, Play anahtarıyla
+değil. Onu da doğrulatmak için debug parmak izini ekle:
+Android Studio → sağdaki *Gradle* paneli → `app > Tasks > android > signingReport`
+→ `Variant: debug` altındaki **SHA-256** satırını `ANDROID_SHA256_FINGERPRINTS`'e
+Play parmak iziyle birlikte virgülle ekle → `npm run deploy:web`. Sonra:
 
 ```bash
+adb shell pm verify-app-links --re-verify com.halisahakolik.app
 adb shell pm get-app-links com.halisahakolik.app   # "verified" görmelisin
 ```
 
-Doğrulanmamış olsa bile davet sayfası `intent://` ile uygulamayı açar.
+Doğrulanmamış olsa bile Chrome'da link, sunucunun yönlendirmesiyle uygulamayı açar.
+**Önemli:** Telefondaki uygulama bu sürümden eski ise link uygulamayı açamaz
+(eski sürümde link ayarları yok) — önce yeni sürümü yükle.
 
 ## Test listesi
 

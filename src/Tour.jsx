@@ -26,29 +26,35 @@ export const markMatchEndTourDone = () => {
   try { localStorage.setItem(STORAGE_KEY_MATCH, "1"); } catch {}
 };
 
-// Ana tur — takım kurma akışı + özellik tanıtımı
+// ═══ ANA TUR — 3 adım, doğrudan değere: maç modu → listeyi yapıştır → AI ile böl ═══
 //
-// İlk 6 adım: kullanıcı uygulamayı kullanmayı öğrenir (interaktif, hedef-bazlı)
-// Son 4 adım: özellik tanıtımı (merkezi popup, "Anladım" ile ilerler)
+// Adım alanları:
+//   target   → data-tour hedefi (ilk bulunan kullanılır; alt[] yedek hedefler)
+//   via      → hedef ekranda yoksa önce buraya yönlendir (örn. "Kadro" sekmesi).
+//              via.when[] verilirse via sadece o hedeflerden biri ekrandayken gösterilir.
+//              Her adımda via en fazla 1 kez kullanılır.
+//   waitFor  → "click" (hedefe tıklayınca) | "event:NAME" (window "halisaha:NAME")
+//              | "next" (hedefsiz bilgi kartı, "Anladım" ile)
+//   canNext  → tooltip'te "Sonraki" butonu (kadrosu zaten olan kullanıcı takılmasın)
 //
-// waitFor seçenekleri:
-//   "click"          → hedefe tıklayınca ilerler
-//   "event:NAME"     → window event'i dinler (custom event)
-//   "next"           → kullanıcı "İleri/Anladım" butonuna basınca ilerler (hedefsiz info-step)
+// ★ SAĞLAMLIK:
+//   • Hedef (ve via) ~2 sn içinde DOM'da görünmezse adım sessizce ATLANIR.
+//   • Hedef DOM'da ama üstü kapalıysa (onboarding, sheet, modal açık) tur görünmez
+//     olur ve bekler; üstü açılınca kaldığı yerden devam eder (atlanmaz).
 const STEPS_MAIN = [
-  // ─── İLK 6: İnteraktif rehber (kullanım) ───
-  { target: "mode-myteam",    title: "tour_0_title", desc: "tour_0_desc", placement: "bottom", waitFor: "event:mode-selected" },
-  { target: "tab-squad",      title: "tour_1_title", desc: "tour_1_desc", placement: "top",    waitFor: "click" },
-  { target: "btn-add-player", title: "tour_2_title", desc: "tour_2_desc", placement: "bottom", waitFor: "click" },
-  { target: null,             title: "tour_3_title", desc: "tour_3_desc", placement: "center", waitFor: "event:player-saved" },
-  { target: "tab-field",      title: "tour_4_title", desc: "tour_4_desc", placement: "top",    waitFor: "click" },
-  { target: "empty-slot",     title: "tour_5_title", desc: "tour_5_desc", placement: "bottom", waitFor: "click" },
-  // ─── YENİ 4: Bilgilendirici özellik turu (info-step, merkezi popup) ───
-  { target: null,             title: "tour_6_title",  desc: "tour_6_desc",  placement: "center", waitFor: "next" },
-  { target: null,             title: "tour_7_title",  desc: "tour_7_desc",  placement: "center", waitFor: "next" },
-  { target: null,             title: "tour_8_title",  desc: "tour_8_desc",  placement: "center", waitFor: "next" },
-  { target: null,             title: "tour_9_title",  desc: "tour_9_desc",  placement: "center", waitFor: "next" },
-  { target: null,             title: "tour_10_title", desc: "tour_10_desc", placement: "center", waitFor: "next" },
+  { target: "mode-match", title: "tour_1_title", desc: "tour_1_desc", placement: "bottom", waitFor: "event:mode-selected" },
+  {
+    target: "paste-roster", alt: ["paste-roster-empty"],
+    via: { target: "tab-squad", title: "tour_2_via_title", desc: "tour_2_via_desc", placement: "top" },
+    title: "tour_2_title", desc: "tour_2_desc", placement: "bottom",
+    waitFor: "event:player-saved", canNext: true,
+  },
+  {
+    target: "ai-split",
+    via: { target: "tab-field", title: "tour_3_via_title", desc: "tour_3_via_desc", placement: "top", when: ["paste-roster", "btn-add-player"] },
+    title: "tour_3_title", desc: "tour_3_desc", placement: "bottom",
+    waitFor: "click",
+  },
 ];
 
 // Mini tour — maçı bitir vurgu
@@ -58,64 +64,143 @@ const STEPS_MATCH_END = [
 
 const PAD = 8;
 const DIM = "rgba(0,0,0,0.78)";
+const MISSING_SKIP_MS = 2000;   // hedef bu sürede görünmezse adımı atla
+const POLL_MS = 300;            // hedef/üstü-kapalı kontrolü sıklığı
+
+const q = (id) => (id ? document.querySelector(`[data-tour="${id}"]`) : null);
+const isRendered = (el) => {
+  if (!el) return false;
+  const r = el.getBoundingClientRect();
+  return r.width > 0 && r.height > 0;
+};
+// Hedefin ortasına başka bir katman (onboarding, sheet, modal) biniyor mu?
+// Tur katmanları pointer-events:none olduğu için elementFromPoint onları görmez.
+const isCovered = (el, r) => {
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const cx = Math.min(vw - 1, Math.max(0, r.left + r.width / 2));
+  const cy = Math.min(vh - 1, Math.max(0, r.top + r.height / 2));
+  if (r.bottom < 0 || r.top > vh || r.right < 0 || r.left > vw) return true; // ekran dışında
+  const hit = document.elementFromPoint ? document.elementFromPoint(cx, cy) : el;
+  if (!hit) return true;
+  return !(hit === el || el.contains(hit) || hit.contains(el));
+};
 
 export default function Tour({ active, onFinish, mode = "main" }) {
-  // mode: "main" (takım kurulum) | "matchEnd" (maçı bitir vurgusu)
+  // mode: "main" (3 adımlık kurulum) | "matchEnd" (maçı bitir vurgusu)
   const STEPS = mode === "matchEnd" ? STEPS_MATCH_END : STEPS_MAIN;
   const [stepIdx, setStepIdx] = useState(0);
   const [rect, setRect] = useState(null);
-  const [tick, setTick] = useState(0);
+  const [viaUsed, setViaUsed] = useState(false);
   const targetElRef = useRef(null);
+  const missingSinceRef = useRef(null);
+  const stepIdxRef = useRef(0);
+  stepIdxRef.current = stepIdx;
 
   const step = STEPS[stepIdx];
 
+  const finish = useCallback(() => {
+    if (mode === "matchEnd") {
+      markMatchEndTourDone();
+    } else {
+      markTourDone();
+    }
+    setStepIdx(0);
+    setViaUsed(false);
+    setRect(null);
+    missingSinceRef.current = null;
+    onFinish?.();
+  }, [mode, onFinish]);
+
+  const advance = useCallback(() => {
+    missingSinceRef.current = null;
+    setViaUsed(false);
+    setRect(null);
+    if (stepIdxRef.current >= STEPS.length - 1) {
+      finish();
+    } else {
+      setStepIdx((i) => Math.min(i + 1, STEPS.length - 1));
+    }
+  }, [STEPS.length, finish]);
+
+  // Tur kapanınca bir sonraki açılış temiz başlasın
+  useEffect(() => {
+    if (!active) {
+      setStepIdx(0); setViaUsed(false); setRect(null);
+      missingSinceRef.current = null;
+    }
+  }, [active]);
+
+  // ── Hedef çözümleme: primary → alt → via ──
+  const resolve = useCallback(() => {
+    if (!step || !step.target) return null;
+    for (const id of [step.target, ...(step.alt || [])]) {
+      const el = q(id);
+      if (isRendered(el)) return { el, kind: "primary" };
+    }
+    const via = step.via;
+    if (via && !viaUsed) {
+      const whenOk = !via.when || via.when.some((id) => isRendered(q(id)));
+      const el = q(via.target);
+      if (whenOk && isRendered(el)) return { el, kind: "via" };
+    }
+    return null;
+  }, [step, viaUsed]);
+
   const measure = useCallback(() => {
     if (!step || !step.target) {
+      targetElRef.current = null;
       setRect(null);
-      targetElRef.current = null;
       return;
     }
-    const el = document.querySelector(`[data-tour="${step.target}"]`);
-    if (!el) {
-      setRect({ found: false });
+    const found = resolve();
+    if (!found) {
       targetElRef.current = null;
+      setRect((prev) => (prev && prev.found === false ? prev : { found: false }));
+      // ★ ~2 sn içinde görünmezse adımı atla
+      const now = Date.now();
+      if (missingSinceRef.current == null) missingSinceRef.current = now;
+      else if (now - missingSinceRef.current >= MISSING_SKIP_MS) advance();
       return;
     }
-    targetElRef.current = el;
-    const r = el.getBoundingClientRect();
-    setRect({
+    missingSinceRef.current = null;
+    targetElRef.current = found.el;
+    const r = found.el.getBoundingClientRect();
+    const next = {
       x: r.left, y: r.top, w: r.width, h: r.height,
-      found: true,
-    });
-  }, [step]);
+      found: true, kind: found.kind, covered: isCovered(found.el, r),
+    };
+    setRect((prev) => (
+      prev && prev.found && prev.x === next.x && prev.y === next.y && prev.w === next.w &&
+      prev.h === next.h && prev.kind === next.kind && prev.covered === next.covered
+    ) ? prev : next);
+  }, [step, resolve, advance]);
 
   // Step değişince ilk iş: target ekran içinde mi? Değilse smooth scroll ile getir.
   useEffect(() => {
     if (!active || !step || !step.target) return;
     const tryScroll = () => {
-      const el = document.querySelector(`[data-tour="${step.target}"]`);
-      if (!el) return;
-      const r = el.getBoundingClientRect();
+      const found = resolve();
+      if (!found) return;
+      const r = found.el.getBoundingClientRect();
       const vh = window.innerHeight;
       const margin = 80; // üst/alt nefes payı
       // Sadece görünür alanın dışındaysa kaydır
       if (r.top < margin || r.bottom > vh - margin) {
-        el.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+        found.el.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
       }
     };
     // DOM hazır olana kadar birkaç deneme — ekran/modal geçişleri için
-    const timers = [0, 120, 300].map(ms => setTimeout(tryScroll, ms));
+    const timers = [0, 120, 300, 700].map(ms => setTimeout(tryScroll, ms));
     return () => timers.forEach(clearTimeout);
-  }, [active, stepIdx, step]);
+  }, [active, stepIdx, step, viaUsed, resolve]);
 
-  // Step değişince + DOM güncellemesinden sonra ölç
+  // Sürekli ölçüm — hedef geç gelebilir, üstündeki sheet kapanabilir, 2 sn atlama sayacı
   useEffect(() => {
     if (!active || !step) return;
     measure();
-    const tries = [100, 400, 800, 1500]; // ← önceden [50, 200, 450, 800
-    const timers = tries.map((ms) => setTimeout(measure, ms));
-    return () => timers.forEach(clearTimeout);
-  }, [active, step, tick, measure]);
+    const iv = setInterval(measure, POLL_MS);
+    return () => clearInterval(iv);
+  }, [active, step, measure]);
 
   // Resize / scroll
   useEffect(() => {
@@ -130,56 +215,63 @@ export default function Tour({ active, onFinish, mode = "main" }) {
   }, [active, measure]);
 
   // Hedefe click dinleme — capture phase
+  //   via → yönlendirme hedefi tıklandı: via harcandı, asıl hedef aranır
+  //   primary + waitFor "click" → ilerle
+  const rectKind = rect?.found ? rect.kind : null;
   useEffect(() => {
-    if (!active || !step || step.waitFor !== "click") return;
+    if (!active || !step || !rectKind) return;
     const el = targetElRef.current;
     if (!el) return;
+    const isVia = rectKind === "via";
+    if (!isVia && step.waitFor !== "click") return;
     let fired = false;
     const handler = () => {
       if (fired) return;
       fired = true;
-      setTimeout(() => advance(), 350);
+      if (isVia) {
+        setTimeout(() => { missingSinceRef.current = null; setViaUsed(true); }, 250);
+      } else {
+        setTimeout(() => advance(), 350);
+      }
     };
     el.addEventListener("click", handler, true);
     return () => el.removeEventListener("click", handler, true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, stepIdx, rect]);
+  }, [active, stepIdx, step, rectKind, rect, advance]);
 
-  // Window event'i (event:NAME)
+  // Window event'i (event:NAME) — via gösterilirken de geçerli
   useEffect(() => {
     if (!active || !step || !step.waitFor?.startsWith("event:")) return;
     const evtName = step.waitFor.slice("event:".length);
     const handler = () => advance();
     window.addEventListener(`halisaha:${evtName}`, handler);
     return () => window.removeEventListener(`halisaha:${evtName}`, handler);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, stepIdx]);
+  }, [active, stepIdx, step, advance]);
 
-  const advance = () => {
-    if (stepIdx >= STEPS.length - 1) {
-      finish();
-    } else {
-      setStepIdx((i) => i + 1);
-      setTick((x) => x + 1);
-    }
-  };
-
-  const finish = () => {
-    if (mode === "matchEnd") {
-      markMatchEndTourDone();
-    } else {
-      markTourDone();
-    }
-    setStepIdx(0);
-    onFinish?.();
-  };
+  // ★ Kullanıcı başka yoldan AI dağıtımına ulaştıysa (örnek kadro, bildirim) tur amacına ulaştı
+  useEffect(() => {
+    if (!active || mode !== "main") return;
+    const onNav = (e) => {
+      if (e?.detail?.route === "ai_split" && stepIdxRef.current >= 1) finish();
+    };
+    window.addEventListener("halisaha:navigate", onNav);
+    return () => window.removeEventListener("halisaha:navigate", onNav);
+  }, [active, mode, finish]);
 
   if (!active || !step) return null;
+
+  // Hedefli adımda hedef henüz yok / üstü kapalı → görünmez bekle (uygulama tamamen kullanılabilir)
+  if (step.target && (!rect || !rect.found || rect.covered)) return null;
+
+  // Gösterilen içerik: via aktifse yönlendirme metni, değilse adımın kendisi
+  const showingVia = rect?.found && rect.kind === "via" && step.via;
+  const view = showingVia
+    ? { ...step, title: step.via.title, desc: step.via.desc, placement: step.via.placement || step.placement, canNext: false }
+    : step;
 
   const vw = typeof window !== "undefined" ? window.innerWidth : 360;
   const vh = typeof window !== "undefined" ? window.innerHeight : 640;
 
-  const hole = step.target && rect?.found ? {
+  const hole = view.target && rect?.found ? {
     x: Math.max(0, rect.x - PAD),
     y: Math.max(0, rect.y - PAD),
     w: Math.min(vw, rect.w + PAD * 2),
@@ -189,8 +281,8 @@ export default function Tour({ active, onFinish, mode = "main" }) {
   // ★ Center step'ler iki farklı tipte:
   //   - Form modal'ı açık olan (waitFor: "event:player-saved") → banner görünümü, modal'ı kapatma
   //   - Bilgilendirici info step (waitFor: "next") → büyük kart, karartılmış arkaplan, "Anladım" butonu
-  const isCenterStep = !hole && step.placement === "center";
-  const isInfoStep   = isCenterStep && step.waitFor === "next";
+  const isCenterStep = !hole && view.placement === "center";
+  const isInfoStep   = isCenterStep && view.waitFor === "next";
 
   // 4-panel cutout — hole çevresini karart, içi dokunulmaz
   const panels = hole ? [
@@ -220,7 +312,11 @@ export default function Tour({ active, onFinish, mode = "main" }) {
     };
   } else if (!hole) {
     tipStyle = { top: "50%", left: "50%", transform: "translate(-50%, -50%)", width: TIP_W };
-  } else if (step.placement === "top") {
+  } else if (
+    // ★ Otomatik yön: istenen tarafta yer yoksa (~170px) karşı tarafa aç
+    (view.placement === "top" && hole.y - 182 >= 0) ||
+    (view.placement !== "top" && hole.y + hole.h + 182 > vh && hole.y - 182 >= 0)
+  ) {
     tipStyle = {
       bottom: vh - hole.y + 12,
       left: Math.max(16, Math.min(vw - TIP_W - 16, hole.x + hole.w / 2 - TIP_W / 2)),
@@ -471,7 +567,7 @@ export default function Tour({ active, onFinish, mode = "main" }) {
               backgroundClip: "text",
               WebkitTextFillColor: "transparent",
             }}>
-              {t(step.title)}
+              {t(view.title)}
             </div>
 
             {/* Açıklama */}
@@ -480,7 +576,7 @@ export default function Tour({ active, onFinish, mode = "main" }) {
               color: "rgba(255,255,255,0.72)",
               marginBottom: 18,
             }}>
-              {t(step.desc)}
+              {t(view.desc)}
             </div>
 
             {/* CTA — Shimmer overlay'li gradient */}
@@ -527,10 +623,10 @@ export default function Tour({ active, onFinish, mode = "main" }) {
             }}>💡</div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 12.5, fontWeight: 700, color: "#34d399", marginBottom: 2 }}>
-                {t(step.title)}
+                {t(view.title)}
               </div>
               <div style={{ fontSize: 11.5, lineHeight: 1.4, color: "rgba(255,255,255,0.7)" }}>
-                {t(step.desc)}
+                {t(view.desc)}
               </div>
             </div>
             <button
@@ -565,20 +661,39 @@ export default function Tour({ active, onFinish, mode = "main" }) {
               }}>
                 {String(stepIdx + 1).padStart(2, "0")} / {String(STEPS.length).padStart(2, "0")}
               </div>
-              <button
-                onClick={finish}
-                style={{
-                  border: "none", background: "rgba(255,255,255,0.05)",
-                  color: "rgba(255,255,255,0.55)",
-                  fontSize: 10.5, fontWeight: 600,
-                  cursor: "pointer",
-                  padding: "3px 9px",
-                  borderRadius: 5,
-                  fontFamily: "inherit",
-                }}
-              >
-                {t("tour_skip")}
-              </button>
+              <div style={{ display: "flex", gap: 6 }}>
+                {/* ★ Kadrosu zaten olan kullanıcı bu adımda takılmasın */}
+                {view.canNext && (
+                  <button
+                    onClick={() => advance()}
+                    style={{
+                      border: "1px solid rgba(52,211,153,0.35)", background: "rgba(52,211,153,0.10)",
+                      color: "#34d399",
+                      fontSize: 10.5, fontWeight: 700,
+                      cursor: "pointer",
+                      padding: "3px 9px",
+                      borderRadius: 5,
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    {t("tour_next")} →
+                  </button>
+                )}
+                <button
+                  onClick={finish}
+                  style={{
+                    border: "none", background: "rgba(255,255,255,0.05)",
+                    color: "rgba(255,255,255,0.55)",
+                    fontSize: 10.5, fontWeight: 600,
+                    cursor: "pointer",
+                    padding: "3px 9px",
+                    borderRadius: 5,
+                    fontFamily: "inherit",
+                  }}
+                >
+                  {t("tour_skip")}
+                </button>
+              </div>
             </div>
 
             <div style={{
@@ -589,13 +704,13 @@ export default function Tour({ active, onFinish, mode = "main" }) {
               backgroundClip: "text",
               WebkitTextFillColor: "transparent",
             }}>
-              {t(step.title)}
+              {t(view.title)}
             </div>
             <div style={{
               fontSize: 12.5, lineHeight: 1.55,
               color: "rgba(255,255,255,0.72)",
             }}>
-              {t(step.desc)}
+              {t(view.desc)}
             </div>
 
             {/* Yatay progress mini */}

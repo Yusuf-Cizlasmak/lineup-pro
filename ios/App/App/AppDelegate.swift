@@ -46,4 +46,26 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         return ApplicationDelegateProxy.shared.application(application, continue: userActivity, restorationHandler: restorationHandler)
     }
 
+    // ═══ UZAK BİLDİRİM (push) — @capacitor-firebase/messaging için köprü ═══
+    // APNs token'ı / hata / arka plan bildirimi Capacitor'a iletilir; eklenti
+    // bunu Firebase'e verip FCM token'ı üretir. Firebase'i (FirebaseApp.configure)
+    // eklentinin kendisi, GoogleService-Info.plist bundle'daysa yapılandırır —
+    // bu yüzden burada Firebase import EDİLMEZ (eklenti yoksa da derlenir).
+    // Eklenti/izin yoksa bu metodlar zararsızdır (dinleyen olmayan bildirim).
+
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        NotificationCenter.default.post(name: .capacitorDidRegisterForRemoteNotifications, object: deviceToken)
+    }
+
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        NotificationCenter.default.post(name: .capacitorDidFailToRegisterForRemoteNotifications, object: error)
+    }
+
+    func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any], fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+        NotificationCenter.default.post(name: Notification.Name.init("didReceiveRemoteNotification"), object: completionHandler, userInfo: userInfo)
+        // Eklenti completionHandler'ı çağırmıyor → iOS'un arka plan süresini
+        // kısmaması için biz kapatıyoruz (veri işleme JS tarafında anlık).
+        completionHandler(.newData)
+    }
+
 }

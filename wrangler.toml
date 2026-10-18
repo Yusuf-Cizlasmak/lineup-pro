@@ -1,15 +1,21 @@
 # Davet linki sunucusu + web app (Cloudflare Workers)
-# Deploy: npm run deploy:web   → https://halisahakolik.com.tr
+# Deploy: npm run deploy:web   → https://davet.halisahakolik.com.tr
 # Kurulum adımları: docs/DAVET_LINKI_KURULUM.md
 name = "halisaha-kolik"
 main = "build/_worker.js"
 compatibility_date = "2024-12-01"
 
-# Kalıcı domain. Deploy'dan ÖNCE domain'in DNS'i Cloudflare'de "Active" olmalı
-# (aksi halde wrangler "Could not find zone" hatası verir).
+# Davet linkleri ALT ALAN ADINDA: kök domain (halisahakolik.com.tr) web sitene ait
+# kalır. Deploy'dan ÖNCE domain'in DNS'i Cloudflare'de "Active" olmalı (aksi halde
+# wrangler "Could not find zone" der). DNS kaydını wrangler kendisi oluşturur.
 # Domain değişirse: src/deepLink.js WEB_BASE + ios App.entitlements + AndroidManifest host
+#
+# 2. satır: kök domainde açılan eski /m/ linklerini davet alt alan adına yönlendirir.
+# Sadece kök domainin DNS kaydı Cloudflare'de "Proxied" (turuncu bulut) ise çalışır;
+# değilse zararsızdır, web sitene dokunmaz.
 routes = [
-  { pattern = "halisahakolik.com.tr", custom_domain = true },
+  { pattern = "davet.halisahakolik.com.tr", custom_domain = true },
+  { pattern = "halisahakolik.com.tr/m/*", zone_name = "halisahakolik.com.tr" },
 ]
 # *.workers.dev adresi yedek olarak açık kalsın
 workers_dev = true
@@ -32,5 +38,7 @@ IOS_UNIVERSAL_LINKS = "false"
 ANDROID_SHA256_FINGERPRINTS = ""
 # Davet sayfasında maç bilgisini (saha, takımlar, saat) göstermek için.
 # Anon key zaten uygulama içinde herkese açık (src/LiveMatchService.js) — gizli değildir.
+# Davet linklerinin asıl adresi — başka host'tan gelen /m/ istekleri buraya yönlendirilir
+PUBLIC_HOST = "davet.halisahakolik.com.tr"
 SUPABASE_URL = "https://mzryetwernvtqrvbhcxp.supabase.co"
 SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im16cnlldHdlcm52dHFydmJoY3hwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc5MDM4ODcsImV4cCI6MjA5MzQ3OTg4N30.Y1rkPk-9DlmjdoBZcwqF843ZB1DGcotZbHJEgv0hnDk"

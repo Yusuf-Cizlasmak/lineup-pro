@@ -20,6 +20,7 @@ import {
   getEffectiveRating,
   isGoalkeeper,
 } from "./playerAttributes";
+import { isPresent } from "./roster";
 
 // ═══ Bir oyuncunun "etkin gücü" ═══
 // Öncelik: attributes → overall. Yoksa rating. Form verisi varsa eklenir.
@@ -176,8 +177,9 @@ function refineSwaps(state, formByPlayerId) {
 //   formByPlayerId : { [playerId]: formDelta }  — opsiyonel, varsa etkin güç kullanılır
 //   seed           : number                     — "Karıştır" için (her çağrı farklı)
 //   restarts       : number                     — random restart sayısı (default 12)
+// ★ Bu hafta gelmeyen (p.absent) oyuncular otomatik olarak dışarıda bırakılır.
 export function buildBalancedTeams(players, options = {}) {
-  const list = (players || []).filter(Boolean);
+  const list = (players || []).filter(isPresent);
   if (list.length < 2) {
     return { teamA: list, teamB: [], ratingA: 0, ratingB: 0, diff: 0, balance: 100, error: "min_2_players" };
   }

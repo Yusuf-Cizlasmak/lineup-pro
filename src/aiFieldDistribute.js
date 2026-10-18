@@ -14,6 +14,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { buildBalancedTeams, playerStrength } from "./teamBalancer";
+import { isPresent } from "./roster";
 
 const M = {
   natural:     (penalty = 0)  => ({ tier: "natural", penalty }),
@@ -206,11 +207,17 @@ function dedup(players) {
   return out;
 }
 
+// ★ Sadece bu hafta GELEN oyuncular dağıtılır (p.absent === true olanlar havuz dışı).
+//   Gelmeyenler kendi takımlarında kalır → absentA / absentB olarak döner,
+//   uygulama tarafı (applyFieldDistribution) kadroya geri ekler.
 export function distributeToField({
   teamA, teamB, positionsA, positionsB, formByPlayerId = null, seed = Math.random(),
 }) {
-  const pool = dedup([...(teamA?.players || []), ...(teamB?.players || [])]);
-  if (pool.length < 2) return { error: "min_2_players", pool };
+  const all = dedup([...(teamA?.players || []), ...(teamB?.players || [])]);
+  const pool = all.filter(isPresent);
+  const absentA = (teamA?.players || []).filter((p) => p && !isPresent(p));
+  const absentB = (teamB?.players || []).filter((p) => p && !isPresent(p) && !absentA.some((x) => x.id === p.id));
+  if (pool.length < 2) return { error: "min_2_players", pool, absentCount: absentA.length + absentB.length };
 
   const balanced = buildBalancedTeams(pool, { formByPlayerId, seed });
 
@@ -228,6 +235,7 @@ export function distributeToField({
          captain: B.captain, lineup: B.lineup, bench: B.bench, rating: B.rating,
          outOfPos: B.outOfPos, emergencyGK: B.emergencyGK },
     balance, diff, poolSize: pool.length,
+    absentA, absentB, absentCount: absentA.length + absentB.length,
     totalOutOfPos: A.outOfPos + B.outOfPos,
     hasEmergencyGK: A.emergencyGK || B.emergencyGK,
   };

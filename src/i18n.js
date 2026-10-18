@@ -8,36 +8,18 @@ const STORAGE_KEY = "halisaha_lang";
 
 const DICT = {
   tr: {
-    // Onboarding
-    tour_0_title: "Hadi Başlayalım",
-    tour_0_desc: "Önce bir mod seç. \"Kendi Takımım\" seçeneğine dokunarak devam et.",
+    // Onboarding — ★ 3 odaklı adım: hızlı kadro → adil takım → haftalık döngü
     onb_skip: "Atla",
     onb_next: "İleri",
-    onb_start: "Hadi Başlayalım",
-    // ─── 8 STEP — daha bilgilendirici ───
-    onb_1_title: "HalıSaha-Kolik'e Hoş Geldin",
-    onb_1_desc: "Halı saha maçlarını profesyonelce yönet — kadro kur, taktiğini belirle, golleri kaydet, istatistikleri analiz et. Tek tıkla arkadaşlarınla paylaş.",
+    onb_start: "Ekibimi Kuralım",
+    onb_1_title: "Ekibini 1 dakikada kur",
+    onb_1_desc: "WhatsApp grubundaki maç listesini kopyala, uygulamaya yapıştır — herkes tek seferde kadroya eklenir. Tek tek isim yazmak yok.",
 
-    onb_2_title: "İki Mod, Tek Uygulama",
-    onb_2_desc: "Sadece kendi takımını yönetmek istersen \"Kendi Takımım\" modunu, iki takımı birden kontrol edip maç yapmak istersen \"Tüm Halı Saha\" modunu seç.",
+    onb_2_title: "Adil takımlar, kavga yok",
+    onb_2_desc: "Bu hafta kim geliyorsa işaretle; AI sadece gelenlerden güç dengeli iki takım kursun. \"Yine iyiler bir tarafta\" tartışması biter.",
 
-    onb_3_title: "Detaylı Oyuncu Profilleri",
-    onb_3_desc: "Her oyuncunun fotoğrafı, forma numarası, mevkisi ve 0–99 arası güç puanı olur. Pas, şut, hız, defans gibi 6 ayrı yetenek değerini spider chart üzerinden görsel olarak ayarla.",
-
-    onb_4_title: "7 Formasyon · Sürükle-Bırak",
-    onb_4_desc: "1-2-3-1, 2-3-1, 3-2-1 gibi 7 farklı dizilişten seç. Oyuncuları parmağınla sürükleyerek istediğin pozisyona yerleştir veya \"Otomatik Kadro\" ile saniyeler içinde dizilim kur.",
-
-    onb_5_title: "Maçı Yönet · Gol & Asist Kaydet",
-    onb_5_desc: "Maç bitince tap-to-score ekranında dakikalı gol kaydı yap, asistleri ekle, kart ve MVP işaretle. Hat-trick efektleri ve kupa animasyonu ile keyifli kullanım.",
-
-    onb_6_title: "İstatistik & Form Takibi",
-    onb_6_desc: "Her oyuncunun maç sayısı, gol/asist ortalaması, kazanma oranı ve son 5 maçtaki form durumu (🔥 alev alev / ❄️ buz gibi) otomatik hesaplanır. FIFA-tarzı kart görünümünde profilini incele.",
-
-    onb_7_title: "Krallık Tabloları & Geçmiş",
-    onb_7_desc: "Tüm maçlarının geçmişi, gol kralı, asist kralı, MVP listesi ve clean-sheet sıralaması saklanır. Hangi oyuncun kaç maçta kaç gol attığını anında gör.",
-
-    onb_8_title: "Tek Tıkla Paylaş",
-    onb_8_desc: "Hazırladığın diziliş veya maç sonucunu görsel olarak yakala, WhatsApp/Instagram üzerinden arkadaşlarınla paylaş. Hadi, ilk takımını kuralım!",
+    onb_3_title: "Gol krallığı ve MVP her hafta",
+    onb_3_desc: "Haftalık maç saatini bir kez kaydet, hatırlatmayı biz yapalım. Skoru gir, MVP'yi seç — gol krallığı ve form tablosu her hafta kendiliğinden güncellensin.",
     // Rate prompt
     rate_title: "Uygulamayı Beğendin mi?",
     rate_desc: "Eğer HalıSaha-Kolik'i beğendiysen 5 yıldızla değerlendirir misin? Bu bizim için çok değerli.",
@@ -128,11 +110,12 @@ const DICT = {
     ok: "Tamam",
     // Premium
     premium_title: "HalıSaha-Kolik Premium",
-    premium_sub: "Tüm reklamları kaldır, kesintisiz deneyim",
-    premium_f1: "Banner ve geçiş reklamları yok",
-    premium_f2: "Sınırsız otomatik kadro",
-    premium_f3: "Tek seferlik ödeme, ömür boyu",
-    premium_f4: "Geliştiriciye destek ol ❤️",
+    // ★ Dürüst Pro listesi — PaywallScreen PRO_FEATURES ile aynı
+    premium_sub: "Reklamsız · Sınırsız oda kurma · Tüm maç geçmişi · Logosuz paylaşım",
+    premium_f1: "Reklamsız",
+    premium_f2: "Sınırsız online oda kurma",
+    premium_f3: "Tüm maç geçmişi",
+    premium_f4: "Paylaşımlarda logo/alt bilgi yok",
     premium_buy: "Premium'a Geç",
     premium_restore: "Satın Alımı Geri Yükle",
     premium_active: "Premium Aktif ✓",
@@ -159,7 +142,7 @@ const DICT = {
     // Settings menu (yeni eklenen)
     settings_title: "Ayarlar",
     settings_show_intro: "Tanıtımı tekrar göster",
-    settings_show_intro_sub: "5 adımlık karşılama ekranını yeniden aç",
+    settings_show_intro_sub: "3 adımlık karşılama ekranını yeniden aç",
     settings_haptics: "Titreşim geri bildirimi",
     settings_haptics_sub: "Buton ve sürükleme anında hafif titreşim",
     settings_lang: "Dil",
@@ -174,31 +157,21 @@ const DICT = {
     tour_finish: "Tamamla",
     tour_got_it: "Anladım",
     tour_step_label: "Adım {current} / {total}",
-    // ─── Mevcut adımlar (daha bilgilendirici) ───
-    tour_1_title: "📋 Kadroya Geç",
-    tour_1_desc: "Önce oyuncularını ekleyelim. Aşağıdaki \"Kadro\" sekmesine dokun.",
-    tour_2_title: "➕ Oyuncu Ekle",
-    tour_2_desc: "İlk oyuncunu eklemek için sağ üstteki + butonuna dokun. İstediğin kadar oyuncu ekleyebilirsin.",
-    tour_3_title: "✏️ Profili Doldur",
-    tour_3_desc: "Ad, soyad, mevki ve güç değerini gir. İstersen forma numarası da seç. Yetenekler bölümünden 6 ayrı yeteneği spider chart üzerinden de düzenleyebilirsin.",
-    tour_4_title: "⚽ Sahaya Geç",
-    tour_4_desc: "Harika! Oyuncuyu kaydettin. Şimdi sahaya yerleştirelim — \"Saha\" sekmesine dön.",
-    tour_5_title: "🎯 Pozisyona Dokun",
-    tour_5_desc: "Boş bir pozisyona dokun ve oyuncunu seç. Listeden sürükle-bırak da yapabilirsin. Yerleştirilen oyuncuyu uzun basıp başka pozisyona taşıyabilirsin.",
-    // ─── ★ YENİ adımlar — özellik tanıtımı ───
-    tour_6_title: "🔄 Formasyonu Değiştir",
-    tour_6_desc: "Üstteki formasyon adına dokunarak 7 farklı diziliş arasında geçiş yapabilirsin: 1-2-3-1, 2-3-1, 3-2-1 gibi. Diziliş değişince oyuncular yeni pozisyonlara otomatik kaydırılır.",
-    tour_7_title: "⚡ Otomatik Kadro",
-    tour_7_desc: "\"Otomatik Kadro\" butonuna dokunarak en yüksek puanlı oyuncularını ideal pozisyonlara saniyeler içinde yerleştir. Manuel düzenlemen istediğin gibi serbest.",
-    tour_8_title: "🎖️ Kaptan & Transfer",
-    tour_8_desc: "Kadro listesinde her oyuncunun yanındaki butonlardan kaptan atayabilir, istatistik profilini açabilir, transfer ile başka takıma gönderebilir, düzenleyebilir veya silebilirsin.",
-    tour_9_title: "📤 Paylaş",
-    tour_9_desc: "Hazırladığın dizilim hazır olunca üstteki paylaş butonuna dokunarak görsel olarak yakalayıp WhatsApp veya Instagram üzerinden arkadaşlarınla paylaşabilirsin.",
-    tour_10_title: "🏁 Hazırsın!",
-    tour_10_desc: "Artık her şeyi biliyorsun. Maç bittiğinde sağ üstteki \"Maçı Bitir\" butonuna dokunarak gol, asist ve MVP kaydedebilirsin. İyi maçlar! ⚽",
+    tour_next: "Sonraki",
+    // ─── ★ 3 adım — değere giden en kısa yol ───
+    tour_1_title: "⚽ Tüm Halı Saha",
+    tour_1_desc: "Haftalık maçınız burada: iki takım, skor, MVP. Başlamak için dokun.",
+    tour_2_title: "📋 Listeyi Yapıştır",
+    tour_2_desc: "WhatsApp'taki maç listesini kopyala, buraya yapıştır — herkes saniyeler içinde kadroya eklenir.",
+    tour_2_via_title: "📋 Önce Kadro",
+    tour_2_via_desc: "Oyuncuları eklemek için alttaki \"Kadro\" sekmesine dokun.",
+    tour_3_title: "🤖 Adil Takımlar",
+    tour_3_desc: "Gelenlerden güç dengeli iki takımı AI kursun. Dokun ve dene!",
+    tour_3_via_title: "⚽ Sahaya Dön",
+    tour_3_via_desc: "Takımları bölmek için alttaki \"Saha\" sekmesine dokun.",
 
     settings_show_tour: "Rehber turu yeniden başlat",
-    settings_show_tour_sub: "Oyuncu ekleme adımlarını tekrar göster",
+    settings_show_tour_sub: "Mod seç → listeyi yapıştır → AI ile böl",
 
     // ═══ MAÇ GEÇMİŞİ + İSTATİSTİKLER ═══
     // Mod seçim — 3. kart
@@ -408,35 +381,18 @@ const DICT = {
     pc_btn_delete: "Kaldır",
   },
   en: {
-    tour_0_title: "Let's Get Started",
-    tour_0_desc: "First, pick a mode. Tap \"My Team\" to continue.",
+    // Onboarding — ★ 3 focused steps
     onb_skip: "Skip",
     onb_next: "Next",
-    onb_start: "Let's Start",
-    // ─── 8 STEP — more informative ───
-    onb_1_title: "Welcome to HalıSaha-Kolik",
-    onb_1_desc: "Manage your 7-a-side football matches like a pro — build squads, set tactics, log goals, analyze stats. Share with friends in one tap.",
+    onb_start: "Set Up My Squad",
+    onb_1_title: "Set up your squad in 1 minute",
+    onb_1_desc: "Copy the match list from your WhatsApp group and paste it — everyone is added at once. No typing names one by one.",
 
-    onb_2_title: "Two Modes, One App",
-    onb_2_desc: "Pick \"My Team\" if you want to manage just your own squad, or \"Full Pitch\" to control both teams head-to-head in match mode.",
+    onb_2_title: "Fair teams, no arguments",
+    onb_2_desc: "Mark who's coming this week; AI builds two balanced teams from the attendees only. No more \"the good ones are all on one side\".",
 
-    onb_3_title: "Detailed Player Profiles",
-    onb_3_desc: "Every player has a photo, jersey number, position, and a 0–99 rating. Tune 6 separate skills (Passing, Shooting, Pace, Defense and more) visually using the spider chart.",
-
-    onb_4_title: "7 Formations · Drag & Drop",
-    onb_4_desc: "Pick from 7 different lineups like 1-2-3-1, 2-3-1, 3-2-1. Drag players to any spot, or use \"Auto Lineup\" to fill the pitch in seconds.",
-
-    onb_5_title: "Run the Match · Goals & Assists",
-    onb_5_desc: "When the match ends, log goals minute-by-minute with tap-to-score, add assists, mark cards and MVP. Hat-trick effects and trophy animations make it fun.",
-
-    onb_6_title: "Stats & Form Tracking",
-    onb_6_desc: "Every player's match count, goal/assist averages, win rate and form across the last 5 games (🔥 on fire / ❄️ freezing) is auto-computed. Browse FIFA-style profile cards.",
-
-    onb_7_title: "Leaderboards & History",
-    onb_7_desc: "Your full match history, top scorers, top assisters, MVP rankings and clean sheets are all saved. See who scored what, in which match, instantly.",
-
-    onb_8_title: "Share with One Tap",
-    onb_8_desc: "Capture your lineup or match result as an image and share via WhatsApp, Instagram, anywhere. Let's go — build your first squad!",
+    onb_3_title: "Top scorers & MVP every week",
+    onb_3_desc: "Save your weekly match slot once and we'll remind you. Enter the score, pick the MVP — the top-scorer and form tables update every week.",
     rate_title: "Enjoying the App?",
     rate_desc: "If you like HalıSaha-Kolik, would you mind giving us a 5-star rating? It means the world to us.",
     rate_yes: "Rate 5 Stars ⭐",
@@ -513,11 +469,11 @@ const DICT = {
     team_color: "Kit Color",
     ok: "OK",
     premium_title: "HalıSaha-Kolik Premium",
-    premium_sub: "Remove all ads, enjoy seamlessly",
-    premium_f1: "No banner or interstitial ads",
-    premium_f2: "Unlimited auto-fill",
-    premium_f3: "One-time payment, lifetime",
-    premium_f4: "Support the developer ❤️",
+    premium_sub: "No ads · Unlimited room creation · Full match history · Unbranded shares",
+    premium_f1: "No ads",
+    premium_f2: "Unlimited online room creation",
+    premium_f3: "Full match history",
+    premium_f4: "No logo/footer on shares",
     premium_buy: "Go Premium",
     premium_restore: "Restore Purchase",
     premium_active: "Premium Active ✓",
@@ -543,7 +499,7 @@ const DICT = {
     // Settings menu
     settings_title: "Settings",
     settings_show_intro: "Replay intro",
-    settings_show_intro_sub: "Open the 5-step welcome again",
+    settings_show_intro_sub: "Open the 3-step welcome again",
     settings_haptics: "Haptic feedback",
     settings_haptics_sub: "Subtle vibration on taps and drags",
     settings_lang: "Language",
@@ -558,31 +514,21 @@ const DICT = {
     tour_finish: "Finish",
     tour_got_it: "Got it",
     tour_step_label: "Step {current} of {total}",
-    // ─── Existing steps (more informative) ───
-    tour_1_title: "📋 Go to Squad",
-    tour_1_desc: "Let's add players first. Tap the \"Squad\" tab at the bottom.",
-    tour_2_title: "➕ Add Player",
-    tour_2_desc: "Tap the + button at the top right to add your first player. Add as many as you want.",
-    tour_3_title: "✏️ Fill Profile",
-    tour_3_desc: "Enter name, surname, position and rating. Optionally pick a jersey number. From the Attributes section you can also tune 6 separate skills using the spider chart.",
-    tour_4_title: "⚽ Go to Pitch",
-    tour_4_desc: "Great! Player saved. Now let's place them on the pitch — switch back to the \"Pitch\" tab.",
-    tour_5_title: "🎯 Tap a Slot",
-    tour_5_desc: "Tap any empty slot and pick a player. Or drag-and-drop from the list. You can long-press a placed player to move them to another slot.",
-    // ─── ★ NEW steps — feature highlights ───
-    tour_6_title: "🔄 Change Formation",
-    tour_6_desc: "Tap the formation name at the top to switch between 7 different lineups: 1-2-3-1, 2-3-1, 3-2-1, etc. Players are automatically repositioned when you change formation.",
-    tour_7_title: "⚡ Auto Lineup",
-    tour_7_desc: "Tap \"Auto Lineup\" to instantly fill the pitch with your top-rated players in their ideal positions. You can still tweak everything manually afterwards.",
-    tour_8_title: "🎖️ Captain & Transfer",
-    tour_8_desc: "From the squad list, each player has buttons to: assign captain, view their stats profile, transfer them to the other team, edit their info, or remove them.",
-    tour_9_title: "📤 Share",
-    tour_9_desc: "Once your lineup is ready, tap the share button at the top to capture it as an image and share via WhatsApp, Instagram, or any app.",
-    tour_10_title: "🏁 You're Ready!",
-    tour_10_desc: "You know it all now. When the match ends, tap \"End Match\" at the top right to log goals, assists and MVP. Have a great match! ⚽",
+    tour_next: "Next",
+    // ─── ★ 3 steps — shortest path to value ───
+    tour_1_title: "⚽ Full Match",
+    tour_1_desc: "Your weekly match lives here: two teams, score, MVP. Tap to start.",
+    tour_2_title: "📋 Paste the List",
+    tour_2_desc: "Copy the match list from WhatsApp and paste it here — everyone joins the squad in seconds.",
+    tour_2_via_title: "📋 Squad First",
+    tour_2_via_desc: "Tap the \"Squad\" tab at the bottom to add players.",
+    tour_3_title: "🤖 Fair Teams",
+    tour_3_desc: "Let AI build two balanced teams from who's coming. Tap to try!",
+    tour_3_via_title: "⚽ Back to Pitch",
+    tour_3_via_desc: "Tap the \"Pitch\" tab at the bottom to split the teams.",
 
     settings_show_tour: "Restart tour guide",
-    settings_show_tour_sub: "Replay the player-adding walkthrough",
+    settings_show_tour_sub: "Pick mode → paste list → split with AI",
 
     // ═══ MATCH HISTORY + STATS ═══
     mode_history_title: "Match History",

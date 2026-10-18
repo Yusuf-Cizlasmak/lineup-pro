@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import logo from "./ssssss.png";
-import { startAds, showInterstitial, showRewarded, showBanner, hideBanner } from "./admob";
+// ★ Interstitial/rewarded artık bu dosyada yok (tek interstitial: MatchResultModal, maç kaydı sonrası)
+import { startAds, showBanner, hideBanner } from "./admob";
 import { t, useLang, setLang, tPos } from "./i18n";
 import { LangToggle } from "./Onboarding";
 import { hapticLight, hapticMedium, hapticHeavy, hapticSuccess, hapticWarning, hapticSelection, isHapticsEnabled, setHapticsEnabled } from "./haptics";
@@ -36,13 +37,36 @@ import TeamBalancerAI from "./TeamBalancerAI";
 import AIFieldDistribution from "./AIFieldDistribution";
 import AIModeSheet from "./AIModeSheet";
 import { compatOf, TIER_LABEL } from "./aiFieldDistribute";
+// ★ Kadro: yapıştır/katılım/misafir/örnek (A1)
+import PasteRosterSheet, {
+  StrengthPicker, DemoBanner, EmptySquadCTA, ActionToast, GuestPrompt,
+  trackPlayersAdded, markSquadReadyIfAlready,
+} from "./PasteRosterSheet";
+import {
+  isPresent, isGuest, isDemo, realPlayers, findDuplicatePlayer, fullNameOf,
+  resizeImageDataUrl, isQuotaError, DEFAULT_STRENGTH,
+} from "./roster";
+import { MATCH_SAVED_EVENT } from "./matchHistoryStore";
 import { scheduleContextNotifications } from "./notifications";
 import { usePlanPrices } from "./PaywallScreen";
 import { JOIN_CODE_EVENT, peekPendingJoinCode } from "./deepLink";
+import { SHARE_FOOTER, APP_SITE_URL } from "./deepLink";
+import { track, EVENTS } from "./analytics";
+import { exportBackup, pickAndImportBackup } from "./backup";
+import { getSchedule, formatSchedule } from "./matchSchedule";
+
+// ★ Paylaşım alt bilgisi — Free kullanıcıda her paylaşım uygulamaya geri link verir
+//   (büyüme döngüsü). Pro avantajı: "Paylaşımlarda logo/alt bilgi yok".
+const shareBrandingOn = () => { try { return !isPremium(); } catch { return true; } };
+const withShareFooter = (txt) => (shareBrandingOn() ? `${txt}\n\n${SHARE_FOOTER}` : txt);
+const SITE_DOMAIN = APP_SITE_URL.replace(/^https?:\/\//, "").replace(/\/+$/, "");
 
 // ─── SCREENSHOT & SHARE UTILITY ───
 const captureAndShare = async (element, filename = "halisaha-kolik.png") => {
   if (!element) return;
+  // ★ Pro → filigran ve alt bilgi yok; Free → filigranda domain + metinde SHARE_FOOTER
+  const branded = shareBrandingOn();
+  const shareText = branded ? SHARE_FOOTER : "⚽ HalıSaha-Kolik";
   console.log('[SHARE] 1️⃣ captureAndShare başladı, platform:', Capacitor.getPlatform());
   try {
     if (!window.html2canvas) {
@@ -66,51 +90,52 @@ const captureAndShare = async (element, filename = "halisaha-kolik.png") => {
     });
     console.log('[SHARE] 4️⃣ Canvas hazır:', canvas.width, 'x', canvas.height);
 
-    // ★ FİLİGRAN EKLE
-    const ctx = canvas.getContext("2d");
-    const cw = canvas.width;
-    const ch = canvas.height;
+    // ★ FİLİGRAN EKLE (sadece Free — Pro'da paylaşımlar logosuz)
+    if (branded) {
+      const ctx = canvas.getContext("2d");
+      const cw = canvas.width;
+      const ch = canvas.height;
 
-    // Sağ alt köşe filigranı — yarı saydam pill
-    const wmText = "⚽ HalıSaha-Kolik";
-    const fontSize = Math.max(18, Math.round(cw * 0.022));
-    ctx.font = `700 ${fontSize}px 'Bebas Neue', 'Oswald', sans-serif`;
-    const textW = ctx.measureText(wmText).width;
-    const padX = fontSize * 0.7;
-    const padY = fontSize * 0.45;
-    const pillW = textW + padX * 2;
-    const pillH = fontSize + padY * 2;
-    const margin = fontSize * 0.8;
-    const pillX = cw - pillW - margin;
-    const pillY = ch - pillH - margin;
-    const radius = pillH / 2;
+      // Sağ alt köşe filigranı — yarı saydam pill (domain'li: görseli gören uygulamayı bulabilsin)
+      const wmText = `⚽ HalıSaha-Kolik · ${SITE_DOMAIN}`;
+      const fontSize = Math.max(18, Math.round(cw * 0.022));
+      ctx.font = `700 ${fontSize}px 'Bebas Neue', 'Oswald', sans-serif`;
+      const textW = ctx.measureText(wmText).width;
+      const padX = fontSize * 0.7;
+      const padY = fontSize * 0.45;
+      const pillW = textW + padX * 2;
+      const pillH = fontSize + padY * 2;
+      const margin = fontSize * 0.8;
+      const pillX = cw - pillW - margin;
+      const pillY = ch - pillH - margin;
+      const radius = pillH / 2;
 
-    // Pill arka planı
-    ctx.fillStyle = "rgba(0,0,0,0.55)";
-    ctx.beginPath();
-    ctx.moveTo(pillX + radius, pillY);
-    ctx.lineTo(pillX + pillW - radius, pillY);
-    ctx.quadraticCurveTo(pillX + pillW, pillY, pillX + pillW, pillY + radius);
-    ctx.lineTo(pillX + pillW, pillY + pillH - radius);
-    ctx.quadraticCurveTo(pillX + pillW, pillY + pillH, pillX + pillW - radius, pillY + pillH);
-    ctx.lineTo(pillX + radius, pillY + pillH);
-    ctx.quadraticCurveTo(pillX, pillY + pillH, pillX, pillY + pillH - radius);
-    ctx.lineTo(pillX, pillY + radius);
-    ctx.quadraticCurveTo(pillX, pillY, pillX + radius, pillY);
-    ctx.closePath();
-    ctx.fill();
+      // Pill arka planı
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      ctx.beginPath();
+      ctx.moveTo(pillX + radius, pillY);
+      ctx.lineTo(pillX + pillW - radius, pillY);
+      ctx.quadraticCurveTo(pillX + pillW, pillY, pillX + pillW, pillY + radius);
+      ctx.lineTo(pillX + pillW, pillY + pillH - radius);
+      ctx.quadraticCurveTo(pillX + pillW, pillY + pillH, pillX + pillW - radius, pillY + pillH);
+      ctx.lineTo(pillX + radius, pillY + pillH);
+      ctx.quadraticCurveTo(pillX, pillY + pillH, pillX, pillY + pillH - radius);
+      ctx.lineTo(pillX, pillY + radius);
+      ctx.quadraticCurveTo(pillX, pillY, pillX + radius, pillY);
+      ctx.closePath();
+      ctx.fill();
 
-    // İnce yeşil çerçeve
-    ctx.strokeStyle = "rgba(52,211,153,0.45)";
-    ctx.lineWidth = Math.max(1, fontSize * 0.06);
-    ctx.stroke();
+      // İnce yeşil çerçeve
+      ctx.strokeStyle = "rgba(52,211,153,0.45)";
+      ctx.lineWidth = Math.max(1, fontSize * 0.06);
+      ctx.stroke();
 
-    // Metin
-    ctx.fillStyle = "rgba(255,255,255,0.95)";
-    ctx.textBaseline = "middle";
-    ctx.textAlign = "center";
-    ctx.fillText(wmText, pillX + pillW / 2, pillY + pillH / 2 + 1);
-
+      // Metin
+      ctx.fillStyle = "rgba(255,255,255,0.95)";
+      ctx.textBaseline = "middle";
+      ctx.textAlign = "center";
+      ctx.fillText(wmText, pillX + pillW / 2, pillY + pillH / 2 + 1);
+    }
     // ★ FİLİGRAN SONU
 
     const dataUrl = canvas.toDataURL("image/png");
@@ -158,7 +183,7 @@ const captureAndShare = async (element, filename = "halisaha-kolik.png") => {
 
       const shareResult = await Share.share({
         title: "HalıSaha-Kolik",
-        text: "⚽ HalıSaha-Kolik",
+        text: shareText,
         url: fileUri,
         dialogTitle: "Paylaş",
       });
@@ -171,7 +196,7 @@ const captureAndShare = async (element, filename = "halisaha-kolik.png") => {
     const file = new File([blob], filename, { type: "image/png" });
 
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      await navigator.share({ files: [file], title: "HalıSaha-Kolik", text: "⚽ HalıSaha-Kolik" });
+      await navigator.share({ files: [file], title: "HalıSaha-Kolik", text: shareText });
       return true;
     }
 
@@ -201,7 +226,7 @@ const captureAndShare = async (element, filename = "halisaha-kolik.png") => {
       const blob = await new Promise((r) => canvas2.toBlob(r, "image/png"));
       const file = new File([blob], filename, { type: "image/png" });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: "HalıSaha-Kolik", text: "⚽ HalıSaha-Kolik" });
+        await navigator.share({ files: [file], title: "HalıSaha-Kolik", text: shareText });
         return true;
       }
       const url = URL.createObjectURL(blob);
@@ -421,8 +446,22 @@ const mkTeam = (name, color, withPlayers) => ({
 
 // ─── KALICI DEPOLAMA (localStorage) ───
 const STORAGE_KEY = "halisaha_kolik_data";
+// ★ Hata artık yutulmuyor: kota dolarsa (büyük base64 fotoğraflar) bir kez
+//   "halisaha:storage-full" olayı yayınlanır → ana bileşen görünür uyarı gösterir.
+let _storageFullWarned = false;
 const saveData = (a, b) => {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ teamA: a, teamB: b })); } catch {}
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ teamA: a, teamB: b }));
+    _storageFullWarned = false; // tekrar sığdıysa bir sonraki dolulukta yine uyar
+    return true;
+  } catch (e) {
+    console.warn("[saveData] kayıt başarısız:", e?.name || e?.message || e);
+    if (isQuotaError(e) && !_storageFullWarned) {
+      _storageFullWarned = true;
+      try { window.dispatchEvent(new CustomEvent("halisaha:storage-full")); } catch {}
+    }
+    return false;
+  }
 };
 const loadData = () => {
   try {
@@ -877,12 +916,21 @@ const MiniActionBtn = ({ icon, label, onClick, color = "rgba(255,255,255,0.5)", 
   );
 };
 
-const PlayerCard = ({ player, onEdit, onDelete, isOnField, teamColor, compact, isCaptain, onToggleCaptain, onShowStats, onTransfer, formDelta }) => {
+// ★ Katılım rozeti: "BU HAFTA YOK" / "MİSAFİR" / "ÖRNEK"
+const PlayerTag = ({ color, children }) => (
+  <span style={{ display: "inline-flex", alignItems: "center", padding: "0 4px", borderRadius: 3, fontSize: 8, fontWeight: 800, letterSpacing: 0.5, lineHeight: "13px", color, border: `1px solid ${color}55`, background: `${color}18`, whiteSpace: "nowrap" }}>{children}</span>
+);
+
+const PlayerCard = ({ player, onEdit, onDelete, isOnField, teamColor, compact, isCaptain, onToggleCaptain, onShowStats, onTransfer, formDelta, onToggleAbsent }) => {
   const rc = ratingColor(player.rating);
+  // ★ Bu hafta yok → soluk; misafir → gri avatar + etiket; örnek → etiket
+  const absent = !isPresent(player);
+  const guest = isGuest(player);
+  const demo = isDemo(player);
   return (
-    <div draggable={!isOnField} onDragStart={(e) => { if (!isOnField) e.dataTransfer.setData("playerId", player.id); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: compact ? "7px 10px" : "10px 12px", background: isOnField ? `${teamColor}11` : "rgba(255,255,255,0.03)", borderRadius: 10, border: isOnField ? `1px solid ${teamColor}33` : "1px solid rgba(255,255,255,0.06)", cursor: isOnField ? "default" : "grab", opacity: isOnField ? 0.5 : 1, transition: "opacity 0.2s" }}>
+    <div draggable={!isOnField} onDragStart={(e) => { if (!isOnField) e.dataTransfer.setData("playerId", player.id); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: compact ? "7px 10px" : "10px 12px", background: isOnField ? `${teamColor}11` : "rgba(255,255,255,0.03)", borderRadius: 10, border: isOnField ? `1px solid ${teamColor}33` : absent ? "1px dashed rgba(255,255,255,0.1)" : "1px solid rgba(255,255,255,0.06)", cursor: isOnField ? "default" : "grab", opacity: isOnField ? 0.5 : absent ? 0.48 : 1, transition: "opacity 0.2s" }}>
       <div style={{ position: "relative" }}>
-        <div style={{ width: compact ? 28 : 34, height: compact ? 28 : 34, borderRadius: "50%", flexShrink: 0, background: player.photo ? `url(${player.photo}) center/cover` : avatarColor(player.id), display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: compact ? 10 : 12, fontFamily: "'Bebas Neue',sans-serif", border: `2px solid ${rc}` }}>
+        <div style={{ width: compact ? 28 : 34, height: compact ? 28 : 34, borderRadius: "50%", flexShrink: 0, background: player.photo ? `url(${player.photo}) center/cover` : guest ? "#475569" : avatarColor(player.id), display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: compact ? 10 : 12, fontFamily: "'Bebas Neue',sans-serif", border: `2px solid ${guest ? "#64748b" : rc}` }}>
           {!player.photo && getInitials(player.name, player.surname)}
         </div>
         {isCaptain && (<div style={{ position: "absolute", top: -5, right: -5, background: "linear-gradient(135deg,#fbbf24,#f59e0b)", borderRadius: 3, padding: "0px 3px", fontSize: 7, fontWeight: 900, color: "#78350f", border: "1px solid rgba(251,191,36,0.6)", lineHeight: "12px" }}>C</div>)}
@@ -896,10 +944,23 @@ const PlayerCard = ({ player, onEdit, onDelete, isOnField, teamColor, compact, i
           {formDelta != null && (
             <CompactFormPill formDelta={formDelta} />
           )}
+          {absent && <PlayerTag color="#f87171">BU HAFTA YOK</PlayerTag>}
+          {guest && <PlayerTag color="#94a3b8">MİSAFİR</PlayerTag>}
+          {demo && <PlayerTag color="#fbbf24">ÖRNEK</PlayerTag>}
         </div>
       </div>
       {!compact && (
         <div style={{ display: "flex", gap: 4 }}>
+          {onToggleAbsent && (
+            <MiniActionBtn
+              icon={<span style={{ fontSize: 12, fontWeight: 800, lineHeight: 1, width: 15, display: "inline-block", textAlign: "center" }}>{absent ? "✓" : "⊘"}</span>}
+              label={absent ? "Bu hafta geliyor" : "Bu hafta yok"}
+              onClick={() => onToggleAbsent(player.id)}
+              color={absent ? "#34d399" : "rgba(255,255,255,0.45)"}
+              bg={absent ? "rgba(52,211,153,0.12)" : undefined}
+              border={absent ? "1px solid rgba(52,211,153,0.3)" : undefined}
+            />
+          )}
           {onToggleCaptain && (
             <MiniActionBtn
               icon={<I.Armband />}
@@ -1425,32 +1486,45 @@ const TransferKapPopup = ({ announcement, onClose, onViewSquad }) => {
 };
 
 // ─── PLAYER FORM ───
-const PlayerForm = ({ player, onSave, onCancel, accent, existingPlayers = [] }) => {
-  // ★ İlk açılışta default forma numarasını otomatik öner (yeni oyuncu için)
-  const initialJersey = player?.jerseyNumber
-    || (player?.id ? null : getDefaultJerseyNumber(player?.position || "ORTA SAHA", existingPlayers));
+// ★ HAFİF FORM: sadece ad zorunlu (soyad isteğe bağlı), ad alanı otomatik odak,
+//   hızlı güç seçici (Zayıf/Orta/İyi/Yıldız), forma no · foto · spider · slider
+//   "Detaylar ▾" altında. "Kaydet ve Yeni Ekle" modalı kapatmadan formu sıfırlar.
+//   allPlayers: iki takımın tüm oyuncuları → aynı isim uyarısı için
+const PlayerForm = ({ player, onSave, onCancel, accent, existingPlayers = [], allPlayers = [] }) => {
+  const isNew = !player?.id;
+  // ★ "Kaydet ve Yeni Ekle" ile bu oturumda eklenenler (parent state'i henüz güncellenmemiş olabilir)
+  const sessionAddedRef = useRef([]);
+  const usedPlayers = () => [...existingPlayers, ...sessionAddedRef.current];
 
-  // ★ Attribute'lar — eski oyuncuda yoksa otomatik üret (geriye uyumlu)
-  const initialPosition = player?.position || "ORTA SAHA";
-  const initialRating = player?.rating || 70;
-  const initialAttributes = (player?.attributes && Object.keys(player.attributes).length > 0)
-    ? player.attributes
-    : generateDefaultAttributes(initialPosition, initialRating, player?.id || "new");
+  // ★ Form başlangıç durumu — "Kaydet ve Yeni Ekle" sonrası tekrar üretilir
+  const buildInitialForm = (pl, pool) => {
+    const position = pl?.position || "ORTA SAHA";
+    const rating = pl?.rating || DEFAULT_STRENGTH;
+    return {
+      name: pl?.name || "",
+      surname: pl?.surname || "",
+      position,
+      rating,
+      photo: pl?.photo || null,
+      // İlk açılışta default forma numarasını otomatik öner (yeni oyuncu için)
+      jerseyNumber: pl?.jerseyNumber || (pl?.id ? null : getDefaultJerseyNumber(position, pool)),
+      // Attribute'lar — eski oyuncuda yoksa otomatik üret (geriye uyumlu)
+      attributes: (pl?.attributes && Object.keys(pl.attributes).length > 0)
+        ? pl.attributes
+        : generateDefaultAttributes(position, rating, pl?.id || "new"),
+      // ★ Kullanıcı attribute'ları manuel düzenlediyse pozisyon değişince üzerine yazma
+      attributesEdited: !!pl?.attributes,
+    };
+  };
 
-  const [f, sF] = useState({
-    name: player?.name || "",
-    surname: player?.surname || "",
-    position: initialPosition,
-    rating: initialRating,
-    photo: player?.photo || null,
-    jerseyNumber: initialJersey,
-    attributes: initialAttributes,
-    // ★ Kullanıcı attribute'ları manuel düzenlediyse pozisyon değişince üzerine yazma
-    attributesEdited: !!player?.attributes,
-  });
+  const [f, sF] = useState(() => buildInitialForm(player, existingPlayers));
   const [error, setError] = useState({ name: false, surname: false, jersey: false });
   const [showAttrPanel, setShowAttrPanel] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);   // ★ Detaylar ▾
+  const [addedCount, setAddedCount] = useState(0);         // ★ "3 oyuncu eklendi"
+  const [dupWarn, setDupWarn] = useState(null);            // ★ { player, keepOpen } aynı isim uyarısı
   const fr = useRef();
+  const nameRef = useRef(null);
 
   // ★ Pozisyon değişirse, kullanıcı manuel numara girmediyse default'u güncelle
   //   ★ Ayrıca: attribute'lar manuel düzenlenmemişse pozisyona göre yenile
@@ -1465,9 +1539,20 @@ const PlayerForm = ({ player, onSave, onCancel, accent, existingPlayers = [] }) 
         : p.attributes;
 
       if (isDefaultBased && !player?.id) {
-        return { ...p, position: newPos, attributes: newAttrs, jerseyNumber: getDefaultJerseyNumber(newPos, existingPlayers, player?.id) };
+        return { ...p, position: newPos, attributes: newAttrs, jerseyNumber: getDefaultJerseyNumber(newPos, usedPlayers(), player?.id) };
       }
       return { ...p, position: newPos, attributes: newAttrs };
+    });
+  };
+
+  // ★ Hızlı güç seçici: puanı ayarlar + attribute'ları üretir
+  //   (attribute'lar elle düzenlendiyse profili koruyup orantılı kaydırır; detay slider'ları yine üstün)
+  const handleStrengthPick = (newRating) => {
+    sF((p) => {
+      if (p.attributesEdited && p.attributes) {
+        return { ...p, rating: newRating, attributes: scaleAttributesToRating(p.attributes, p.position, p.rating, newRating) };
+      }
+      return { ...p, rating: newRating, attributes: generateDefaultAttributes(p.position, newRating, player?.id || "new") };
     });
   };
 
@@ -1516,22 +1601,49 @@ const PlayerForm = ({ player, onSave, onCancel, accent, existingPlayers = [] }) 
   // ★ Spider'dan hesaplanan overall — kullanıcıya feedback için
   const overallFromAttrs = computeOverallFromAttributes(f.attributes, f.position);
 
-  const handleSave = () => {
+  // keepOpen: "Kaydet ve Yeni Ekle" · force: aynı isim uyarısı onaylandı
+  const handleSave = (keepOpen = false, force = false) => {
+    const pool = usedPlayers();
     const nameOk = f.name.trim().length > 0;
-    const surnameOk = f.surname.trim().length > 0;
-    const jerseyOk = !f.jerseyNumber || isJerseyNumberAvailable(f.jerseyNumber, existingPlayers, player?.id);
+    // ★ Soyad artık isteğe bağlı — sadece ad zorunlu
+    const jerseyOk = !f.jerseyNumber || isJerseyNumberAvailable(f.jerseyNumber, pool, player?.id);
 
-    setError({ name: !nameOk, surname: !surnameOk, jersey: !jerseyOk });
+    setError({ name: !nameOk, surname: false, jersey: !jerseyOk });
 
-    if (!nameOk || !surnameOk || !jerseyOk) {
+    if (!nameOk || !jerseyOk) {
       hapticWarning();
+      if (!jerseyOk) setShowDetails(true); // hata detaylardaysa göster
       return;
     }
+    // ★ Aynı isim uyarısı (iki takım birlikte) — "Ahmet zaten kadroda — yine de ekle?"
+    const nameChanged = isNew
+      || `${f.name} ${f.surname}`.trim().toLocaleLowerCase("tr-TR") !== `${player?.name || ""} ${player?.surname || ""}`.trim().toLocaleLowerCase("tr-TR");
+    if (!force && nameChanged) {
+      const dup = findDuplicatePlayer(f.name, f.surname, [...allPlayers, ...sessionAddedRef.current], player?.id);
+      if (dup) { hapticWarning(); setDupWarn({ player: dup, keepOpen }); return; }
+    }
+    setDupWarn(null);
     // ★ Numara boşsa otomatik ata (gerçi initial'da zaten atadık ama güvenli)
-    const finalJersey = f.jerseyNumber || getDefaultJerseyNumber(f.position, existingPlayers, player?.id);
+    const finalJersey = f.jerseyNumber || getDefaultJerseyNumber(f.position, pool, player?.id);
     // ★ attributesEdited UI flag'i — kayıt ederken oyuncu objesine yazma
     const { attributesEdited, ...formData } = f;
-    onSave({ ...player, ...formData, jerseyNumber: finalJersey, id: player?.id || generateId() });
+    const saved = {
+      ...player, ...formData,
+      name: f.name.trim(), surname: f.surname.trim(),
+      jerseyNumber: finalJersey, id: player?.id || generateId(),
+    };
+    onSave(saved, { keepOpen: keepOpen && isNew });
+
+    // ★ Kaydet ve Yeni Ekle → formu sıfırla, modal açık kalsın
+    if (keepOpen && isNew) {
+      sessionAddedRef.current = [...sessionAddedRef.current, saved];
+      setAddedCount((c) => c + 1);
+      sF(buildInitialForm(null, [...existingPlayers, ...sessionAddedRef.current]));
+      setError({ name: false, surname: false, jersey: false });
+      setShowAttrPanel(false);
+      setShowDetails(false);
+      setTimeout(() => { try { nameRef.current?.focus(); } catch {} }, 30);
+    }
   };
 
   const inputErrorStyle = { borderColor: "#ef4444", boxShadow: "0 0 0 1px #ef4444" };
@@ -1555,8 +1667,8 @@ const PlayerForm = ({ player, onSave, onCancel, accent, existingPlayers = [] }) 
           allowEditing: false,
           resultType: CameraResultType.DataUrl,
           source: isIPad ? CameraSource.Photos : CameraSource.Prompt,
-          width: 800,
-          height: 800,
+          width: 400,
+          height: 400,
           correctOrientation: true,
           // Türkçe action sheet etiketleri
           promptLabelHeader: "Fotoğraf",
@@ -1565,7 +1677,9 @@ const PlayerForm = ({ player, onSave, onCancel, accent, existingPlayers = [] }) 
           promptLabelPicture: "Kameradan Çek",
         });
         if (image?.dataUrl) {
-          sF((p) => ({ ...p, photo: image.dataUrl }));
+          // ★ localStorage'a base64 yazıldığı için max 200px JPEG (0.7) — hafıza dolmasın
+          const small = await resizeImageDataUrl(image.dataUrl, 200, 0.7);
+          sF((p) => ({ ...p, photo: small }));
         }
       } catch (e) {
         // Kullanıcı iptal ederse sessizce yut (User cancelled photos app)
@@ -1579,62 +1693,35 @@ const PlayerForm = ({ player, onSave, onCancel, accent, existingPlayers = [] }) 
     fr.current?.click();
   };
 
+  const onEnterSave = (e) => {
+    if (e.key === "Enter") { e.preventDefault(); handleSave(isNew); }
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 15 }}>
-      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 14 }}>
-        <div onClick={handlePhotoClick} style={{ width: 70, height: 70, borderRadius: "50%", cursor: "pointer", background: f.photo ? `url(${f.photo}) center/cover` : "rgba(255,255,255,0.06)", border: "2px dashed rgba(255,255,255,0.18)", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(255,255,255,0.3)" }}>
-          {!f.photo && <I.Camera />}
-        </div>
-        {/* Web fallback — native'de kullanılmaz */}
-        <input ref={fr} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => { const file = e.target.files?.[0]; if (!file) return; const r = new FileReader(); r.onload = (ev) => sF((p) => ({ ...p, photo: ev.target.result })); r.readAsDataURL(file); }} />
-        {/* ★ FORMA NUMARASI — fotoğrafın yanında belirgin */}
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5 }}>
-          <label style={{ ...S.label, marginBottom: 0, fontSize: 9.5 }}>{t("jersey_number")}</label>
-          <input
-            type="number"
-            min="1"
-            max="99"
-            value={f.jerseyNumber || ""}
-            onChange={(e) => {
-              const v = e.target.value;
-              sF((p) => ({ ...p, jerseyNumber: v === "" ? null : Math.min(99, Math.max(1, parseInt(v, 10) || 1)) }));
-              if (error.jersey) setError((er) => ({ ...er, jersey: false }));
-            }}
-            placeholder="—"
-            style={{
-              width: 70, height: 56,
-              borderRadius: 12,
-              border: error.jersey ? "2px solid #ef4444" : `2px solid ${accent}55`,
-              background: error.jersey ? "rgba(239,68,68,0.08)" : `${accent}15`,
-              color: "#fff",
-              fontSize: 28, fontWeight: 800,
-              textAlign: "center",
-              fontFamily: "'Bebas Neue','Oswald',sans-serif",
-              outline: "none",
-              padding: 0,
-              boxShadow: error.jersey ? "0 0 0 1px #ef4444" : `0 4px 12px ${accent}22, inset 0 -2px 4px rgba(0,0,0,0.15)`,
-              transition: "all 0.15s",
-            }}
-          />
-          {error.jersey && <div style={{ fontSize: 9.5, color: "#ef4444", fontWeight: 600 }}>{t("jersey_taken")}</div>}
-        </div>
-      </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         <div>
           <label style={S.label}>{t("name")} <span style={{ color: "#ef4444" }}>*</span></label>
           <input
+            ref={nameRef}
+            autoFocus={isNew}
+            enterKeyHint="done"
             style={{ ...S.input, ...(error.name ? inputErrorStyle : {}) }}
             value={f.name}
-            onChange={(e) => { sF((p) => ({ ...p, name: e.target.value })); if (error.name) setError((er) => ({ ...er, name: false })); }}
+            onChange={(e) => { sF((p) => ({ ...p, name: e.target.value })); if (error.name) setError((er) => ({ ...er, name: false })); if (dupWarn) setDupWarn(null); }}
+            onKeyDown={onEnterSave}
             placeholder={t("name")}
           />
         </div>
         <div>
-          <label style={S.label}>{t("surname")} <span style={{ color: "#ef4444" }}>*</span></label>
+          {/* ★ Soyad isteğe bağlı */}
+          <label style={S.label}>{t("surname")} <span style={{ color: "rgba(255,255,255,0.28)", textTransform: "none", letterSpacing: 0, fontWeight: 500 }}>(isteğe bağlı)</span></label>
           <input
-            style={{ ...S.input, ...(error.surname ? inputErrorStyle : {}) }}
+            enterKeyHint="done"
+            style={S.input}
             value={f.surname}
-            onChange={(e) => { sF((p) => ({ ...p, surname: e.target.value })); if (error.surname) setError((er) => ({ ...er, surname: false })); }}
+            onChange={(e) => { sF((p) => ({ ...p, surname: e.target.value })); if (dupWarn) setDupWarn(null); }}
+            onKeyDown={onEnterSave}
             placeholder={t("surname")}
           />
         </div>
@@ -1645,83 +1732,170 @@ const PlayerForm = ({ player, onSave, onCancel, accent, existingPlayers = [] }) 
           {POSITIONS_LIST.map((p) => (<button key={p} onClick={() => handlePositionChange(p)} style={{ padding: "5px 11px", borderRadius: 6, fontSize: 10, fontWeight: 600, cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.4, border: f.position === p ? `1px solid ${accent}` : "1px solid rgba(255,255,255,0.08)", background: f.position === p ? `${accent}22` : "rgba(255,255,255,0.03)", color: f.position === p ? accent : "rgba(255,255,255,0.45)" }}>{tPos(p)}</button>))}
         </div>
       </div>
-      <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, padding: "14px", marginTop: 4 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-          <label style={{ ...S.label, marginBottom: 0 }}>{t("rating")}</label>
-          <div style={{ background: `${ratingColor(f.rating)}22`, color: ratingColor(f.rating), padding: "2px 8px", borderRadius: 6, fontSize: 16, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", border: `1px solid ${ratingColor(f.rating)}55` }}>{f.rating}</div>
+      {/* ★ HIZLI GÜÇ — Zayıf 60 / Orta 70 / İyi 80 / Yıldız 88 (detay slider'ları yine üstün) */}
+      <div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <label style={{ ...S.label, marginBottom: 0 }}>Güç</label>
+          <div style={{ color: ratingColor(f.rating), fontSize: 12, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace" }}>{f.rating}</div>
         </div>
-        <input type="range" min="40" max="99" value={f.rating} style={{ width: "100%", height: 6, borderRadius: 6, appearance: "none", outline: "none", background: `linear-gradient(to right, ${ratingColor(f.rating)} ${((f.rating - 40) / (99 - 40)) * 100}%, rgba(255,255,255,0.08) ${((f.rating - 40) / (99 - 40)) * 100}%)` }} onChange={(e) => handleRatingChange(+e.target.value)} />
-        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 10, color: "rgba(255,255,255,0.25)", fontWeight: 600 }}><span>40</span><span>99</span></div>
+        <StrengthPicker value={f.rating} onChange={handleStrengthPick} accent={accent} />
       </div>
 
-      {/* ★ ATTRIBUTE PANELİ — açılır kapanır */}
-      <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, overflow: "hidden", marginTop: 4 }}>
-        <button
-          onClick={() => { setShowAttrPanel((v) => !v); hapticLight(); }}
-          style={{
-            width: "100%",
-            display: "flex", alignItems: "center", justifyContent: "space-between",
-            padding: "12px 14px",
-            background: "transparent", border: "none", cursor: "pointer",
-            color: "#e2e8f0", fontFamily: "inherit",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontSize: 14 }}>📊</span>
-            <div style={{ textAlign: "left" }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#e2e8f0" }}>{t("attributes_title")}</div>
-              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.45)", marginTop: 1 }}>
-                {f.attributesEdited ? t("attributes_overall") : t("attributes_auto_filled")} · {overallFromAttrs}
-              </div>
+      {/* ★ DETAYLAR ▾ — forma no, fotoğraf, puan slider'ı, özellik (spider) paneli */}
+      <button
+        onClick={() => { hapticLight(); setShowDetails((v) => !v); }}
+        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.02)", cursor: "pointer", color: "#e2e8f0", fontFamily: "inherit" }}
+      >
+        <span style={{ fontSize: 12, fontWeight: 700 }}>Detaylar</span>
+        <span style={{ flex: 1, textAlign: "left", fontSize: 10, color: "rgba(255,255,255,0.38)" }}>
+          forma no{f.jerseyNumber ? ` ${f.jerseyNumber}` : ""} · fotoğraf · özellikler
+        </span>
+        <span style={{ transform: showDetails ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s", color: "rgba(255,255,255,0.5)", fontSize: 14 }}>▾</span>
+      </button>
+      {showDetails && (
+        <>
+          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 14 }}>
+            <div onClick={handlePhotoClick} style={{ width: 70, height: 70, borderRadius: "50%", cursor: "pointer", background: f.photo ? `url(${f.photo}) center/cover` : "rgba(255,255,255,0.06)", border: "2px dashed rgba(255,255,255,0.18)", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(255,255,255,0.3)" }}>
+              {!f.photo && <I.Camera />}
             </div>
-          </div>
-          <span style={{
-            transform: showAttrPanel ? "rotate(180deg)" : "rotate(0deg)",
-            transition: "transform 0.2s",
-            color: "rgba(255,255,255,0.5)",
-            fontSize: 14,
-          }}>▾</span>
-        </button>
-        {showAttrPanel && (
-          <div style={{ padding: "10px 14px 16px", borderTop: "1px solid rgba(255,255,255,0.05)" }}>
-            <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.45)", marginBottom: 12, lineHeight: 1.45 }}>
-              {t("attributes_subtitle")}
-            </div>
-            <div style={{ display: "flex", justifyContent: "center" }}>
-              <SpiderChart
-                attributes={f.attributes}
-                keys={getAttrKeys(f.position)}
-                accent={accent}
-                size={280}
-                editable={true}
-                onChange={handleAttrChange}
-              />
-            </div>
-            <div style={{ display: "flex", justifyContent: "center", marginTop: 10 }}>
-              <button
-                onClick={resetAttrs}
-                style={{
-                  padding: "5px 12px",
-                  fontSize: 10.5, fontWeight: 600,
-                  borderRadius: 6,
-                  background: "rgba(255,255,255,0.04)",
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  color: "rgba(255,255,255,0.5)",
-                  cursor: "pointer",
-                  fontFamily: "inherit",
+            {/* Web fallback — native'de kullanılmaz */}
+            <input ref={fr} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => { const file = e.target.files?.[0]; if (!file) return; const r = new FileReader(); r.onload = (ev) => { resizeImageDataUrl(ev.target.result, 200, 0.7).then((small) => sF((p) => ({ ...p, photo: small }))); }; r.readAsDataURL(file); e.target.value = ""; }} />
+            {/* ★ FORMA NUMARASI — fotoğrafın yanında belirgin */}
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5 }}>
+              <label style={{ ...S.label, marginBottom: 0, fontSize: 9.5 }}>{t("jersey_number")}</label>
+              <input
+                type="number"
+                min="1"
+                max="99"
+                value={f.jerseyNumber || ""}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  sF((p) => ({ ...p, jerseyNumber: v === "" ? null : Math.min(99, Math.max(1, parseInt(v, 10) || 1)) }));
+                  if (error.jersey) setError((er) => ({ ...er, jersey: false }));
                 }}
-              >
-                ↺ {t("attributes_reset")}
-              </button>
+                placeholder="—"
+                style={{
+                  width: 70, height: 56,
+                  borderRadius: 12,
+                  border: error.jersey ? "2px solid #ef4444" : `2px solid ${accent}55`,
+                  background: error.jersey ? "rgba(239,68,68,0.08)" : `${accent}15`,
+                  color: "#fff",
+                  fontSize: 28, fontWeight: 800,
+                  textAlign: "center",
+                  fontFamily: "'Bebas Neue','Oswald',sans-serif",
+                  outline: "none",
+                  padding: 0,
+                  boxShadow: error.jersey ? "0 0 0 1px #ef4444" : `0 4px 12px ${accent}22, inset 0 -2px 4px rgba(0,0,0,0.15)`,
+                  transition: "all 0.15s",
+                }}
+              />
+              {error.jersey && <div style={{ fontSize: 9.5, color: "#ef4444", fontWeight: 600 }}>{t("jersey_taken")}</div>}
             </div>
           </div>
-        )}
-      </div>
+          <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, padding: "14px", marginTop: 4 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <label style={{ ...S.label, marginBottom: 0 }}>{t("rating")}</label>
+              <div style={{ background: `${ratingColor(f.rating)}22`, color: ratingColor(f.rating), padding: "2px 8px", borderRadius: 6, fontSize: 16, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", border: `1px solid ${ratingColor(f.rating)}55` }}>{f.rating}</div>
+            </div>
+            <input type="range" min="40" max="99" value={f.rating} style={{ width: "100%", height: 6, borderRadius: 6, appearance: "none", outline: "none", background: `linear-gradient(to right, ${ratingColor(f.rating)} ${((f.rating - 40) / (99 - 40)) * 100}%, rgba(255,255,255,0.08) ${((f.rating - 40) / (99 - 40)) * 100}%)` }} onChange={(e) => handleRatingChange(+e.target.value)} />
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 10, color: "rgba(255,255,255,0.25)", fontWeight: 600 }}><span>40</span><span>99</span></div>
+          </div>
+
+          {/* ★ ATTRIBUTE PANELİ — açılır kapanır */}
+          <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, overflow: "hidden", marginTop: 4 }}>
+            <button
+              onClick={() => { setShowAttrPanel((v) => !v); hapticLight(); }}
+              style={{
+                width: "100%",
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                padding: "12px 14px",
+                background: "transparent", border: "none", cursor: "pointer",
+                color: "#e2e8f0", fontFamily: "inherit",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontSize: 14 }}>📊</span>
+                <div style={{ textAlign: "left" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#e2e8f0" }}>{t("attributes_title")}</div>
+                  <div style={{ fontSize: 10, color: "rgba(255,255,255,0.45)", marginTop: 1 }}>
+                    {f.attributesEdited ? t("attributes_overall") : t("attributes_auto_filled")} · {overallFromAttrs}
+                  </div>
+                </div>
+              </div>
+              <span style={{
+                transform: showAttrPanel ? "rotate(180deg)" : "rotate(0deg)",
+                transition: "transform 0.2s",
+                color: "rgba(255,255,255,0.5)",
+                fontSize: 14,
+              }}>▾</span>
+            </button>
+            {showAttrPanel && (
+              <div style={{ padding: "10px 14px 16px", borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+                <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.45)", marginBottom: 12, lineHeight: 1.45 }}>
+                  {t("attributes_subtitle")}
+                </div>
+                <div style={{ display: "flex", justifyContent: "center" }}>
+                  <SpiderChart
+                    attributes={f.attributes}
+                    keys={getAttrKeys(f.position)}
+                    accent={accent}
+                    size={280}
+                    editable={true}
+                    onChange={handleAttrChange}
+                  />
+                </div>
+                <div style={{ display: "flex", justifyContent: "center", marginTop: 10 }}>
+                  <button
+                    onClick={resetAttrs}
+                    style={{
+                      padding: "5px 12px",
+                      fontSize: 10.5, fontWeight: 600,
+                      borderRadius: 6,
+                      background: "rgba(255,255,255,0.04)",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      color: "rgba(255,255,255,0.5)",
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    ↺ {t("attributes_reset")}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* ★ AYNI İSİM UYARISI */}
+      {dupWarn && (
+        <div style={{ padding: "10px 12px", borderRadius: 10, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.3)" }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: "#fbbf24" }}>
+            {fullNameOf(dupWarn.player) || f.name.trim()} zaten kadroda — yine de ekle?
+          </div>
+          <div style={{ display: "flex", gap: 7, marginTop: 8 }}>
+            <button onClick={() => setDupWarn(null)} style={{ ...S.btn, flex: 1, padding: "8px", fontSize: 12, background: "rgba(255,255,255,0.06)" }}>Vazgeç</button>
+            <button onClick={() => handleSave(dupWarn.keepOpen, true)} style={{ ...S.btn, flex: 1.3, padding: "8px", fontSize: 12, background: "rgba(251,191,36,0.85)", color: "#3a2a00" }}>Yine de ekle</button>
+          </div>
+        </div>
+      )}
+
+      {/* ★ Kaydet ve Yeni Ekle sayacı */}
+      {addedCount > 0 && (
+        <div style={{ alignSelf: "center", padding: "4px 12px", borderRadius: 20, fontSize: 11.5, fontWeight: 700, color: accent, background: `${accent}18`, border: `1px solid ${accent}44` }}>
+          ✓ {addedCount} oyuncu eklendi
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 9 }}>
-        <button onClick={onCancel} style={{ ...S.btn, background: "rgba(255,255,255,0.06)", flex: 1 }}>{t("cancel")}</button>
-        <button onClick={handleSave} style={{ ...S.btn, flex: 1, background: `linear-gradient(135deg,${accent},${accent}bb)` }}><I.Check /> {player?.id ? t("update") : t("save")}</button>
+        <button onClick={onCancel} style={{ ...S.btn, background: "rgba(255,255,255,0.06)", flex: 1 }}>{addedCount > 0 ? "Bitti" : t("cancel")}</button>
+        <button onClick={() => handleSave(false)} style={{ ...S.btn, flex: 1, background: `linear-gradient(135deg,${accent},${accent}bb)` }}><I.Check /> {player?.id ? t("update") : t("save")}</button>
       </div>
+      {isNew && (
+        <button onClick={() => handleSave(true)} style={{ ...S.btn, marginTop: -6, background: "transparent", border: `1px dashed ${accent}77`, color: accent }}>
+          <I.Plus /> Kaydet ve Yeni Ekle
+        </button>
+      )}
     </div>
   );
 };
@@ -1848,6 +2022,20 @@ const TeamStatsCard = ({ team, accent, onClick }) => {
 // Pro: yenileme tarihi, kalan süre, aylık değer, avantaj çipleri.
 // Free: gerçek kullanım sayaçları + progress bar + Pro preview + CTA.
 // ─────────────────────────────────────────────────────────────────────
+// ═══ DÜRÜST PRO LİSTESİ — paywall ile aynı; olmayan özellik (cloud sync vb.) YAZILMAZ ═══
+const PRO_BENEFITS = [
+  { icon: "🚫", text: "Reklamsız" },
+  { icon: "⚡", text: "Sınırsız online oda kurma" },
+  { icon: "📊", text: "Tüm maç geçmişi" },
+  { icon: "✨", text: "Paylaşımlarda logo/alt bilgi yok" },
+];
+// ★ Free'de her zaman açık olanlar
+const FREE_INCLUDES = [
+  "AI takım dengeleme",
+  "sınırsız maça katılım",
+  "haftalık maç planı ve hatırlatmalar",
+  "Kasa",
+];
 const PlanSettingsCard = ({ onOpenPlan }) => {
   const s = getSubscription();
   const isPro = s.tier === "pro";
@@ -2026,7 +2214,6 @@ const PlanSettingsCard = ({ onOpenPlan }) => {
             {isPro && (
               <span style={{
                 fontSize: 8.5, fontWeight: 900, letterSpacing: 1.4,
-                color: "#0a0805",
                 background: trialUrgent
                   ? "linear-gradient(135deg, #f87171, #ef4444)"
                   : `linear-gradient(135deg, ${accent}, ${accentDim})`,
@@ -2076,10 +2263,10 @@ const PlanSettingsCard = ({ onOpenPlan }) => {
             paddingTop: 10,
             borderTop: "1px solid rgba(255,255,255,0.06)",
           }}>
-            <BenefitChip icon="⚡" text="Sınırsız oda"  active />
-            <BenefitChip icon="🚫" text="Reklamsız"    active />
-            <BenefitChip icon="☁️" text="Cloud sync"   active />
-            <BenefitChip icon="📊" text="Sınırsız geçmiş" active />
+            {/* ★ Dürüst Pro listesi — sadece gerçekten var olan avantajlar */}
+            {PRO_BENEFITS.map((b) => (
+              <BenefitChip key={b.text} icon={b.icon} text={b.text} active />
+            ))}
           </div>
 
           {/* Mini hint metni */}
@@ -2169,10 +2356,17 @@ const PlanSettingsCard = ({ onOpenPlan }) => {
               PRO İLE AÇILIR
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-              <BenefitChip icon="⚡" text="Sınırsız oda"  active={false} />
-              <BenefitChip icon="🚫" text="Reklamsız"    active={false} />
-              <BenefitChip icon="☁️" text="Cloud sync"   active={false} />
-              <BenefitChip icon="📊" text="Sınırsız geçmiş" active={false} />
+              {PRO_BENEFITS.map((b) => (
+                <BenefitChip key={b.text} icon={b.icon} text={b.text} active={false} />
+              ))}
+            </div>
+            {/* ★ Ücretsizde her zaman olanlar — kullanıcı neyi kaybetmediğini bilsin */}
+            <div style={{
+              marginTop: 9, fontSize: 10, lineHeight: 1.45,
+              color: "rgba(255,255,255,0.42)",
+            }}>
+              <span style={{ color: "rgba(255,255,255,0.6)", fontWeight: 700 }}>Ücretsizde de var: </span>
+              {FREE_INCLUDES.join(" · ")}
             </div>
           </div>
 
@@ -2210,8 +2404,54 @@ const PlanSettingsCard = ({ onOpenPlan }) => {
 };
 
 // ─── APP SETTINGS MODAL (Genel ayarlar — Tanıtım, dil, haptik, takım) ───
-const AppSettingsModal = ({ open, onClose, onReplayOnboarding, onReplayTour, onOpenTeamSettings, onOpenPlan, hapticsOn, onToggleHaptics, lang }) => {
+const AppSettingsModal = ({ open, onClose, onReplayOnboarding, onReplayTour, onOpenTeamSettings, onOpenPlan, hapticsOn, onToggleHaptics, lang, onToast }) => {
   if (!open) return null;
+  const toastMsg = (m) => { try { onToast?.(m); } catch {} };
+
+  // ═══ Haftalık maç planı — kayıtlıysa "Perşembe 21:00 · Yıldız Halı Saha" göster ═══
+  let scheduleSub = "Gün, saat ve saha — hatırlatmalar otomatik gelir";
+  try {
+    const sch = getSchedule();
+    if (sch) scheduleSub = formatSchedule(sch);
+  } catch {}
+
+  // Kapat → App.js'teki sheet'i aç (üst üste iki bottom-sheet olmasın)
+  const openViaEvent = (name, detail) => {
+    hapticLight();
+    onClose();
+    setTimeout(() => window.dispatchEvent(new CustomEvent(name, detail ? { detail } : undefined)), 220);
+  };
+
+  // ═══ YEDEK — tüm halisaha_ verilerini .json olarak paylaş / indir ═══
+  const handleExportBackup = async () => {
+    hapticLight();
+    let res = { ok: false };
+    try { res = (await exportBackup()) || { ok: false }; }
+    catch (e) { res = { ok: false, error: e?.message || String(e) }; }
+    track(EVENTS.BACKUP, { action: "export", ok: !!res.ok });
+    if (res.ok) { hapticSuccess(); toastMsg("Yedek dosyası hazır ✓"); }
+    else if (res.error && !/cancel/i.test(String(res.error))) { hapticWarning(); toastMsg("Yedek alınamadı"); }
+  };
+
+  // ═══ GERİ YÜKLE — onay → dosya seç → yaz → uygulamayı yeniden yükle ═══
+  const handleImportBackup = async () => {
+    hapticLight();
+    // eslint-disable-next-line no-restricted-globals
+    if (!window.confirm("Mevcut verilerin yedektekiyle değiştirilecek. Devam?")) return;
+    let res = { ok: false };
+    try { res = (await pickAndImportBackup()) || { ok: false }; }
+    catch (e) { res = { ok: false, error: e?.message || String(e) }; }
+    track(EVENTS.BACKUP, { action: "import", ok: !!res.ok });
+    if (res.ok) {
+      hapticSuccess();
+      toastMsg("Yedek yüklendi — uygulama yenileniyor…");
+      // Analytics olayı gitsin + kullanıcı mesajı görsün diye kısa bekleme
+      setTimeout(() => window.location.reload(), 700);
+    } else if (res.error && !/cancel/i.test(String(res.error))) {
+      hapticWarning();
+      toastMsg(`Geri yüklenemedi: ${String(res.error).slice(0, 40)}`);
+    }
+  };
   const Row = ({ icon, title, sub, right, onClick }) => (
     <div
       onClick={onClick}
@@ -2270,6 +2510,23 @@ const AppSettingsModal = ({ open, onClose, onReplayOnboarding, onReplayTour, onO
             onOpenPlan={() => { hapticLight(); onClose(); setTimeout(() => onOpenPlan?.(), 220); }}
           />
 
+          {/* ★ Haftalık maç saati — sabit gün/saat/saha + akıllı hatırlatmalar */}
+          <Row
+            icon="📅"
+            title="Haftalık maç saati"
+            sub={scheduleSub}
+            right={<I.Chevron />}
+            onClick={() => openViaEvent("halisaha:open-schedule")}
+          />
+          {/* ★ Kasa — saha ücretini kişi başı böl, kim ödedi takip et */}
+          <Row
+            icon="💰"
+            title="Kasa (saha ücreti)"
+            sub="Kişi başı tutar, kim ödedi, IBAN paylaş"
+            right={<I.Chevron />}
+            onClick={() => openViaEvent("halisaha:open-kasa", {})}
+          />
+
           {/* Dil */}
           <Row
             icon="🌐"
@@ -2307,6 +2564,21 @@ const AppSettingsModal = ({ open, onClose, onReplayOnboarding, onReplayTour, onO
             sub={t("settings_team_sub")}
             right={<I.Chevron />}
             onClick={() => { hapticLight(); onClose(); setTimeout(onOpenTeamSettings, 220); }}
+          />
+          {/* ★ Yedekleme — telefon değişince kadro/geçmiş kaybolmasın */}
+          <Row
+            icon="💾"
+            title="Verilerimi yedekle"
+            sub="Kadro, maç geçmişi ve ayarlar tek dosyada"
+            right={<I.Chevron />}
+            onClick={handleExportBackup}
+          />
+          <Row
+            icon="♻️"
+            title="Yedekten geri yükle"
+            sub="Yedek dosyasını seç — mevcut verilerin yerine geçer"
+            right={<I.Chevron />}
+            onClick={handleImportBackup}
           />
           {/* Hakkında */}
           <div style={{ marginTop: 8, padding: "10px 14px", textAlign: "center", fontSize: 10, color: "rgba(255,255,255,0.3)" }}>
@@ -2406,23 +2678,28 @@ export default function LineupPro() {
       `B Takımı (ort. ${r.ratingB}): ${names(r.teamB)}\n\n` +
       `Denge: %${r.balance}`;
     try {
-      await Share.share({ title: "Takımlar", text: txt, dialogTitle: t("share") });
+      // ★ Free → alt bilgi (uygulamaya geri link); Pro → alt bilgisiz
+      await Share.share({ title: "Takımlar", text: withShareFooter(txt), dialogTitle: t("share") });
+      track(EVENTS.LINEUP_SHARED, { kind: "text" });
     } catch (e) { /* iptal */ }
   }, []);
 
   // ★ AI Saha Dağıtımı — sonucu gerçek kadrolara + sahaya uygula
   const applyFieldDistribution = useCallback((res) => {
     if (!res || res.error) return;
+    // ★ AI sadece GELENLERİ dağıtır → "bu hafta yok" olanlar kendi takımında kalır (silinmez)
+    const distributedIds = new Set([...(res.A.players || []), ...(res.B.players || [])].map((p) => p.id));
+    const keepNotDistributed = (tt) => (tt.players || []).filter((p) => p && !distributedIds.has(p.id));
     setTeamA((tt) => ({
       ...tt,
-      players: res.A.players,
+      players: [...res.A.players, ...keepNotDistributed(tt)],
       fieldPlayers: res.A.fieldPlayers,
       captain: res.A.captain || null,
       slotMeta: res.A.meta || null,
     }));
     setTeamB((tt) => ({
       ...tt,
-      players: res.B.players,
+      players: [...res.B.players, ...keepNotDistributed(tt)],
       fieldPlayers: res.B.fieldPlayers,
       captain: res.B.captain || null,
       slotMeta: res.B.meta || null,
@@ -2434,19 +2711,23 @@ export default function LineupPro() {
   // ★ AI A&B Böl — tüm havuzu iki dengeli kadroya yaz (saha sıfırlanır, temiz başlangıç)
   const applyRosterSplit = useCallback((res) => {
     if (!res || res.error) return;
+    // ★ Bölünmeyen (bu hafta gelmeyen) oyuncular kendi takımında kalır
+    const splitIds = new Set([...(res.teamA || []), ...(res.teamB || [])].map((p) => p.id));
+    const keepNotSplit = (tt) => (tt.players || []).filter((p) => p && !splitIds.has(p.id));
     setTeamA((tt) => ({
       ...tt,
-      players: res.teamA,
+      players: [...res.teamA, ...keepNotSplit(tt)],
       fieldPlayers: Array(7).fill(null),
       captain: null,
     }));
     setTeamB((tt) => ({
       ...tt,
-      players: res.teamB,
+      players: [...res.teamB, ...keepNotSplit(tt)],
       fieldPlayers: Array(7).fill(null),
       captain: null,
     }));
     hapticSuccess();
+    track(EVENTS.AI_BALANCE_USED, { surface: "match", players: (res.teamA?.length || 0) + (res.teamB?.length || 0) });
     toast_("Oyuncular A ve B takımına bölündü");
   }, []);
 
@@ -2458,6 +2739,8 @@ export default function LineupPro() {
     });
     return out;
   }, [teamA.players, teamB.players]);
+  // ★ Bu hafta gelenler (AI dağıtımları sadece bunları kullanır; TeamBalancerAI de ayrıca süzer)
+  const presentPoolCount = useMemo(() => combinedPool.filter(isPresent).length, [combinedPool]);
 
   // ★ REKLAM: Uygulama açılışında reklamları başlat
   useEffect(() => {
@@ -2493,15 +2776,82 @@ export default function LineupPro() {
   }, []); // sadece ilk mount
 
 
+  // ★ Güncel mod — timeout/event callback'lerinde stale closure olmasın
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+
+  // ★ Yeni kurulumda rehber turu — davet linkiyle gelen (odaya katılacak) kullanıcıya
+  //   ve online moddayken GÖSTERİLMEZ; önce maça katılsın, tur sonra ayarlardan açılabilir.
   useEffect(() => {
-    if (!mode && !isTourDone() && teamA.players.length === 0 && teamB.players.length === 0) {
+    const cameViaInvite = () => {
+      try { if (peekPendingJoinCode()) return true; } catch {}
+      try { return localStorage.getItem("halisaha_invited") === "1"; } catch { return false; }
+    };
+    if (!mode && !isTourDone() && !cameViaInvite() && teamA.players.length === 0 && teamB.players.length === 0) {
       const timer = setTimeout(() => {
+        // 800ms içinde davet linki gelmiş / online'a geçilmiş olabilir — tekrar kontrol
+        if (cameViaInvite() || modeRef.current === "online") return;
         window.dispatchEvent(new CustomEvent("halisaha:start-tour"));
       }, 800);
       return () => clearTimeout(timer);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); 
+  }, []);
+
+  // ═══ NAVİGASYON ROUTER — bildirim tap'i / ana ekran kısayolları ═══
+  //   window "halisaha:navigate" { route }:
+  //   attendance | ai_split | result | stats | online | squad
+  //   Sadece state setter'lar kullanılır → uygulama açılır açılmaz da güvenli.
+  useEffect(() => {
+    const timers = [];
+    const closeOverlays = () => {
+      setShowAppSettings(false);
+      setSP(false); setEP(null);
+      setSC(false); setSS(null); setSF(null); setQS(null);
+      setShowBalancer(false); setShowFieldAI(false); setShowAISplit(false); setShowAIMode(false);
+      setSR(false);
+      setTransferRequest(null);
+      setHistoryPlayer(null);
+    };
+    const onNavigate = (e) => {
+      const route = e?.detail?.route;
+      if (!route) return;
+      closeOverlays();
+      switch (route) {
+        case "attendance":
+          // Maç modu render olsun, sonra A1'in Yapıştır/Yoklama sheet'ini "Bu hafta kim geliyor" sekmesiyle aç
+          setMode("match"); setTab("players");
+          timers.push(setTimeout(() => {
+            window.dispatchEvent(new CustomEvent("halisaha:open-paste-roster", { detail: { tab: "attendance" } }));
+          }, 350));
+          break;
+        case "ai_split":
+          setMode("match"); setTab("field");
+          setShowAIMode(true);              // AI MODU butonunun açtığı menü (reklamsız)
+          break;
+        case "result":
+          setMode("match");
+          setSR(true);                      // "Maçı Bitir" ile aynı modal — reklamsız
+          break;
+        case "stats":
+          setMode("history");
+          break;
+        case "online":
+          setMode("online");
+          break;
+        case "squad":
+          setMode("match"); setTab("players");
+          break;
+        default:
+          console.warn("[navigate] bilinmeyen route:", route);
+      }
+    };
+    window.addEventListener("halisaha:navigate", onNavigate);
+    return () => {
+      window.removeEventListener("halisaha:navigate", onNavigate);
+      timers.forEach(clearTimeout);
+    };
+  }, []);
 
 
   // ★ Banner kontrolü — SADECE mode select ekranında ve hiçbir modal/tour/onboarding açık değilken görünsün
@@ -2630,7 +2980,8 @@ export default function LineupPro() {
   const handleEmptySlotTap = (side, idx, role) => {
     const targetTeam = side === "A" ? teamA : teamB;
     const onFieldSet = new Set(targetTeam.fieldPlayers.filter(Boolean));
-    const availableCount = targetTeam.players.filter(p => !onFieldSet.has(p.id)).length;
+    // ★ "Bu hafta yok" olanlar seçilebilir sayılmaz
+    const availableCount = targetTeam.players.filter(p => !onFieldSet.has(p.id) && isPresent(p)).length;
 
     if (availableCount === 0) {
       // Hiç müsait oyuncu yok → kadro tab'a yumuşak geçiş
@@ -2651,10 +3002,155 @@ export default function LineupPro() {
 
   const getPositions = (side) => FORMATIONS[(side === "A" ? teamA : teamB).formation].positions.map((p) => mapPos(p, side, isMatch));
 
-  const savePlayer = (p) => {
+  // ═══════════════════════════════════════════════════════════
+  // ═══ KADRO (A1): yapıştır · katılım · misafir · örnek · geri al
+  // ═══════════════════════════════════════════════════════════
+  // Güncel takımlar — window event callback'lerinde stale closure olmasın
+  const teamsRef = useRef({ teamA, teamB });
+  teamsRef.current = { teamA, teamB };
+
+  // ★ Aksiyonlu toast (Geri al / Hafıza dolu) — mevcut basit Toast'tan ayrı
+  const [notice, setNotice] = useState(null);
+  const noticeTimerRef = useRef(null);
+  const showNotice = useCallback((n, ms = 5000) => {
+    clearTimeout(noticeTimerRef.current);
+    const id = Date.now() + Math.random();
+    setNotice({ ...n, id });
+    noticeTimerRef.current = setTimeout(() => setNotice((cur) => (cur && cur.id === id ? null : cur)), ms);
+  }, []);
+  useEffect(() => () => clearTimeout(noticeTimerRef.current), []);
+
+  // ★ "Listeyi Yapıştır" / "Kim Var?" sheet'i — { tab, nonce } | null
+  const [pasteSheet, setPasteSheet] = useState(null);
+  const openPasteSheet = (tabName = "paste") => {
+    hapticLight();
+    setPasteSheet({ tab: tabName === "attendance" ? "attendance" : "paste", nonce: Date.now() });
+  };
+  useEffect(() => {
+    const onOpen = (e) => {
+      const tabReq = e?.detail?.tab === "attendance" ? "attendance" : "paste";
+      setPasteSheet({ tab: tabReq, nonce: Date.now() });
+      // Sheet ana (saha/kadro) arayüzünde mount edilir → ana ekrandan/geçmişten gelindiyse maç moduna geç
+      setMode((m) => (m === "match" || m === "myteam" ? m : "match"));
+      setTab("players");
+    };
+    window.addEventListener("halisaha:open-paste-roster", onOpen);
+    return () => window.removeEventListener("halisaha:open-paste-roster", onOpen);
+  }, []);
+
+  // ★ SQUAD_READY "ilk kez 10+" anlamını korusun: zaten 10+ olan eski kullanıcıyı sessizce işaretle
+  useEffect(() => {
+    markSquadReadyIfAlready(realPlayers([...(teamA.players || []), ...(teamB.players || [])]).length);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ★ Hafıza dolu → görünür uyarı + tek dokunuşla fotoğrafları küçült
+  const shrinkAllPhotos = useCallback(async () => {
+    const { teamA: a, teamB: b } = teamsRef.current;
+    const all = [...(a.players || []), ...(b.players || [])].filter((p) => p?.photo && p.photo.length > 30000);
+    if (all.length === 0) { toast_("Küçültülecek fotoğraf yok"); return; }
+    const pairs = await Promise.all(all.map(async (p) => [p.id, await resizeImageDataUrl(p.photo, 200, 0.7)]));
+    const byId = new Map(pairs);
+    const apply = (tt) => ({ ...tt, players: tt.players.map((p) => (byId.has(p.id) ? { ...p, photo: byId.get(p.id) } : p)) });
+    setTeamA(apply); setTeamB(apply);
+    hapticSuccess();
+    toast_(`${all.length} fotoğraf küçültüldü`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    const onFull = () => showNotice({
+      msg: "Hafıza dolu: fotoğrafları küçültüp tekrar dene",
+      actionLabel: "Küçült", tone: "warn", onAction: shrinkAllPhotos,
+    }, 9000);
+    window.addEventListener("halisaha:storage-full", onFull);
+    return () => window.removeEventListener("halisaha:storage-full", onFull);
+  }, [showNotice, shrinkAllPhotos]);
+
+  // ★ Maç kaydedildi → misafir varsa "Kadroya kat / Sil" sor (online maçlar hariç)
+  const [guestPrompt, setGuestPrompt] = useState(null); // [guestId] | null
+  useEffect(() => {
+    const onSaved = (e) => {
+      if (e?.detail?.kind === "online") return;
+      const { teamA: a, teamB: b } = teamsRef.current;
+      const guests = [...(a.players || []), ...(b.players || [])].filter(isGuest);
+      if (guests.length > 0) setGuestPrompt(guests.map((g) => g.id));
+    };
+    window.addEventListener(MATCH_SAVED_EVENT, onSaved);
+    return () => window.removeEventListener(MATCH_SAVED_EVENT, onSaved);
+  }, []);
+  const promptGuests = guestPrompt ? combinedPool.filter((p) => guestPrompt.includes(p.id) && isGuest(p)) : [];
+  const keepGuests = () => {
+    const ids = new Set(promptGuests.map((g) => g.id));
+    const apply = (tt) => ({ ...tt, players: tt.players.map((p) => { if (!ids.has(p.id)) return p; const { isGuest: _g, ...rest } = p; return rest; }) });
+    setTeamA(apply); setTeamB(apply);
+    setGuestPrompt(null);
+    toast_(`${ids.size} misafir kadroya katıldı`);
+  };
+  const removePlayersWhere = (pred) => (tt) => {
+    const ids = new Set((tt.players || []).filter(pred).map((p) => p.id));
+    if (ids.size === 0) return tt;
+    const fieldHad = (tt.fieldPlayers || []).some((x) => ids.has(x));
+    return {
+      ...tt,
+      players: tt.players.filter((p) => !ids.has(p.id)),
+      fieldPlayers: (tt.fieldPlayers || []).map((x) => (ids.has(x) ? null : x)),
+      captain: ids.has(tt.captain) ? null : tt.captain,
+      slotMeta: fieldHad ? null : tt.slotMeta,
+    };
+  };
+  const deleteGuests = () => {
+    const ids = new Set(promptGuests.map((g) => g.id));
+    setTeamA(removePlayersWhere((p) => ids.has(p.id)));
+    setTeamB(removePlayersWhere((p) => ids.has(p.id)));
+    setGuestPrompt(null);
+    toast_("Misafirler silindi");
+  };
+
+  // ★ Katılım: "bu hafta yok" hızlı geçişi (PlayerCard)
+  const toggleAbsent = (id) => {
+    hapticSelection();
+    const side = teamA.players.some((x) => x.id === id) ? "A" : "B";
+    (side === "A" ? setTeamA : setTeamB)((tt) => ({
+      ...tt,
+      players: tt.players.map((x) => {
+        if (x.id !== id) return x;
+        if (x.absent) { const { absent: _a, ...rest } = x; return rest; }
+        return { ...x, absent: true };
+      }),
+    }));
+  };
+
+  // ★ "Örnek kadroyla dene" — demo kadro (isDemo) + AI dağıtımını aç
+  const demoCount = useMemo(() => combinedPool.filter(isDemo).length, [combinedPool]);
+  const loadDemoSquad = () => {
+    hapticSuccess();
+    const placed = [...(teamA.players || [])];
+    const demo = mkTeam("", TEAM_COLORS[0], true).players.map((p) => {
+      const full = ensurePlayerAttributes({ ...p, isDemo: true, jerseyNumber: getDefaultJerseyNumber(p.position, placed) });
+      placed.push(full);
+      return full;
+    });
+    setTeamA((tt) => ({ ...tt, players: [...tt.players, ...demo] }));
+    setAT("A");
+    const allAfter = [...combinedPool, ...demo];
+    trackPlayersAdded({ source: "demo", count: demo.length, squadSize: allAfter.length, realSquadSize: realPlayers(allAfter).length });
+    toast_("Örnek kadro yüklendi");
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent("halisaha:navigate", { detail: { route: "ai_split" } }));
+    }, 450);
+  };
+  const removeDemoPlayers = () => {
+    setTeamA(removePlayersWhere(isDemo));
+    setTeamB(removePlayersWhere(isDemo));
+    toast_("Örnek oyuncular silindi");
+  };
+
+  // ★ opts.keepOpen → "Kaydet ve Yeni Ekle": modal açık kalır
+  const savePlayer = (p, opts = {}) => {
     const isFirstEver = teamA.players.length === 0 && teamB.players.length === 0 && !milestones.current.first;
+    const isNewPlayer = !teamA.players.some((x) => x.id === p.id) && !teamB.players.some((x) => x.id === p.id);
     setTeam((tt) => { const i = tt.players.findIndex((x) => x.id === p.id); return { ...tt, players: i >= 0 ? tt.players.map((x, j) => (j === i ? p : x)) : [...tt.players, p] }; });
-    setSP(false); setEP(null);
+    if (!opts.keepOpen) { setSP(false); setEP(null); }
     if (isFirstEver) {
       milestones.current.first = true;
       hapticSuccess();
@@ -2663,14 +3159,42 @@ export default function LineupPro() {
       hapticLight();
       toast_(t("t_saved"));
     }
+    if (isNewPlayer) {
+      const allAfter = [...teamA.players, ...teamB.players, p];
+      trackPlayersAdded({ source: "manual", count: 1, squadSize: allAfter.length, realSquadSize: realPlayers(allAfter).length });
+    }
     // ★ Tur için sinyal — "oyuncu kaydedildi" event'i
     window.dispatchEvent(new CustomEvent("halisaha:player-saved"));
   };
 
+  // ★ Silme artık geri alınabilir: 5 sn "Geri al" — aynı sıraya, saha slotuna ve kaptanlığa döner
   const deletePlayer = (id) => {
     hapticWarning();
-    setTeam((tt) => ({ ...tt, players: tt.players.filter((x) => x.id !== id), fieldPlayers: tt.fieldPlayers.map((x) => (x === id ? null : x)), captain: tt.captain === id ? null : tt.captain }));
-    toast_(t("t_deleted"));
+    const side = teamA.players.some((x) => x.id === id) ? "A" : teamB.players.some((x) => x.id === id) ? "B" : activeTeam;
+    const src = side === "A" ? teamA : teamB;
+    const setter = side === "A" ? setTeamA : setTeamB;
+    const index = src.players.findIndex((x) => x.id === id);
+    if (index < 0) return;
+    const removed = src.players[index];
+    const fieldSlots = (src.fieldPlayers || []).map((x, i) => (x === id ? i : -1)).filter((i) => i >= 0);
+    const wasCaptain = src.captain === id;
+    setter((tt) => ({ ...tt, players: tt.players.filter((x) => x.id !== id), fieldPlayers: tt.fieldPlayers.map((x) => (x === id ? null : x)), captain: tt.captain === id ? null : tt.captain }));
+    showNotice({
+      msg: `Oyuncu silindi · ${fullNameOf(removed) || "Oyuncu"}`,
+      actionLabel: "Geri al",
+      onAction: () => {
+        setter((tt) => {
+          if (tt.players.some((x) => x.id === id)) return tt;
+          const players = [...tt.players];
+          players.splice(Math.min(index, players.length), 0, removed);
+          const fieldPlayers = [...(tt.fieldPlayers || [])];
+          fieldSlots.forEach((i) => { if (i < fieldPlayers.length && !fieldPlayers[i]) fieldPlayers[i] = id; });
+          return { ...tt, players, fieldPlayers, captain: wasCaptain && !tt.captain ? id : tt.captain };
+        });
+        hapticSuccess();
+        toast_("Oyuncu geri alındı");
+      },
+    }, 5000);
   };
 
   // ★ TRANSFER — oyuncuyu diğer takıma taşı.
@@ -2785,9 +3309,9 @@ export default function LineupPro() {
   const handleModeSelect = async (newMode) => {
     hapticMedium();
 
-    // Reklam Promise'ini bekle — show başarısız olsa bile (false dönerse) anında devam eder.
-    try { await showInterstitial(); } catch (_) {}
-
+    // ★ Mod seçiminde tam ekran reklam YOK — kullanıcı beklemeden moda girer.
+    //   (Tek interstitial: MatchResultModal'da maç kaydedildikten sonra.)
+    track(EVENTS.MODE_SELECTED, { mode: newMode });
     setMode(newMode);
 
     // ★ Tour için: mod seçildi sinyali
@@ -2801,7 +3325,7 @@ export default function LineupPro() {
 
   const handleMatchEnd = async () => {
     hapticHeavy();
-    showInterstitial();
+    // ★ Reklam yok — sonuç ekranı anında açılır (reklam kayıttan SONRA, MatchResultModal'da)
     setSR(true);
   };
 
@@ -2811,18 +3335,19 @@ const handleShareLineup = async () => {
     hapticLight();
     toast_(t("t_screenshot"));
     
-    // iOS engelini aşmak için reklamı burdan sildik, en sona aldık.
+    // ★ Paylaşım sonrası reklam KALDIRILDI — paylaşan kullanıcı ödüllendirilmeli, cezalandırılmamalı
     const ok = await captureAndShare(pitchEl, "dizilim.png");
-    if (ok) { hapticSuccess(); toast_(t("t_lineup_shared")); }
-    
-    // İşlem bittikten sonra reklamı göster
-    setTimeout(() => {
-      showInterstitial();
-    }, 500);
+    if (ok) {
+      hapticSuccess(); toast_(t("t_lineup_shared"));
+      track(EVENTS.LINEUP_SHARED, { kind: "image" });
+    }
   };
 
   const onFieldIds = new Set(team.fieldPlayers.filter(Boolean));
-  const filtered = team.players.filter((p) => { const q = search.toLowerCase(); return p.name.toLowerCase().includes(q) || p.surname.toLowerCase().includes(q) || p.position.toLowerCase().includes(q); });
+  // ★ Soyad artık isteğe bağlı → null-güvenli arama
+  const filtered = team.players.filter((p) => { const q = search.toLowerCase(); return (p.name || "").toLowerCase().includes(q) || (p.surname || "").toLowerCase().includes(q) || (p.position || "").toLowerCase().includes(q); });
+  // ★ Katılım sayacı (aktif takım) — "12/14 geliyor"
+  const teamPresentCount = team.players.filter(isPresent).length;
 
   const globalCSS = `
     @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@700&display=swap');
@@ -3053,9 +3578,9 @@ const handleShareLineup = async () => {
             <style>{globalCSS}</style>
             <ModeSelectScreen
               onSelectMode={(key) => {
-                if (key === "history") { hapticMedium(); setMode("history"); }
-                else if (key === "online") { hapticMedium(); setMode("online"); }
-                else { handleModeSelect(key); }   // myteam | match
+                if (key === "history") { hapticMedium(); track(EVENTS.MODE_SELECTED, { mode: "history" }); setMode("history"); }
+                else if (key === "online") { hapticMedium(); track(EVENTS.MODE_SELECTED, { mode: "online" }); setMode("online"); }
+                else { handleModeSelect(key); }   // myteam | match (track handleModeSelect içinde)
               }}
               onOpenSettings={() => { hapticLight(); setShowAppSettings(true); }}
             />
@@ -3071,7 +3596,10 @@ const handleShareLineup = async () => {
             hapticsOn={hapticsOn}
             onToggleHaptics={(v) => { setHapticsEnabled(v); setHapticsOnState(v); }}
             lang={lang}
+            onToast={toast_}
           />
+          {/* ★ Ana ekranda da toast (yedek alındı vb. mesajlar görünsün) */}
+          <Toast message={toast.msg} show={toast.show} />
         </>
       );
     }
@@ -3149,7 +3677,7 @@ const handleShareLineup = async () => {
           <div key="field" style={{ animation: "tabContentIn 0.32s cubic-bezier(.22,.85,.32,1) both" }}>
             {isMatch && (
               <div style={{ padding: "9px 13px 3px" }}>
-                <button onClick={() => { hapticMedium(); setShowAIMode(true); }} style={{
+                <button data-tour="ai-split" onClick={() => { hapticMedium(); setShowAIMode(true); }} style={{
                   width: "100%", display: "flex", alignItems: "center", gap: 11, padding: "12px 14px",
                   borderRadius: 12, border: "1px solid rgba(16,185,129,0.3)", cursor: "pointer",
                   background: "linear-gradient(135deg, rgba(16,185,129,0.16), rgba(16,185,129,0.04))",
@@ -3272,8 +3800,26 @@ const handleShareLineup = async () => {
                   } : {}),
                 }}
               ><I.Plus /></button>
+              {/* ★ WhatsApp listesini tek seferde kadroya çevir */}
+              <button
+                data-tour="paste-roster"
+                onClick={() => openPasteSheet("paste")}
+                style={{
+                  ...S.btn,
+                  width: "auto",
+                  padding: "10px 11px",
+                  borderRadius: 8,
+                  fontSize: 11.5,
+                  whiteSpace: "nowrap",
+                  color: tc,
+                  background: `${tc}14`,
+                  border: `1px solid ${tc}44`,
+                }}
+              >📋 Listeyi Yapıştır</button>
             </div>
-            <button onClick={async () => { showInterstitial(); setSC(true); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: "rgba(251,191,36,0.06)", borderRadius: 10, marginBottom: 10, border: "1px solid rgba(251,191,36,0.15)", cursor: "pointer", width: "100%" }}>
+            {/* ★ Örnek kadro yüklüyse: sil ve kendi ekibini ekle */}
+            <DemoBanner count={demoCount} onRemove={removeDemoPlayers} />
+            <button onClick={() => { hapticLight(); setSC(true); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: "rgba(251,191,36,0.06)", borderRadius: 10, marginBottom: 10, border: "1px solid rgba(251,191,36,0.15)", cursor: "pointer", width: "100%" }}>
               <div style={{ fontSize: 16 }}>👑</div>
               <div style={{ flex: 1, textAlign: "left" }}><div style={{ fontSize: 11, fontWeight: 700, color: "#fbbf24" }}>{t("captain")}</div><div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)" }}>{team.captain ? (() => { const cp = team.players.find((p) => p.id === team.captain); return cp ? `${cp.name} ${cp.surname}` : t("captain_none"); })() : t("captain_none")}</div></div>
               <div style={{ color: "rgba(251,191,36,0.5)", transform: "rotate(-90deg)" }}><I.Chevron /></div>
@@ -3291,14 +3837,35 @@ const handleShareLineup = async () => {
                 <div style={{ color: "rgba(16,185,129,0.5)", transform: "rotate(-90deg)" }}><I.Chevron /></div>
               </button>
             )}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 9 }}><span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontWeight: 600 }}>{t("players_count", {n: filtered.length})}</span><span style={{ fontSize: 10, color: "rgba(255,255,255,0.22)" }}>{t("on_field", {n: onFieldIds.size})}</span></div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 9, gap: 6 }}>
+              <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontWeight: 600 }}>{t("players_count", {n: filtered.length})}</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                {/* ★ Katılım: "12/14 geliyor" → Kim Var? sekmesi */}
+                {team.players.length > 0 && (
+                  <button onClick={() => openPasteSheet("attendance")} style={{ padding: "3px 8px", borderRadius: 6, cursor: "pointer", fontSize: 10, fontWeight: 700, fontFamily: "inherit", color: teamPresentCount < team.players.length ? "#fbbf24" : "#34d399", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                    ✅ {teamPresentCount}/{team.players.length} geliyor
+                  </button>
+                )}
+                <button onClick={() => openPasteSheet("attendance")} style={{ padding: "3px 8px", borderRadius: 6, cursor: "pointer", fontSize: 10, fontWeight: 700, fontFamily: "inherit", color: "rgba(255,255,255,0.5)", background: "rgba(255,255,255,0.03)", border: "1px dashed rgba(255,255,255,0.14)" }}>+ Misafir</button>
+                <span style={{ fontSize: 10, color: "rgba(255,255,255,0.22)" }}>{t("on_field", {n: onFieldIds.size})}</span>
+              </div>
+            </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-              {filtered.map((p) => (<PlayerCard key={p.id} player={p} isOnField={onFieldIds.has(p.id)} teamColor={tc} isCaptain={team.captain === p.id} onToggleCaptain={(id) => toggleCaptain(activeTeam, id)} onEdit={(pl) => { setEP(pl); setSP(true); }} onDelete={deletePlayer} onShowStats={(pl) => { setHistoryPlayer(pl); setMode("history"); }} onTransfer={isMatch ? (pl) => setTransferRequest({ player: pl, fromSide: activeTeam }) : undefined} formDelta={formDeltaMap[p.id]} />))}
+              {filtered.map((p) => (<PlayerCard key={p.id} player={p} isOnField={onFieldIds.has(p.id)} teamColor={tc} isCaptain={team.captain === p.id} onToggleCaptain={(id) => toggleCaptain(activeTeam, id)} onEdit={(pl) => { setEP(pl); setSP(true); }} onDelete={deletePlayer} onShowStats={(pl) => { setHistoryPlayer(pl); setMode("history"); }} onTransfer={isMatch ? (pl) => setTransferRequest({ player: pl, fromSide: activeTeam }) : undefined} formDelta={formDeltaMap[p.id]} onToggleAbsent={toggleAbsent} />))}
               {filtered.length === 0 && (<div style={{ textAlign: "center", padding: 38, color: "rgba(255,255,255,0.18)" }}><div style={{ fontSize: 30, marginBottom: 7 }}>⚽</div><div style={{ fontSize: 13, marginBottom: 11 }}>{t("no_player_found")}</div><button onClick={() => { setSearch(""); setEP(null); setSP(true); }} style={{
                 ...S.btn, width: "auto", padding: "9px 22px", fontSize: 13, display: "inline-flex",
                 background: `linear-gradient(135deg,${team.color.primary},${team.color.secondary})`,
                 ...(highlightAddBtn ? { animation: "ctaPulse 1.0s ease-in-out 0s 2 both" } : {}),
-              }}><I.Plus /> {t("add_player")}</button></div>)}
+              }}><I.Plus /> {t("add_player")}</button>
+                {/* ★ BOŞ KADRO: WhatsApp listesi yapıştır / örnek kadroyla dene (hiç oyuncu yoksa) */}
+                {team.players.length === 0 && !search && (
+                  <EmptySquadCTA
+                    accent={tc}
+                    onPaste={() => openPasteSheet("paste")}
+                    onDemo={combinedPool.length === 0 ? loadDemoSquad : undefined}
+                  />
+                )}
+              </div>)}
             </div>
             <div style={{ marginTop: 14 }}>
               <TeamStatsCard
@@ -3319,7 +3886,7 @@ const handleShareLineup = async () => {
       </div>
 
       {/* MODALS */}
-      <Modal open={showPlayer} onClose={() => { setSP(false); setEP(null); }} title={editPlayer ? t("edit_player") : t("new_player")}><PlayerForm player={editPlayer} onSave={savePlayer} onCancel={() => { setSP(false); setEP(null); }} accent={tc} existingPlayers={team.players} /></Modal>
+      <Modal open={showPlayer} onClose={() => { setSP(false); setEP(null); }} title={editPlayer ? t("edit_player") : t("new_player")}><PlayerForm player={editPlayer} onSave={savePlayer} onCancel={() => { setSP(false); setEP(null); }} accent={tc} existingPlayers={team.players} allPlayers={combinedPool} /></Modal>
 
       {/* ★ TRANSFER MODAL — basit, iki takım arasında oyuncu taşıma */}
       <Modal open={!!transferRequest} onClose={() => setTransferRequest(null)} title={t("transfer_title")}>
@@ -3432,17 +3999,14 @@ const handleShareLineup = async () => {
       )}
       {showAIMode && (
         <AIModeSheet
-          poolSize={combinedPool.length}
-          showAdBadge={!isPremium()}
+          poolSize={presentPoolCount}
+          showAdBadge={false}
           onClose={() => setShowAIMode(false)}
-          onSelect={async (m) => {
+          onSelect={(m) => {
             setShowAIMode(false);
-            // ★ Her AI modu 1 reward reklam ister (premium hariç)
-            const open = () => { if (m === "split") setShowAISplit(true); else setShowFieldAI(true); };
+            // ★ AI takım dengeleme ÜCRETSİZ — reklam kapısı yok, doğrudan açılır
             try { localStorage.setItem("halisaha_used_ai", "1"); } catch {}
-            if (isPremium()) { open(); return; }
-            const rewarded = await showRewarded(open);
-            if (!rewarded) { showInterstitial(); open(); }
+            if (m === "split") setShowAISplit(true); else setShowFieldAI(true);
           }}
         />
       )}
@@ -3466,7 +4030,28 @@ const handleShareLineup = async () => {
           onCommit={applyFieldDistribution}
         />
       )}
-      <Modal open={!!quickSelect} onClose={() => setQS(null)} title={t("select")}>{quickSelect && (<QuickSelect role={quickSelect.role} players={(quickSelect.side === "A" ? teamA : teamB).players} teamColor={(quickSelect.side === "A" ? teamA : teamB).color.secondary} onFieldIds={new Set((quickSelect.side === "A" ? teamA : teamB).fieldPlayers.filter(Boolean))} onSelect={(id) => { placePlayer(quickSelect.side, quickSelect.idx, id); setQS(null); }} />)}</Modal>
+      <Modal open={!!quickSelect} onClose={() => setQS(null)} title={t("select")}>{quickSelect && (<QuickSelect role={quickSelect.role} players={(quickSelect.side === "A" ? teamA : teamB).players.filter(isPresent)} teamColor={(quickSelect.side === "A" ? teamA : teamB).color.secondary} onFieldIds={new Set((quickSelect.side === "A" ? teamA : teamB).fieldPlayers.filter(Boolean))} onSelect={(id) => { placePlayer(quickSelect.side, quickSelect.idx, id); setQS(null); }} />)}</Modal>
+      {/* ═══ KADRO (A1): Listeyi Yapıştır / Kim Var? · Geri al toast'ı · maç sonrası misafir sorusu ═══ */}
+      {pasteSheet && (
+        <PasteRosterSheet
+          key={pasteSheet.nonce}
+          initialTab={pasteSheet.tab}
+          teamA={teamA}
+          teamB={teamB}
+          setTeamA={setTeamA}
+          setTeamB={setTeamB}
+          isMatch={isMatch}
+          activeTeam={activeTeam}
+          makeId={generateId}
+          getJersey={getDefaultJerseyNumber}
+          onToast={toast_}
+          onClose={() => setPasteSheet(null)}
+        />
+      )}
+      <ActionToast notice={notice} onClose={() => setNotice(null)} />
+      {guestPrompt && !showResult && !pasteSheet && (
+        <GuestPrompt guests={promptGuests} onKeep={keepGuests} onDelete={deleteGuests} onClose={() => setGuestPrompt(null)} />
+      )}
       <Modal open={!!showSettings} onClose={() => setSS(null)} title={t("team_settings")}>
         {showSettings && (() => { const tm = showSettings === "A" ? teamA : teamB; const setter = showSettings === "A" ? setTeamA : setTeamB; return (
           <div style={{ display: "flex", flexDirection: "column", gap: 15 }}>
@@ -3498,6 +4083,7 @@ const handleShareLineup = async () => {
         hapticsOn={hapticsOn}
         onToggleHaptics={(v) => { setHapticsEnabled(v); setHapticsOnState(v); }}
         lang={lang}
+        onToast={toast_}
       />
       <Toast message={toast.msg} show={toast.show} />
     </div>

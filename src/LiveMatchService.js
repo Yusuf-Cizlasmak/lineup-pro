@@ -326,6 +326,8 @@ export const updateSessionMeta = async (sessionId, meta = {}) => {
   if (meta.team_a_color !== undefined) allowed.team_a_color = meta.team_a_color;
   if (meta.team_b_color !== undefined) allowed.team_b_color = meta.team_b_color;
   if (meta.duration_minutes !== undefined) allowed.duration_minutes = meta.duration_minutes;
+  // ★ Maç tarihi/saati (ISO string | null) — scheduled_at temel kolon, her şemada var
+  if (meta.scheduled_at !== undefined) allowed.scheduled_at = meta.scheduled_at;
   if (Object.keys(allowed).length === 0) return;
 
   const { error } = await supabase
@@ -340,6 +342,7 @@ export const updateSessionMeta = async (sessionId, meta = {}) => {
     if (allowed.team_b_name !== undefined) safe.team_b_name = allowed.team_b_name;
     if (allowed.field_name !== undefined) safe.field_name = allowed.field_name;
     if (allowed.location !== undefined) safe.location = allowed.location;
+    if (allowed.scheduled_at !== undefined) safe.scheduled_at = allowed.scheduled_at;
     if (Object.keys(safe).length > 0) {
       const r = await supabase
         .from('match_sessions')

@@ -7,6 +7,10 @@
 const STORAGE_KEY = "halisaha_match_history";
 const MAX_MATCHES = 200; // perf guard — eski maçları otomatik düşür
 
+// ★ Kaydedilen her YENİ maç için yayınlanan olay (Kasa, bildirimler, misafir sorusu dinler)
+//   detail: { id, date (ms), kind: "offline"|"online", attendeeCount, scoreA, scoreB }
+export const MATCH_SAVED_EVENT = "halisaha:match-saved";
+
 // ─── Şema (referans) ───
 // Match {
 //   id: string
@@ -18,8 +22,14 @@ const MAX_MATCHES = 200; // perf guard — eski maçları otomatik düşür
 //   isMatch: boolean (tek takım mı, iki takım mı)
 //   events: Event[]   // dakika sıralı akış
 //   mvpId: string | null
-//   playerSnapshots: { [playerId]: { id, name, surname, jerseyNumber, position, side: "A"|"B" } }
+//   playerSnapshots: { [playerId]: { id, name, surname, jerseyNumber, position, side: "A"|"B", isGuest? } }
+//   source?: "online" | "offline"   // LiveMatch → "online" (buildMatch({ source }) ile)
+//   attendeeCount: number           // maça katılan (gelen) oyuncu sayısı, misafirler dahil
 // }
+// ★ Katılım kuralları (roster.js bayrakları):
+//   • p.absent  → bu hafta gelmedi → snapshot'a YAZILMAZ (olaylarda adı geçiyorsa yazılır)
+//   • p.isDemo  → örnek oyuncu → geçmişe HİÇ yazılmaz; sadece örnek oyunculu maç kaydedilmez
+//   • p.isGuest → snapshot'a isGuest:true ile yazılır, istatistik/krallıklara girmez
 // Event {
 //   id: string
 //   type: "goal" | "own_goal" | "yellow" | "red" | "assist_only"
@@ -59,14 +69,45 @@ export const getAllMatches = () => readAll();
 
 export const getMatch = (id) => readAll().find((m) => m.id === id) || null;
 
+// Online (LiveMatch) maçı mı? source/kind alanı ya da (eski kayıtlar için) oyuncu
+// kimliklerinin hepsinin cihaz UUID'si olmasından anlaşılır.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const matchKindOf = (match) => {
+  if (!match) return "offline";
+  if (match.source === "online" || match.kind === "online") return "online";
+  if (match.source === "offline" || match.kind === "offline") return "offline";
+  const ids = Object.keys(match.playerSnapshots || {});
+  if (ids.length > 0 && ids.every((id) => UUID_RE.test(id))) return "online";
+  return "offline";
+};
+
 export const saveMatch = (match) => {
+  // ★ Sadece örnek oyunculardan oluşan maç geçmişe yazılmaz (deneme amaçlı)
+  if (!match || match.isDemo) return match;
   const all = readAll();
   const i = all.findIndex((m) => m.id === match.id);
+  const isNew = i < 0;
   if (i >= 0) all[i] = match;
   else all.unshift(match);
   writeAll(all);
   // Cross-tab + dinleyici bilgilendirmesi
   try { window.dispatchEvent(new CustomEvent("halisaha:history-updated")); } catch {}
+  // ★ Yeni maç → Kasa / bildirim / misafir sorusu dinleyicileri
+  if (isNew) {
+    try {
+      const snaps = Object.values(match.playerSnapshots || {});
+      window.dispatchEvent(new CustomEvent(MATCH_SAVED_EVENT, {
+        detail: {
+          id: match.id,
+          date: match.playedAt || Date.now(),
+          kind: matchKindOf(match),
+          attendeeCount: typeof match.attendeeCount === "number" ? match.attendeeCount : snaps.length,
+          scoreA: match.teamA?.score ?? 0,
+          scoreB: match.teamB?.score ?? 0,
+        },
+      }));
+    } catch {}
+  }
   return match;
 };
 
@@ -85,6 +126,7 @@ export const clearAllMatches = () => {
 const newId = () => `m_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
 // Maç oluştur (modaldan kaydet butonu çağırır)
+// source: "online" (LiveMatch) | "offline" — verilmezse otomatik tespit edilir
 export const buildMatch = ({
   teamA,
   teamB,
@@ -93,11 +135,35 @@ export const buildMatch = ({
   events,
   isMatch,
   mvpId = null,
+  source = null,
 }) => {
+  const allPlayers = [...(teamA?.players || []), ...(teamB?.players || [])].filter(Boolean);
+  const demoIds = new Set(allPlayers.filter((p) => p.isDemo === true).map((p) => p.id));
+
+  // ★ Örnek oyuncular olaylardan da silinir (gol/asist/kart/MVP kimseye yazılmaz)
+  const cleanEvents = (events || []).map((ev) => {
+    if (!ev) return ev;
+    const pid = ev.playerId && demoIds.has(ev.playerId) ? null : ev.playerId ?? null;
+    const aid = ev.assistPlayerId && demoIds.has(ev.assistPlayerId) ? null : ev.assistPlayerId ?? null;
+    if (pid === ev.playerId && aid === ev.assistPlayerId) return ev;
+    return { ...ev, playerId: pid, assistPlayerId: aid };
+  }).filter(Boolean);
+  const cleanMvp = mvpId && demoIds.has(mvpId) ? null : mvpId;
+
+  // Olaylarda adı geçen oyuncu "gelmedi" işaretli olsa bile maça katılmıştır
+  const involved = new Set();
+  cleanEvents.forEach((ev) => {
+    if (ev.playerId) involved.add(ev.playerId);
+    if (ev.assistPlayerId) involved.add(ev.assistPlayerId);
+  });
+  if (cleanMvp) involved.add(cleanMvp);
+
   // Oyuncu snapshot — sonradan oyuncu silinse bile geçmişte kalsın
+  // ★ Sadece gelen (absent olmayan) ve örnek olmayan oyuncular yazılır
   const playerSnapshots = {};
   const snap = (p, side) => {
-    if (!p) return;
+    if (!p || p.isDemo === true) return;
+    if (p.absent === true && !involved.has(p.id)) return;
     playerSnapshots[p.id] = {
       id: p.id,
       name: p.name || "",
@@ -105,10 +171,15 @@ export const buildMatch = ({
       jerseyNumber: p.jerseyNumber || null,
       position: p.position || null,
       side,
+      ...(p.isGuest === true ? { isGuest: true } : {}),
     };
   };
   (teamA?.players || []).forEach((p) => snap(p, "A"));
   (teamB?.players || []).forEach((p) => snap(p, "B"));
+
+  const attendeeCount = Object.keys(playerSnapshots).length;
+  // Kadroda oyuncu vardı ama hepsi örnek oyuncu → deneme maçı, geçmişe yazılmaz
+  const isDemoOnly = attendeeCount === 0 && demoIds.size > 0;
 
   return {
     id: newId(),
@@ -126,9 +197,12 @@ export const buildMatch = ({
     formationA: teamA?.formation || null,
     formationB: teamB?.formation || null,
     isMatch: !!isMatch,
-    events: events || [],
-    mvpId,
+    events: cleanEvents,
+    mvpId: cleanMvp,
     playerSnapshots,
+    attendeeCount,
+    ...(source === "online" || source === "offline" ? { source } : {}),
+    ...(isDemoOnly ? { isDemo: true } : {}),
   };
 };
 
@@ -182,7 +256,13 @@ export const computePlayerStats = (matches) => {
   };
 
   for (const m of matches) {
-    const pSnaps = m.playerSnapshots || {};
+    const allSnaps = m.playerSnapshots || {};
+    // ★ Misafir (+1) oyuncular istatistik/krallıklara girmez
+    const skip = new Set(
+      Object.values(allSnaps).filter((s) => s && (s.isGuest || s.isDemo)).map((s) => s.id)
+    );
+    const pSnaps = {};
+    Object.keys(allSnaps).forEach((pid) => { if (!skip.has(pid)) pSnaps[pid] = allSnaps[pid]; });
     // info'yu güncelle (en son maç en başta olduğu için ilk yazan en son bilgisi olur)
     Object.values(pSnaps).forEach((s) => {
       if (!playerInfo[s.id]) playerInfo[s.id] = s;
@@ -215,17 +295,22 @@ export const computePlayerStats = (matches) => {
     const matchGoalsByPlayer = {}; // bu maç içinde her oyuncu kaç gol atmış (lastMatches için)
     const matchAssistsByPlayer = {};
     for (const ev of m.events || []) {
-      if (ev.type === "goal" && ev.playerId) {
+      if (!ev) continue;
+      if (ev.type === "goal" && ev.playerId && !skip.has(ev.playerId)) {
         const s = ensure(ev.playerId);
         s.goals++;
         const gt = ev.goalType || "normal";
         if (s.goalsByType[gt] != null) s.goalsByType[gt]++;
         matchGoalsByPlayer[ev.playerId] = (matchGoalsByPlayer[ev.playerId] || 0) + 1;
-        if (ev.assistPlayerId) {
+      }
+      if (ev.type === "goal" && ev.playerId) {
+        if (ev.assistPlayerId && !skip.has(ev.assistPlayerId)) {
           const sa = ensure(ev.assistPlayerId);
           sa.assists++;
           matchAssistsByPlayer[ev.assistPlayerId] = (matchAssistsByPlayer[ev.assistPlayerId] || 0) + 1;
         }
+      } else if (ev.playerId && skip.has(ev.playerId)) {
+        // misafirin kendi kalesine golü / kartı istatistiğe yazılmaz
       } else if (ev.type === "own_goal" && ev.playerId) {
         ensure(ev.playerId).ownGoals++;
       } else if (ev.type === "yellow" && ev.playerId) {
@@ -236,7 +321,7 @@ export const computePlayerStats = (matches) => {
     }
 
     // MVP
-    if (m.mvpId) ensure(m.mvpId).mvpCount++;
+    if (m.mvpId && !skip.has(m.mvpId)) ensure(m.mvpId).mvpCount++;
 
     // lastMatches — her oyuncu için en fazla 5 tut
     playedIds.forEach((pid) => {
@@ -278,6 +363,7 @@ export const computeLeaderboards = (matches, currentTeams = []) => {
   currentTeams.forEach((t) => {
     if (!t?.players) return;
     t.players.forEach((p) => {
+      if (!p || p.isDemo === true) return;
       playerInfo[p.id] = {
         id: p.id,
         name: p.name,

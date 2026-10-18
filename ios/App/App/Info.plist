@@ -48,6 +48,13 @@
     <key>UIViewControllerBasedStatusBarAppearance</key>
     <true/>
 
+    <!-- ✅ Uzak bildirim (FCM/APNs) — arka planda gelen bildirim verisi uygulamaya iletilir.
+         Push kapalıyken (codemagic ENABLE_PUSH=false) zararsızdır. -->
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>remote-notification</string>
+    </array>
+
     <!-- ✅ Davet linki: halisahakolik://join?code=HK-XXXX uygulamayı açar.
          (Universal Link için ayrıca App.entitlements → associated-domains) -->
     <key>CFBundleURLTypes</key>

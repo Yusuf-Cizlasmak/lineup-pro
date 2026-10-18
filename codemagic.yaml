@@ -30,6 +30,19 @@ workflows:
         # → "Associated Domains" kutusunu işaretle → Save. Aksi halde imzalama hata verir.
         # Sonra wrangler.toml → IOS_UNIVERSAL_LINKS = "true". Bkz. docs/DAVET_LINKI_KURULUM.md
         ENABLE_UNIVERSAL_LINKS: "false"
+        # ★ Uzak bildirim (push · FCM) — "true" yapınca 3 şey birden açılır:
+        #   1) @capacitor-firebase/messaging iOS build'e girer (false iken çıkarılır →
+        #      Firebase SDK hiç derlenmez, build bugünkü gibi kalır)
+        #   2) ios/App/App/GoogleService-Info.plist App target'a (Resources) eklenir
+        #   3) App.entitlements'a aps-environment = production yazılır + imzaya eklenir
+        # "true" yapmadan ÖNCE (yoksa imzalama hata verir):
+        #   a) developer.apple.com → Identifiers → com.halisahakolik.app →
+        #      "Push Notifications" kutusunu işaretle → Save
+        #   b) developer.apple.com → Keys → "+" → Apple Push Notifications service (APNs)
+        #      → .p8 indir → Firebase Console → Project Settings → Cloud Messaging →
+        #      Apple app configuration → APNs Authentication Key → yükle (Key ID + Team ID)
+        #   Adım adım: docs/BILDIRIM_KURULUM.md
+        ENABLE_PUSH: "false"
 
     scripts:
 
@@ -54,7 +67,6 @@ workflows:
             @capacitor/status-bar \
             @capacitor/keyboard \
             @capacitor/local-notifications \
-            @capacitor/push-notifications \
             @capacitor-community/admob \
             @capacitor-community/in-app-review \
             @revenuecat/purchases-capacitor \
@@ -68,8 +80,20 @@ workflows:
 
       - name: Sync Capacitor
         script: |
+          # ★ Push kapalıysa Firebase Messaging eklentisini iOS build'den çıkar.
+          #   (JS tarafı paketi import etmez — src/push.js sessizce no-op olur.)
+          #   @capacitor/push-notifications ARTIK YOK: Firebase eklentisiyle çakışır.
+          if [ "$ENABLE_PUSH" != "true" ]; then
+            echo "ℹ️  ENABLE_PUSH=false → @capacitor-firebase/messaging iOS build'e eklenmiyor"
+            npm uninstall @capacitor-firebase/messaging --no-audit --no-fund || \
+              rm -rf node_modules/@capacitor-firebase/messaging
+          else
+            echo "🔔 ENABLE_PUSH=true → Firebase Messaging (SPM) iOS build'e ekleniyor"
+          fi
           npx cap add ios || true
           npx cap sync ios
+          echo "----- CapApp-SPM/Package.swift eklentileri -----"
+          grep -E "\.package\(name" ios/App/CapApp-SPM/Package.swift || true
 
       # ★ App icon — AppIcon.png varsa 1024x1024 olarak App Store icon slot'una yaz
       - name: Set app icon
@@ -181,11 +205,44 @@ workflows:
 
       - name: Detect provisioning profile
         script: |
-          PROFILE_PATH=$(find "$HOME/Library/MobileDevice/Provisioning Profiles" -name "*.mobileprovision" | head -1)
+          PROFILE_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+          PROFILE_PATH=""
+
+          # ★ Birden çok profil varsa BUNDLE_ID'ye ait olanı seç; ENABLE_PUSH=true iken
+          #   aps-environment içeren (Push capability açıldıktan SONRA üretilmiş) profili tercih et.
+          for P in "$PROFILE_DIR"/*.mobileprovision; do
+            [ -f "$P" ] || continue
+            APPID=$(security cms -D -i "$P" 2>/dev/null | plutil -extract Entitlements.application-identifier raw - 2>/dev/null || echo "")
+            case "$APPID" in
+              *".$BUNDLE_ID") ;;
+              *) continue ;;
+            esac
+            if [ "$ENABLE_PUSH" = "true" ]; then
+              security cms -D -i "$P" 2>/dev/null | plutil -extract Entitlements.aps-environment raw - >/dev/null 2>&1 || continue
+            fi
+            PROFILE_PATH="$P"
+            break
+          done
+
+          # Eski davranış (yedek): ilk bulunan profil
+          if [ -z "$PROFILE_PATH" ]; then
+            PROFILE_PATH=$(find "$PROFILE_DIR" -name "*.mobileprovision" | head -1)
+          fi
 
           if [ -z "$PROFILE_PATH" ]; then
             echo "❌ Profile bulunamadı"
             exit 1
+          fi
+
+          if [ "$ENABLE_PUSH" = "true" ]; then
+            if ! security cms -D -i "$PROFILE_PATH" | plutil -extract Entitlements.aps-environment raw - >/dev/null 2>&1; then
+              echo "❌ ENABLE_PUSH=true ama provisioning profile'da aps-environment YOK."
+              echo "   developer.apple.com → Identifiers → $BUNDLE_ID → Push Notifications ✔ → Save"
+              echo "   Sonra Profiles → eski App Store profilini sil (Codemagic yenisini üretir) ve build'i tekrarla."
+              echo "   Ya da push'u şimdilik kapat: ENABLE_PUSH: \"false\". Bkz. docs/BILDIRIM_KURULUM.md"
+              exit 1
+            fi
+            echo "✅ Profil aps-environment içeriyor (push imzası hazır)"
           fi
 
           PROFILE_UUID=$(security cms -D -i "$PROFILE_PATH" | plutil -extract UUID raw -)
@@ -197,11 +254,62 @@ workflows:
           echo "$PROFILE_UUID" > /tmp/profile_uuid.txt
           echo "$PROFILE_NAME" > /tmp/profile_name.txt
 
+      # ★ Entitlements dosyası bayraklara göre BUILD SIRASINDA üretilir:
+      #   ENABLE_UNIVERSAL_LINKS=true → associated-domains (repo'daki App.entitlements listesinden)
+      #   ENABLE_PUSH=true            → aps-environment = production (TestFlight/App Store)
+      #   İkisi de false → dosyaya dokunulmaz, imzaya da eklenmez (bugünkü davranış).
+      - name: Generate entitlements
+        script: |
+          set -e
+          ENT="ios/App/App/App.entitlements"
+          PB=/usr/libexec/PlistBuddy
+
+          if [ "$ENABLE_UNIVERSAL_LINKS" != "true" ] && [ "$ENABLE_PUSH" != "true" ]; then
+            echo "ℹ️  Entitlement bayrağı yok — CODE_SIGN_ENTITLEMENTS ayarlanmayacak"
+            exit 0
+          fi
+
+          # Repo'daki associated-domains listesini koru (tek doğruluk kaynağı)
+          DOMAINS=""
+          if [ -f "$ENT" ]; then
+            i=0
+            while D=$($PB -c "Print :com.apple.developer.associated-domains:$i" "$ENT" 2>/dev/null); do
+              DOMAINS="$DOMAINS $D"
+              i=$((i+1))
+            done
+          fi
+          if [ -z "$DOMAINS" ]; then DOMAINS="applinks:davet.halisahakolik.com.tr"; fi
+
+          # Sıfırdan üret
+          printf '%s\n' \
+            '<?xml version="1.0" encoding="UTF-8"?>' \
+            '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+            '<plist version="1.0">' '<dict>' '</dict>' '</plist>' > "$ENT"
+
+          if [ "$ENABLE_UNIVERSAL_LINKS" = "true" ]; then
+            $PB -c "Add :com.apple.developer.associated-domains array" "$ENT"
+            j=0
+            for D in $DOMAINS; do
+              $PB -c "Add :com.apple.developer.associated-domains:$j string $D" "$ENT"
+              j=$((j+1))
+            done
+            echo "🔗 associated-domains:$DOMAINS"
+          fi
+          if [ "$ENABLE_PUSH" = "true" ]; then
+            $PB -c "Add :aps-environment string production" "$ENT"
+            echo "🔔 aps-environment = production"
+          fi
+
+          plutil -lint "$ENT"
+          echo "----- App.entitlements -----"
+          cat "$ENT"
+
       - name: Patch App target signing (Ruby)
         script: |
           PROFILE_NAME=$(cat /tmp/profile_name.txt)
 
           ruby <<RUBY
+          # encoding: utf-8
           require 'xcodeproj'
 
           project_path = 'ios/App/App.xcodeproj'
@@ -213,6 +321,9 @@ workflows:
           end
 
           enable_ul = '${ENABLE_UNIVERSAL_LINKS}' == 'true'
+          enable_push = '${ENABLE_PUSH}' == 'true'
+          # Entitlements yalnızca en az bir bayrak açıksa imzaya eklenir
+          enable_ent = enable_ul || enable_push
 
           target.build_configurations.each do |config|
             attrs = config.build_settings
@@ -221,9 +332,29 @@ workflows:
             attrs['DEVELOPMENT_TEAM'] = '${DEVELOPMENT_TEAM}'
             attrs['PROVISIONING_PROFILE_SPECIFIER'] = '${PROFILE_NAME}'
             attrs['PRODUCT_BUNDLE_IDENTIFIER'] = '${BUNDLE_ID}'
-            # Universal Links: associated-domains entitlement'ı imzaya ekle
-            attrs['CODE_SIGN_ENTITLEMENTS'] = 'App/App.entitlements' if enable_ul
-            puts "✅ Patched config: #{config.name}#{enable_ul ? ' (+ Universal Links)' : ''}"
+            # Universal Links / Push: üretilen App.entitlements'ı imzaya ekle
+            attrs['CODE_SIGN_ENTITLEMENTS'] = 'App/App.entitlements' if enable_ent
+            tags = []
+            tags << 'Universal Links' if enable_ul
+            tags << 'Push' if enable_push
+            puts "✅ Patched config: #{config.name}#{tags.empty? ? '' : ' (+ ' + tags.join(', ') + ')'}"
+          end
+
+          # ★ Push: GoogleService-Info.plist App bundle'a girmeli (Firebase onu okuyup
+          #   kendini yapılandırır). Dosya repo'da var ama pbxproj'da referansı yok →
+          #   burada Resources build phase'ine ekliyoruz (pbxproj elle düzenlenmez).
+          if enable_push
+            gsi_disk = 'ios/App/App/GoogleService-Info.plist'
+            unless File.exist?(gsi_disk)
+              abort "❌ ENABLE_PUSH=true ama #{gsi_disk} yok (Firebase Console → iOS uygulaması → GoogleService-Info.plist indir)"
+            end
+            app_group = project.main_group.children.find { |g| g.isa == 'PBXGroup' && (g.path == 'App' || g.name == 'App') }
+            abort "❌ Xcode'da 'App' grubu bulunamadı" if app_group.nil?
+            ref = app_group.files.find { |f| f.path == 'GoogleService-Info.plist' }
+            ref ||= app_group.new_reference('GoogleService-Info.plist')
+            already = target.resources_build_phase.files_references.any? { |f| f && f.path == 'GoogleService-Info.plist' }
+            target.add_resources([ref]) unless already
+            puts "✅ GoogleService-Info.plist → App target Resources#{already ? ' (zaten vardı)' : ''}"
           end
 
           project.root_object.attributes['TargetAttributes'] ||= {}
@@ -277,6 +408,20 @@ workflows:
             /usr/libexec/PlistBuddy -c "Print :NSPhotoLibraryAddUsageDescription" "$ARCHIVE_PLIST" || echo "⚠️ NSPhotoLibraryAddUsageDescription YOK"
           else
             echo "⚠️ Archive plist bulunamadı"
+          fi
+
+          # ★ İmzadaki entitlement'lar (push / universal links gerçekten girdi mi?)
+          APP_DIR="build/App.xcarchive/Products/Applications/App.app"
+          echo "----- İmza entitlements -----"
+          codesign -d --entitlements - --xml "$APP_DIR" 2>/dev/null | plutil -p - 2>/dev/null || \
+            codesign -d --entitlements :- "$APP_DIR" 2>/dev/null || echo "⚠️ entitlements okunamadı"
+          if [ "$ENABLE_PUSH" = "true" ]; then
+            if [ -f "$APP_DIR/GoogleService-Info.plist" ]; then
+              echo "✅ GoogleService-Info.plist bundle'da"
+            else
+              echo "❌ ENABLE_PUSH=true ama GoogleService-Info.plist bundle'da YOK"
+              exit 1
+            fi
           fi
 
       - name: Export IPA

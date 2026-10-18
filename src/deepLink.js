@@ -22,7 +22,7 @@ import { Capacitor } from '@capacitor/core';
 //     • android/app/src/main/AndroidManifest.xml → android:host="<domain>"
 //   Not: Domain değişince eski linkler/QR'lar çalışmaz — kalıcı bir domain seç.
 export const WEB_BASE = (
-  process.env.REACT_APP_WEB_BASE || 'https://halisahakolik.com.tr'
+  process.env.REACT_APP_WEB_BASE || 'https://davet.halisahakolik.com.tr'
 ).replace(/\/+$/, '');
 
 // ★ CUSTOM_SCHEME — Native uygulamayı doğrudan açan URI scheme.
@@ -46,6 +46,11 @@ export const IOS_APP_URL = IOS_APP_STORE_ID
 export const ANDROID_APP_URL =
   `https://play.google.com/store/apps/details?id=${ANDROID_PACKAGE_NAME}`;
 
+// ★ Uygulamanın tanıtım sitesi + tüm paylaşımların alt bilgisi (büyüme döngüsü:
+//   her paylaşılan görsel/metin uygulamaya geri link verir)
+export const APP_SITE_URL = 'https://halisahakolik.com.tr';
+export const SHARE_FOOTER = '⚽ HalıSaha-Kolik ile kuruldu · halisahakolik.com.tr';
+
 // ─── URL ÜRETİCİLERİ ─────────────────────────────────────────
 
 /**
@@ -53,7 +58,7 @@ export const ANDROID_APP_URL =
  * App yüklüyse işletim sistemi linki doğrudan uygulamaya verir; değilse
  * Worker davet sayfasını gösterip mağazaya yönlendirir.
  *
- * Format:  https://halisahakolik.com.tr/m/HK-AB12
+ * Format:  https://davet.halisahakolik.com.tr/m/HK-AB12
  */
 export const buildJoinUrl = (code) => {
   if (!code) return WEB_BASE;

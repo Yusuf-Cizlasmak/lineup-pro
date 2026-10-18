@@ -12,8 +12,14 @@ import { Capacitor } from "@capacitor/core";
 // ★ NEW — Deep link / Landing page
 import JoinLandingPage from "./JoinLandingPage";
 import { parseCodeFromUrl, queueJoinCode } from "./deepLink";
-import { initNotifications, scheduleReengagement, scheduleWelcome } from "./notifications";
+import { initNotifications, refreshNotifications } from "./notifications";
 import { initPush } from "./push";
+import { initAnalytics, track, EVENTS } from "./analytics";
+
+// ★ Haftalık maç planı · bildirim ön-izni · Kasa (window event'leriyle açılır)
+import ScheduleSheet from "./ScheduleSheet";
+import NotifPermissionPrompt from "./NotifPermissionPrompt";
+import KasaSheet from "./KasaSheet";
 
 // ─── ADMOB / IAP DEBUG PANEL ─────────────────────────────────
 // Default KAPALI — production'da görünmesin.
@@ -113,6 +119,7 @@ function AdMobDebugPanel() {
 // ─────────────────────────────────────────────────────────────
 
 const ONBOARDING_KEY = "halisaha_onboarded";
+const INVITED_KEY = "halisaha_invited"; // davet linkiyle geldi → tour/onboarding atlanır
 const LAUNCH_COUNT_KEY = "halisaha_launch_count";
 const RATED_KEY = "halisaha_rated";
 
@@ -129,48 +136,55 @@ export default function App() {
     const onboarded = localStorage.getItem(ONBOARDING_KEY) === "1";
     if (!onboarded) setShowOnboarding(true);
 
+    // ★ Ölçüm — kullanıcının nerede bıraktığını görmek için (anahtar yoksa no-op)
+    initAnalytics();
+    track(EVENTS.APP_OPEN, { source: "cold", onboarded });
+
     // ★ RevenueCat IAP — App boot'unda bir kez init et
     //   Native değilse (web) no-op. PaywallScreen iap.js'i çağrır.
     iap.init();
 
-    // ★ Eğlenceli geri-getirme bildirimleri — izin al + planı tazele.
-    //   Her açılışta planlananlar sıfırlanıp yeniden kurulur → aktif kullanıcı
-    //   spam yemez, yalnızca uzaklaşan kullanıcıya bildirim gider.
+    // ★ Akıllı maç hatırlatmaları — açılışta İZİN İSTENMEZ.
+    //   initNotifications: Android kanalı + bildirime dokunma → ekran yönlendirmesi.
+    //   refreshNotifications: tüm tek seferlik bildirimler güncel veriyle yeniden
+    //   hesaplanır (izin yoksa no-op). İzin, değer anında NotifPermissionPrompt ile istenir.
     (async () => {
       try {
         await initNotifications();
-        await scheduleWelcome();
-        await scheduleReengagement();
+        await refreshNotifications("boot");
       } catch (e) { /* sessiz geç */ }
     })();
 
-    // ★ FCM push — admin'in Firebase Console'dan herkese bildirim atabilmesi için kayıt
+    // ★ FCM push — izin daha önce verildiyse kayıt olur (izin penceresi AÇMAZ)
     initPush();
+
+    // ★ Maç kaydı / geçmiş değişimi / plan değişimi → bildirim planını tazele
+    //   (ör. maç kaydedilince "Dünkü maçı kaydetmedin" iptal olur)
+    const onPlanInputsChanged = () => { refreshNotifications("data_changed").catch(() => {}); };
+    window.addEventListener("halisaha:match-saved", onPlanInputsChanged);
+    window.addEventListener("halisaha:history-updated", onPlanInputsChanged);
+    window.addEventListener("halisaha:schedule-changed", onPlanInputsChanged);
 
     // ─── Deep link join code dispatcher ───
     // queueJoinCode kodu saklar + event yayınlar → HaliSahaKolik Online moda
     // geçer, LiveMatch mount olunca kodu alıp doğrudan odaya katılır.
     // Aynı link hem appUrlOpen hem getLaunchUrl ile gelebilir → kısa süreli dedupe.
+    // ★ Davetle gelen kullanıcı onboarding'e takılmaz: doğrudan odaya gider.
     let lastCode = null, lastCodeAt = 0;
     const dispatchJoinCode = (code) => {
       if (!code?.trim()) return;
       const clean = code.trim().toUpperCase();
       if (clean === lastCode && Date.now() - lastCodeAt < 5000) return;
       lastCode = clean; lastCodeAt = Date.now();
-      const dispatch = () => queueJoinCode(clean);
-      const isOnboarded = localStorage.getItem(ONBOARDING_KEY) === "1";
-      if (isOnboarded) {
-        setTimeout(dispatch, 300);   // ilk render tamamlansın
-      } else {
-        window.addEventListener('halisaha:onboarded', dispatch, { once: true });
-      }
+      skipOnboardingForInvite();
+      setTimeout(() => queueJoinCode(clean), 300);   // ilk render tamamlansın
     };
 
     // ═══════════════════════════════════════════════════════════
     // NATIVE (iOS/Android) — Capacitor appUrlOpen
     //   Scheme:        halisahakolik://join?code=HK-AB12
     //                  halisahakolik:///m/HK-AB12
-    //   Universal:     https://halisahakolik.com.tr/m/HK-AB12
+    //   Universal:     https://davet.halisahakolik.com.tr/m/HK-AB12
     //   Tüm formatlar deepLink.js → parseCodeFromUrl ile yakalanır.
     // ═══════════════════════════════════════════════════════════
     let capListener = null;
@@ -188,9 +202,11 @@ export default function App() {
         if (code) dispatchJoinCode(code);
       }).catch(() => {});
 
-      // ★ Uygulama öne gelince geri-getirme planını tazele (sayaç sıfırlanır)
+      // ★ Uygulama öne gelince bildirim planını tazele (geri-getirme sayacı sıfırlanır,
+      //   durum bildirimleri iptal edilip yeniden hesaplanır)
       CapApp.addListener('resume', () => {
-        scheduleReengagement().catch(() => {});
+        track(EVENTS.APP_OPEN, { source: "resume" });
+        refreshNotifications("resume").catch(() => {});
       }).then(listener => { resumeListener = listener; });
     } else {
       // ═══════════════════════════════════════════════════════════
@@ -248,6 +264,9 @@ export default function App() {
       window.removeEventListener("halisaha:replay-onboarding", onReplay);
       window.removeEventListener("halisaha:start-tour", onStartTour);
       window.removeEventListener("halisaha:start-match-end-tour", onStartMatchEndTour);
+      window.removeEventListener("halisaha:match-saved", onPlanInputsChanged);
+      window.removeEventListener("halisaha:history-updated", onPlanInputsChanged);
+      window.removeEventListener("halisaha:schedule-changed", onPlanInputsChanged);
       // Capacitor deep link listener'ı temizle
       if (capListener) capListener.remove();
       if (resumeListener) resumeListener.remove();
@@ -261,15 +280,29 @@ export default function App() {
     window.dispatchEvent(new CustomEvent("halisaha:onboarded"));
   };
 
+  // ★ DAVET AKIŞI — link/QR ile gelen kullanıcı önce onboarding'i geçmek
+  //   zorunda kalmaz: onboarded + invited işaretlenir, onboarding gizlenir,
+  //   kod hemen odaya aktarılır. (HaliSahaKolik "halisaha_invited" görünce tour'u da atlar.)
+  //   Sadece setter + localStorage kullanır → boot effect'inden güvenle çağrılır.
+  function skipOnboardingForInvite() {
+    let onboarded = false;
+    try { onboarded = localStorage.getItem(ONBOARDING_KEY) === "1"; } catch {}
+    if (onboarded) return;
+    try {
+      localStorage.setItem(ONBOARDING_KEY, "1");
+      localStorage.setItem(INVITED_KEY, "1");
+    } catch {}
+    setShowOnboarding(false);
+    track(EVENTS.ONBOARDING_DONE, { skipped: true, slide: "invite" });
+  }
+
   // ★ NEW — Landing'den "Tarayıcıda Devam Et"e basıldığında
   const handleContinueWebFromLanding = () => {
     const code = pendingLandingCode;
     setPendingLandingCode(null);
     if (!code) return;
-    const isOnboarded = localStorage.getItem(ONBOARDING_KEY) === "1";
-    const dispatch = () => queueJoinCode(code);
-    if (isOnboarded) setTimeout(dispatch, 300);
-    else window.addEventListener('halisaha:onboarded', dispatch, { once: true });
+    skipOnboardingForInvite();
+    setTimeout(() => queueJoinCode(code), 300);
   };
 
   return (
@@ -281,6 +314,12 @@ export default function App() {
       {showRate && <RatePrompt onClose={() => setShowRate(false)} />}
       <Tour active={tourActive} onFinish={() => setTourActive(false)} mode="main" />
       <Tour active={matchEndTourActive} onFinish={() => setMatchEndTourActive(false)} mode="matchEnd" />
+
+      {/* ★ Haftalık maç planı ("halisaha:open-schedule"), bildirim ön-izni
+          ("halisaha:ask-notif-permission"), Kasa ("halisaha:open-kasa") */}
+      <ScheduleSheet />
+      <KasaSheet />
+      <NotifPermissionPrompt />
 
       {/* ★ NEW — Web deep-link landing page (sadece web'de açılır) */}
       {pendingLandingCode && (
